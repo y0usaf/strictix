@@ -1,0 +1,5 @@
+---
+source: bin/tests/manual_inherit_from.rs
+expression: "\"{ a = x.a or null; }\""
+---
+

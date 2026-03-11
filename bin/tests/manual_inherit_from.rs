@@ -15,5 +15,8 @@ generate_tests! {
         "let x.y.z.w = 2; in { w = x.y.z.w; }",
         // no lint: key != last attr
         "let x.y.z = 2; in { a = x.y.z; }",
+        // no lint: `or` fallback — cannot replace with inherit
+        "{ a = x.a or null; }",
+        "{ z = x.y.z or \"default\"; }",
     ],
 }
