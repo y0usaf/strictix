@@ -22,7 +22,8 @@
           };
         };
         settings.global.excludes = [
-          "LICENSE"
+          "LICENSE-AGPL"
+          "LICENSE-MIT"
           "NOTICE"
         ];
         settings.on-unmatched = "fatal";
