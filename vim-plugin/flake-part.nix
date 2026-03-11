@@ -3,18 +3,18 @@
   perSystem =
     { pkgs, ... }:
     {
-      packages.statix-vim = pkgs.vimUtils.buildVimPlugin {
-        pname = "statix-vim";
+      packages.strictix-vim = pkgs.vimUtils.buildVimPlugin {
+        pname = "strictix-vim";
         version = "0.1.0";
         src = lib.fileset.toSource {
           root = ./.;
-          fileset = lib.fileset.union ./plugin/statix.vim ./ftplugin/nix.vim;
+          fileset = lib.fileset.union ./plugin/strictix.vim ./ftplugin/nix.vim;
         };
       };
     };
 
   partitions.dev.module.perSystem = psArgs: {
     treefmt.settings.global.excludes = [ "*.vim" ];
-    checks."packages/statix-vim" = psArgs.config.packages.statix-vim;
+    checks."packages/strictix-vim" = psArgs.config.packages.strictix-vim;
   };
 }

@@ -8,8 +8,8 @@
     psArgs@{ pkgs, ... }:
     {
       packages = {
-        statix = pkgs.rustPlatform.buildRustPackage {
-          pname = "statix";
+        strictix = pkgs.rustPlatform.buildRustPackage {
+          pname = "strictix";
           inherit ((lib.importTOML (root + "/bin/Cargo.toml")).package) version;
 
           src = lib.fileset.toSource {
@@ -38,19 +38,19 @@
           '';
 
           meta = {
-            mainProgram = "statix";
-            description = "Lints and suggestions for the Nix programming language";
-            homepage = "https://git.peppe.rs/languages/statix/about";
+            mainProgram = "strictix";
+            description = "Strict lints and suggestions for the Nix programming language";
+            homepage = "https://github.com/y0usaf/strictix";
             license = lib.licenses.mit;
           };
         };
 
-        default = psArgs.config.packages.statix;
+        default = psArgs.config.packages.strictix;
       };
     };
 
   partitions.dev.module.perSystem = psArgs: {
     treefmt.settings.global.excludes = [ "bin/tests/data/*.nix" ];
-    checks."packages/statix" = psArgs.config.packages.statix;
+    checks."packages/strictix" = psArgs.config.packages.strictix;
   };
 }

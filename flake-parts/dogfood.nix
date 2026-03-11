@@ -17,7 +17,7 @@
         pkgs.runCommand "dogfood" { nativeBuildInputs = [ psArgs.config.packages.default ]; }
           ''
             cd ${src}
-            statix check --ignore /bin/tests/data
+            strictix check --ignore /bin/tests/data
             touch $out
           '';
     };

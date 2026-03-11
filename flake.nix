@@ -40,7 +40,7 @@
           ./flake-parts/license.nix
           ./flake-parts/overlay.nix
           ./flake-parts/rust.nix
-          ./flake-parts/statix.nix
+          ./flake-parts/strictix.nix
           ./vim-plugin/flake-part.nix
         ];
 
