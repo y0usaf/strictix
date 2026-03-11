@@ -40,6 +40,7 @@ use std::collections::HashMap;
 struct SingleUseLet;
 
 impl Rule for SingleUseLet {
+    #[allow(clippy::too_many_lines)]
     fn validate(&self, node: &SyntaxElement) -> Option<Report> {
         let NodeOrToken::Node(node) = node else {
             return None;
