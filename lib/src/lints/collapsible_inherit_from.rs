@@ -52,8 +52,7 @@ impl Rule for CollapsibleInheritFrom {
         let next_inherit = node
             .siblings_with_tokens(Direction::Next)
             .skip(1)
-            .filter(|s| !matches!(s.kind(), SyntaxKind::TOKEN_WHITESPACE))
-            .next()?;
+            .find(|s| !matches!(s.kind(), SyntaxKind::TOKEN_WHITESPACE))?;
 
         let NodeOrToken::Node(next_node) = next_inherit else {
             return None;

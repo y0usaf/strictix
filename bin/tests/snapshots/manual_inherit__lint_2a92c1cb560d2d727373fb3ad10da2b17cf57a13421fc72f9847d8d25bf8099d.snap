@@ -2,6 +2,15 @@
 source: bin/tests/manual_inherit.rs
 expression: "\"let a = 2; in { a = a; }\""
 ---
+[W30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:1:5]
+   │
+ 1 │ let a = 2; in { a = a; }
+   ·     ───┬──          ┬  
+   ·        ╰─────────────── a is only used once; consider inlining
+   ·                     │  
+   ·                     ╰── a is only used once; consider inlining
+───╯
 [W03] Warning: Assignment instead of inherit
    ╭─[<temp_file_path>:1:17]
    │

@@ -9,3 +9,12 @@ expression: "\"let b = 0; in (b)\""
    ·               ─┬─  
    ·                ╰─── Useless parentheses around body of let expression
 ───╯
+[W30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:1:5]
+   │
+ 1 │ let b = 0; in (b)
+   ·     ───┬──     ┬  
+   ·        ╰────────── b is only used once; consider inlining
+   ·                │  
+   ·                ╰── b is only used once; consider inlining
+───╯

@@ -6,4 +6,4 @@ expression: "\"let a = 0; in (null)\""
 +++ <temp_file_path> [fixed]
 @@ -1 +1 @@
 -let a = 0; in (null)
-+let a = 0; in null
++null
