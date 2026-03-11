@@ -49,6 +49,7 @@ pub mod main {
         traits::WriteDiagnostic,
     };
 
+    use ariadne::{Color, Fmt as _};
     use rayon::prelude::*;
 
     pub fn main(check_config: &CheckConfig) -> Result<(), StatixErr> {
@@ -56,6 +57,7 @@ pub mod main {
         let lints = conf_file.lints();
 
         let vfs = check_config.vfs(conf_file.ignore.as_slice())?;
+        let file_count = vfs.len();
 
         let mut stdout = io::stdout();
         let lint = |vfs_entry| lint_with(&vfs_entry, &lints);
@@ -65,13 +67,39 @@ pub mod main {
             .filter(|lr| !lr.reports.is_empty())
             .collect::<Vec<_>>();
 
-        if !results.is_empty() {
-            for r in &results {
-                stdout.write(r, &vfs, check_config.format).unwrap();
-            }
-            std::process::exit(1);
+        if results.is_empty() {
+            let files = format!(
+                "{} {}",
+                file_count,
+                if file_count == 1 { "file" } else { "files" }
+            );
+            eprintln!(
+                "{} No issues found across {}",
+                "✓".fg(Color::Green),
+                files.fg(Color::Fixed(8)),
+            );
+            std::process::exit(0);
         }
 
-        std::process::exit(0);
+        for r in &results {
+            stdout.write(r, &vfs, check_config.format).unwrap();
+        }
+
+        let warning_count: usize = results.iter().map(|r| r.reports.len()).sum();
+        let file_count = results.len();
+        eprintln!(
+            "\n{} {} {} across {} {}",
+            "✗".fg(Color::Red),
+            warning_count.to_string().fg(Color::Red),
+            if warning_count == 1 {
+                "warning"
+            } else {
+                "warnings"
+            },
+            file_count.to_string().fg(Color::Yellow),
+            if file_count == 1 { "file" } else { "files" },
+        );
+
+        std::process::exit(1);
     }
 }
