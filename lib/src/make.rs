@@ -45,18 +45,6 @@ pub fn inherit_stmt<'a>(nodes: impl IntoIterator<Item = &'a ast::Ident>) -> ast:
     ast_from_text(&format!("{{ inherit {inherited_idents}; }}"))
 }
 
-pub fn inherit_from_stmt<'a>(
-    from: &SyntaxNode,
-    nodes: impl IntoIterator<Item = &'a ast::Ident>,
-) -> ast::Inherit {
-    let inherited_idents = nodes
-        .into_iter()
-        .map(std::string::ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(" ");
-    ast_from_text(&format!("{{ inherit ({from}) {inherited_idents}; }}"))
-}
-
 pub fn inherit_from_stmt_text<'a>(
     from: &str,
     nodes: impl IntoIterator<Item = &'a ast::Ident>,
