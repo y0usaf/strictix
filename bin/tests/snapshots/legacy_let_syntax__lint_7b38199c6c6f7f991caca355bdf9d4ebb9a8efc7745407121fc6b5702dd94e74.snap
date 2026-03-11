@@ -1,0 +1,12 @@
+---
+source: bin/tests/legacy_let_syntax.rs
+expression: "\"let {\\n  body = x + y;\\n  x = \\\"hello,\\\";\\n  y = \\\" world!\\\";\\n}\\n\""
+---
+[W05] Warning: Using undocumented `let` syntax
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ ╭─▶ let {
+ 5 │ ├─▶ }
+   · │       
+   · ╰─────── Prefer rec over undocumented let syntax
+───╯
