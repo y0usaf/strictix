@@ -21,6 +21,10 @@
             };
           };
         };
+        settings.global.excludes = [
+          "LICENSE"
+          "NOTICE"
+        ];
         settings.on-unmatched = "fatal";
       };
     };
