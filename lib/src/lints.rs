@@ -22,5 +22,6 @@ lints! {
     with_expression,
     collapsible_inherit_from,
     empty_attrset_merge,
-    redundant_if_bool
+    redundant_if_bool,
+    if_else_empty_attrset
 }
