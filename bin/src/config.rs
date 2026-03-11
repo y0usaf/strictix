@@ -67,19 +67,9 @@ pub struct Check {
 impl Check {
     pub fn vfs(&self, extra_ignores: &[String]) -> Result<ReadOnlyVfs, ConfigErr> {
         if self.streaming {
-            use std::io::{self, BufRead};
-            let src = io::stdin()
-                .lock()
-                .lines()
-                .map(|l| l.unwrap())
-                .collect::<Vec<String>>()
-                .join("\n");
-            Ok(ReadOnlyVfs::singleton("<stdin>", src.as_bytes()))
+            stdin_vfs()
         } else {
-            let all_ignores = [self.ignore.as_slice(), extra_ignores].concat();
-            let ignore = dirs::build_ignore_set(&all_ignores, &self.target, self.unrestricted)?;
-            let files = dirs::walk_nix_files(ignore, &self.target)?;
-            Ok(vfs(&files.collect::<Vec<_>>()))
+            filesystem_vfs(&self.target, &self.ignore, extra_ignores, self.unrestricted)
         }
     }
 }
@@ -120,19 +110,9 @@ pub enum FixOut {
 impl Fix {
     pub fn vfs(&self, extra_ignores: &[String]) -> Result<ReadOnlyVfs, ConfigErr> {
         if self.streaming {
-            use std::io::{self, BufRead};
-            let src = io::stdin()
-                .lock()
-                .lines()
-                .map(|l| l.unwrap())
-                .collect::<Vec<String>>()
-                .join("\n");
-            Ok(ReadOnlyVfs::singleton("<stdin>", src.as_bytes()))
+            stdin_vfs()
         } else {
-            let all_ignores = [self.ignore.as_slice(), extra_ignores].concat();
-            let ignore = dirs::build_ignore_set(&all_ignores, &self.target, self.unrestricted)?;
-            let files = dirs::walk_nix_files(ignore, &self.target)?;
-            Ok(vfs(&files.collect::<Vec<_>>()))
+            filesystem_vfs(&self.target, &self.ignore, extra_ignores, self.unrestricted)
         }
     }
 
@@ -140,13 +120,7 @@ impl Fix {
     // does not reflect what i have in mind
     #[must_use]
     pub fn out(&self) -> FixOut {
-        if self.diff_only {
-            FixOut::Diff
-        } else if self.streaming {
-            FixOut::Stream
-        } else {
-            FixOut::Write
-        }
+        fix_out(self.diff_only, self.streaming)
     }
 }
 
@@ -176,14 +150,7 @@ pub struct Single {
 impl Single {
     pub fn vfs(&self) -> Result<ReadOnlyVfs, ConfigErr> {
         if self.streaming {
-            use std::io::{self, BufRead};
-            let src = io::stdin()
-                .lock()
-                .lines()
-                .map(|l| l.unwrap())
-                .collect::<Vec<String>>()
-                .join("\n");
-            Ok(ReadOnlyVfs::singleton("<stdin>", src.as_bytes()))
+            stdin_vfs()
         } else {
             let src = std::fs::read_to_string(self.target.as_ref().unwrap())
                 .map_err(ConfigErr::InvalidPath)?;
@@ -192,13 +159,7 @@ impl Single {
     }
     #[must_use]
     pub fn out(&self) -> FixOut {
-        if self.diff_only {
-            FixOut::Diff
-        } else if self.streaming {
-            FixOut::Stream
-        } else {
-            FixOut::Write
-        }
+        fix_out(self.diff_only, self.streaming)
     }
 }
 
@@ -271,8 +232,8 @@ impl ConfFile {
         toml::de::from_str(&config_file).map_err(ConfigErr::ConfFileParse)
     }
     pub fn discover<P: AsRef<Path>>(path: P) -> Result<Self, ConfigErr> {
-        let cannonical_path = fs::canonicalize(path.as_ref()).map_err(ConfigErr::InvalidPath)?;
-        for p in cannonical_path.ancestors() {
+        let canonical_path = fs::canonicalize(path.as_ref()).map_err(ConfigErr::InvalidPath)?;
+        for p in canonical_path.ancestors() {
             let strictix_toml_path = if p.is_dir() {
                 p.join("strictix.toml")
             } else {
@@ -307,19 +268,14 @@ impl ConfFile {
 }
 
 fn parse_line_col(src: &str) -> Result<(usize, usize), ConfigErr> {
-    let parts = src.split(',');
-    match parts.collect::<Vec<_>>().as_slice() {
-        [line, col] => {
-            let do_parse = |val: &str| {
-                val.parse::<usize>()
-                    .map_err(|_| ConfigErr::InvalidPosition(src.to_owned()))
-            };
-            let l = do_parse(line)?;
-            let c = do_parse(col)?;
-            Ok((l, c))
-        }
-        _ => Err(ConfigErr::InvalidPosition(src.to_owned())),
-    }
+    let Some((line, col)) = src.split_once(',') else {
+        return Err(ConfigErr::InvalidPosition(src.to_owned()));
+    };
+    let do_parse = |val: &str| {
+        val.parse::<usize>()
+            .map_err(|_| ConfigErr::InvalidPosition(src.to_owned()))
+    };
+    Ok((do_parse(line)?, do_parse(col)?))
 }
 
 fn parse_warning_code(src: &str) -> Result<u32, ConfigErr> {
@@ -348,4 +304,42 @@ fn vfs(files: &[PathBuf]) -> vfs::ReadOnlyVfs {
         }
     }
     vfs
+}
+
+fn read_stdin() -> Result<String, ConfigErr> {
+    use std::io::{self, BufRead};
+
+    io::stdin()
+        .lock()
+        .lines()
+        .collect::<Result<Vec<_>, _>>()
+        .map(|lines| lines.join("\n"))
+        .map_err(ConfigErr::InvalidPath)
+}
+
+fn stdin_vfs() -> Result<ReadOnlyVfs, ConfigErr> {
+    let src = read_stdin()?;
+    Ok(ReadOnlyVfs::singleton("<stdin>", src.as_bytes()))
+}
+
+fn filesystem_vfs(
+    target: &Path,
+    ignore: &[String],
+    extra_ignores: &[String],
+    unrestricted: bool,
+) -> Result<ReadOnlyVfs, ConfigErr> {
+    let all_ignores = [ignore, extra_ignores].concat();
+    let ignore = dirs::build_ignore_set(&all_ignores, target, unrestricted)?;
+    let files = dirs::walk_nix_files(ignore, target)?;
+    Ok(vfs(&files.collect::<Vec<_>>()))
+}
+
+fn fix_out(diff_only: bool, streaming: bool) -> FixOut {
+    if diff_only {
+        FixOut::Diff
+    } else if streaming {
+        FixOut::Stream
+    } else {
+        FixOut::Write
+    }
 }
