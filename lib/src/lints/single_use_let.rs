@@ -270,7 +270,7 @@ enum InlineTarget {
 fn find_ident_ref(node: &SyntaxNode, name: &str) -> Option<InlineTarget> {
     if let Some(ident) = Ident::cast(node.clone()) {
         let parent = node.parent();
-        let parent_kind = parent.as_ref().map(|p| p.kind());
+        let parent_kind = parent.as_ref().map(SyntaxNode::kind);
 
         if parent_kind == Some(SyntaxKind::NODE_INHERIT) {
             // Bare `inherit foo;` — only fixable when it is the sole attribute.
