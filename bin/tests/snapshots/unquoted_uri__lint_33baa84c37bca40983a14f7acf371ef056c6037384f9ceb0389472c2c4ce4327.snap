@@ -1,0 +1,11 @@
+---
+source: bin/tests/unquoted_uri.rs
+expression: "\"github:nerdypepper/statix\""
+---
+[W12] Warning: Found unquoted URI expression
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ github:nerdypepper/statix
+   · ────────────┬────────────  
+   ·             ╰────────────── Consider quoting this URI expression
+───╯
