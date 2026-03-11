@@ -36,5 +36,26 @@ generate_tests! {
             in
               x.name + x.version
         "},
+        // binding used in bare inherit — diagnostic only, no auto-fix
+        indoc! {"
+            let
+              x = 1;
+            in
+              { inherit x; }
+        "},
+        // binding used in string interpolation — diagnostic only, no auto-fix
+        indoc! {"
+            let
+              dev = \"/dev/sda\";
+            in
+              ''mount ${dev} /mnt''
+        "},
+        // binding used as inherit-from source — fix without double parens
+        indoc! {"
+            let
+              attrs = { a = 1; };
+            in
+              { inherit (attrs) a; }
+        "},
     ],
 }

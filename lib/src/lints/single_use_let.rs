@@ -87,20 +87,33 @@ impl Rule for SingleUseLet {
                 // the binding removal (lower offset) stays valid.
                 let message = format!("`{name}` is only used once; consider inlining");
                 let value_node = kv.value()?.syntax().clone();
-                if let Some(ref_range) = find_ident_ref_range(body.syntax(), &name) {
-                    let replacement = make::parenthesize(&value_node);
-                    report = report
-                        .suggest(
-                            ref_range,
-                            &message,
-                            Suggestion::with_replacement(ref_range, replacement.syntax().clone()),
-                        )
-                        .suggest(
-                            binding_at,
-                            message,
-                            Suggestion::with_empty(binding_removal_range(kv.syntax())),
-                        );
-                    fix_allocated = true;
+                // Skip auto-fix for multiline values: indentation can't be
+                // correctly adjusted without a proper pretty-printer, and
+                // inlining complex multi-line expressions tends to mangle the
+                // surrounding code.
+                let value_is_multiline = value_node.to_string().contains('\n');
+                if !value_is_multiline {
+                    if let Some((ref_range, needs_parens)) = find_ident_ref(body.syntax(), &name) {
+                        let replacement = if needs_parens {
+                            make::parenthesize(&value_node).syntax().clone()
+                        } else {
+                            value_node.clone()
+                        };
+                        report = report
+                            .suggest(
+                                ref_range,
+                                &message,
+                                Suggestion::with_replacement(ref_range, replacement),
+                            )
+                            .suggest(
+                                binding_at,
+                                message,
+                                Suggestion::with_empty(binding_removal_range(kv.syntax())),
+                            );
+                        fix_allocated = true;
+                    } else {
+                        report = report.diagnostic(binding_at, message);
+                    }
                 } else {
                     report = report.diagnostic(binding_at, message);
                 }
@@ -199,17 +212,30 @@ fn count_ident_refs(node: &SyntaxNode, name: &str) -> usize {
         .sum()
 }
 
-/// Find the text range of the first variable reference to `name` in `node`.
-fn find_ident_ref_range(node: &SyntaxNode, name: &str) -> Option<TextRange> {
+/// Find the first variable reference to `name` in `node`.
+/// Returns the text range and whether the inlined value needs to be parenthesized.
+/// Returns `None` if the reference is in a context that cannot be safely inlined:
+/// - `inherit foo;` (bare inherit attr): replacing with `(expr)` produces
+///   `inherit (expr);` which is semantically different (inherit-from).
+/// - `${foo}` (string interpolation): replacing would produce ugly `${(expr)}`.
+fn find_ident_ref(node: &SyntaxNode, name: &str) -> Option<(TextRange, bool)> {
     if let Some(ident) = Ident::cast(node.clone()) {
-        let parent_is_attrpath = node
-            .parent()
-            .is_some_and(|p| p.kind() == SyntaxKind::NODE_ATTRPATH);
+        let parent_kind = node.parent().map(|p| p.kind());
+        if parent_kind == Some(SyntaxKind::NODE_INHERIT) {
+            return None;
+        }
+        if parent_kind == Some(SyntaxKind::NODE_INTERPOL) {
+            return None;
+        }
+        let parent_is_attrpath = parent_kind == Some(SyntaxKind::NODE_ATTRPATH);
         if !parent_is_attrpath && ident.to_string() == name {
-            return Some(node.text_range());
+            // In `inherit (from) attrs`, parens are already provided by the
+            // inherit syntax so no extra wrapping is needed.
+            let needs_parens = parent_kind != Some(SyntaxKind::NODE_INHERIT_FROM);
+            return Some((node.text_range(), needs_parens));
         }
         return None;
     }
     node.children()
-        .find_map(|child| find_ident_ref_range(&child, name))
+        .find_map(|child| find_ident_ref(&child, name))
 }

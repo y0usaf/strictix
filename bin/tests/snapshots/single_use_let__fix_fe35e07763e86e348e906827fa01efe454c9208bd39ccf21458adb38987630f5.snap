@@ -1,0 +1,5 @@
+---
+source: bin/tests/single_use_let.rs
+expression: "\"let\\n  dev = \\\"/dev/sda\\\";\\nin\\n  ''mount ${dev} /mnt''\\n\""
+---
+
