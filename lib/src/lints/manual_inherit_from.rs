@@ -63,6 +63,11 @@ impl Rule for ManualInherit {
             return None;
         };
 
+        // `x.y or default` is a safe access with fallback — not replaceable with inherit
+        if value.or_token().is_some() {
+            return None;
+        }
+
         let select_attrpath = value.attrpath()?;
         let attrs: Vec<_> = select_attrpath.attrs().collect();
 
