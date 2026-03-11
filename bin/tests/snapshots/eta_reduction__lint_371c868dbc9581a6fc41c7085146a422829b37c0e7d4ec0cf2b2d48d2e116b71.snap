@@ -2,6 +2,15 @@
 source: bin/tests/eta_reduction.rs
 expression: "\"let double = x: x * 2; in map (x: double x) [1 2 3]\""
 ---
+[W30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:1:5]
+   │
+ 1 │ let double = x: x * 2; in map (x: double x) [1 2 3]
+   ·     ─────────┬────────            ───┬──  
+   ·              ╰──────────────────────────── double is only used once; consider inlining
+   ·                                      │    
+   ·                                      ╰──── double is only used once; consider inlining
+───╯
 [W07] Warning: This function expression is eta reducible
    ╭─[<temp_file_path>:1:32]
    │

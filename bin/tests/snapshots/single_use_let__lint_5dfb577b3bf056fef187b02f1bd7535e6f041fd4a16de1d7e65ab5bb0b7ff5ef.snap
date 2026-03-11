@@ -1,0 +1,5 @@
+---
+source: bin/tests/single_use_let.rs
+expression: "\"let\\n  x = pkgs.hello;\\nin\\n  x.name + x.version\\n\""
+---
+

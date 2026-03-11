@@ -2,4 +2,12 @@
 source: bin/tests/manual_inherit.rs
 expression: "\"let y = 2; in { x.y = y; }\""
 ---
-
+[W30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:1:5]
+   │
+ 1 │ let y = 2; in { x.y = y; }
+   ·     ───┬──            ┬  
+   ·        ╰───────────────── y is only used once; consider inlining
+   ·                       │  
+   ·                       ╰── y is only used once; consider inlining
+───╯
