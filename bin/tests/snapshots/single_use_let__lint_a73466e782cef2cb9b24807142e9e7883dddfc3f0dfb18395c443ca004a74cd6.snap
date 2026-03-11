@@ -1,6 +1,6 @@
 ---
 source: bin/tests/single_use_let.rs
-expression: "\"let\\n  x = 1;\\nin\\n  { inherit x; }\\n\""
+expression: "\"let\\n  x = 1;\\nin\\n  { inherit x y; }\\n\""
 ---
 [W30] Warning: Let binding used only once; consider inlining
    ╭─[<temp_file_path>:2:3]
@@ -8,7 +8,4 @@ expression: "\"let\\n  x = 1;\\nin\\n  { inherit x; }\\n\""
  2 │   x = 1;
    ·   ───┬──  
    ·      ╰──── x is only used once; consider inlining
- 4 │   { inherit x; }
-   ·     ─────┬────  
-   ·          ╰────── x is only used once; consider inlining
 ───╯

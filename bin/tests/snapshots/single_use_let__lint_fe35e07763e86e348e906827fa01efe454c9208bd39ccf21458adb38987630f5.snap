@@ -8,4 +8,7 @@ expression: "\"let\\n  dev = \\\"/dev/sda\\\";\\nin\\n  ''mount ${dev} /mnt''\\n
  2 │   dev = "/dev/sda";
    ·   ────────┬────────  
    ·           ╰────────── dev is only used once; consider inlining
+ 4 │   ''mount ${dev} /mnt''
+   ·           ───┬──  
+   ·              ╰──── dev is only used once; consider inlining
 ───╯

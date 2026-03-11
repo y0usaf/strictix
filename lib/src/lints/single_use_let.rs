@@ -3,7 +3,7 @@ use crate::{Metadata, Report, Rule, Suggestion, make};
 use macros::lint;
 use rnix::{
     NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode, TextRange,
-    ast::{Attr, Entry, HasEntry as _, Ident, LetIn},
+    ast::{Attr, Entry, HasEntry as _, Ident, Inherit, LetIn},
 };
 use rowan::ast::AstNode as _;
 
@@ -92,8 +92,13 @@ impl Rule for SingleUseLet {
                 // inlining complex multi-line expressions tends to mangle the
                 // surrounding code.
                 let value_is_multiline = value_node.to_string().contains('\n');
-                if !value_is_multiline {
-                    if let Some((ref_range, needs_parens)) = find_ident_ref(body.syntax(), &name) {
+                let removal = Suggestion::with_empty(binding_removal_range(kv.syntax()));
+
+                match find_ident_ref(body.syntax(), &name) {
+                    Some(InlineTarget::Direct {
+                        range: ref_range,
+                        needs_parens,
+                    }) if !value_is_multiline => {
                         let replacement = if needs_parens {
                             make::parenthesize(&value_node).syntax().clone()
                         } else {
@@ -105,17 +110,50 @@ impl Rule for SingleUseLet {
                                 &message,
                                 Suggestion::with_replacement(ref_range, replacement),
                             )
-                            .suggest(
-                                binding_at,
-                                message,
-                                Suggestion::with_empty(binding_removal_range(kv.syntax())),
-                            );
+                            .suggest(binding_at, message, removal);
                         fix_allocated = true;
-                    } else {
+                    }
+                    Some(InlineTarget::BareInherit { inherit_node }) if !value_is_multiline => {
+                        // Replace `inherit foo;` with `foo = value;`.
+                        // Preserve the leading whitespace/indentation from the
+                        // inherit node's text so the new binding is indented correctly.
+                        let inherit_text = inherit_node.to_string();
+                        let prefix = inherit_text
+                            .find("inherit")
+                            .map_or("", |i| &inherit_text[..i]);
+                        let value_stripped = value_node.to_string();
+                        let value_stripped = value_stripped.trim_start();
+                        let replacement = format!("{prefix}{name} = {value_stripped};");
+                        let inherit_range = inherit_node.text_range();
+                        report = report
+                            .suggest(
+                                inherit_range,
+                                &message,
+                                Suggestion::with_text(inherit_range, replacement),
+                            )
+                            .suggest(binding_at, message, removal);
+                        fix_allocated = true;
+                    }
+                    Some(InlineTarget::StringInterpol { interpol_range }) => {
+                        // Replace `${foo}` with the literal string content.
+                        // Only applies when the value is a simple string literal
+                        // with no escape sequences or nested interpolations.
+                        if let Some(content) = simple_string_content(&value_node) {
+                            report = report
+                                .suggest(
+                                    interpol_range,
+                                    &message,
+                                    Suggestion::with_text(interpol_range, content),
+                                )
+                                .suggest(binding_at, message, removal);
+                            fix_allocated = true;
+                        } else {
+                            report = report.diagnostic(binding_at, message);
+                        }
+                    }
+                    _ => {
                         report = report.diagnostic(binding_at, message);
                     }
-                } else {
-                    report = report.diagnostic(binding_at, message);
                 }
                 found = true;
             } else {
@@ -212,30 +250,83 @@ fn count_ident_refs(node: &SyntaxNode, name: &str) -> usize {
         .sum()
 }
 
-/// Find the first variable reference to `name` in `node`.
-/// Returns the text range and whether the inlined value needs to be parenthesized.
-/// Returns `None` if the reference is in a context that cannot be safely inlined:
-/// - `inherit foo;` (bare inherit attr): replacing with `(expr)` produces
-///   `inherit (expr);` which is semantically different (inherit-from).
-/// - `${foo}` (string interpolation): replacing would produce ugly `${(expr)}`.
-fn find_ident_ref(node: &SyntaxNode, name: &str) -> Option<(TextRange, bool)> {
+enum InlineTarget {
+    /// Replace the ident directly; `needs_parens` controls whether the inlined
+    /// value should be wrapped in `(…)`.
+    Direct {
+        range: TextRange,
+        needs_parens: bool,
+    },
+    /// The ident appears as the sole attribute of a bare `inherit foo;`.
+    /// Replace the entire inherit statement with `foo = value;`.
+    BareInherit { inherit_node: SyntaxNode },
+    /// The ident appears inside a `${foo}` string interpolation.
+    /// Replace the entire `${…}` with the literal string content.
+    StringInterpol { interpol_range: TextRange },
+}
+
+/// Walk `node` looking for the first reference to `name` and return how it
+/// should be inlined.
+fn find_ident_ref(node: &SyntaxNode, name: &str) -> Option<InlineTarget> {
     if let Some(ident) = Ident::cast(node.clone()) {
-        let parent_kind = node.parent().map(|p| p.kind());
+        let parent = node.parent();
+        let parent_kind = parent.as_ref().map(|p| p.kind());
+
         if parent_kind == Some(SyntaxKind::NODE_INHERIT) {
+            // Bare `inherit foo;` — only fixable when it is the sole attribute.
+            let inherit_node = parent?;
+            let inherit = Inherit::cast(inherit_node.clone())?;
+            if inherit.from().is_none() && inherit.attrs().count() == 1 && ident.to_string() == name
+            {
+                return Some(InlineTarget::BareInherit { inherit_node });
+            }
             return None;
         }
-        if parent_kind == Some(SyntaxKind::NODE_INTERPOL) {
-            return None;
+
+        if parent_kind == Some(SyntaxKind::NODE_INTERPOL) && ident.to_string() == name {
+            let interpol_range = parent?.text_range();
+            return Some(InlineTarget::StringInterpol { interpol_range });
         }
+
         let parent_is_attrpath = parent_kind == Some(SyntaxKind::NODE_ATTRPATH);
         if !parent_is_attrpath && ident.to_string() == name {
             // In `inherit (from) attrs`, parens are already provided by the
             // inherit syntax so no extra wrapping is needed.
             let needs_parens = parent_kind != Some(SyntaxKind::NODE_INHERIT_FROM);
-            return Some((node.text_range(), needs_parens));
+            return Some(InlineTarget::Direct {
+                range: node.text_range(),
+                needs_parens,
+            });
         }
         return None;
     }
     node.children()
         .find_map(|child| find_ident_ref(&child, name))
+}
+
+/// If `value_node` is a plain `"…"` string with no interpolations or escape
+/// sequences, return its content (the text between the quotes).
+fn simple_string_content(value_node: &SyntaxNode) -> Option<String> {
+    if value_node.kind() != SyntaxKind::NODE_STRING {
+        return None;
+    }
+    // Reject strings that contain interpolations
+    if value_node
+        .children()
+        .any(|c| c.kind() == SyntaxKind::NODE_INTERPOL)
+    {
+        return None;
+    }
+    let text = value_node.to_string();
+    let trimmed = text.trim();
+    // Must be a simple double-quoted string (not a `''…''` indented string)
+    if !trimmed.starts_with('"') || !trimmed.ends_with('"') || trimmed.len() < 2 {
+        return None;
+    }
+    let content = &trimmed[1..trimmed.len() - 1];
+    // Skip strings with backslash escapes to avoid mis-representing them
+    if content.contains('\\') {
+        return None;
+    }
+    Some(content.to_string())
 }

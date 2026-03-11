@@ -36,14 +36,14 @@ generate_tests! {
             in
               x.name + x.version
         "},
-        // binding used in bare inherit — diagnostic only, no auto-fix
+        // bare inherit — fix: replace `inherit x;` with `x = 1;`
         indoc! {"
             let
               x = 1;
             in
               { inherit x; }
         "},
-        // binding used in string interpolation — diagnostic only, no auto-fix
+        // string interpolation — fix: replace `${dev}` with the literal content
         indoc! {"
             let
               dev = \"/dev/sda\";
@@ -56,6 +56,20 @@ generate_tests! {
               attrs = { a = 1; };
             in
               { inherit (attrs) a; }
+        "},
+        // multi-attr inherit — only one attr is single-use; diagnostic only
+        indoc! {"
+            let
+              x = 1;
+            in
+              { inherit x y; }
+        "},
+        // string interpol with non-string value — diagnostic only
+        indoc! {"
+            let
+              x = someExpr;
+            in
+              \"value: ${x}\"
         "},
     ],
 }

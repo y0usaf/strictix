@@ -181,6 +181,7 @@ impl Serialize for Diagnostic {
 pub enum Replacement {
     Empty,
     SyntaxElement(SyntaxElement),
+    Text(String),
 }
 
 /// Suggested fix for a diagnostic, the fix is provided as a syntax element.
@@ -196,6 +197,7 @@ impl std::fmt::Display for Replacement {
         match self {
             Replacement::Empty => Ok(()),
             Replacement::SyntaxElement(syntax_element) => write!(f, "{syntax_element}"),
+            Replacement::Text(s) => write!(f, "{s}"),
         }
     }
 }
@@ -206,6 +208,13 @@ impl Suggestion {
         Self {
             at,
             fix: Replacement::SyntaxElement(fix.into()),
+        }
+    }
+    #[must_use]
+    pub fn with_text(at: TextRange, fix: impl Into<String>) -> Self {
+        Self {
+            at,
+            fix: Replacement::Text(fix.into()),
         }
     }
     #[must_use]
