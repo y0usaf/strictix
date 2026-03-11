@@ -18,5 +18,7 @@ lints! {
     bool_simplification,
     useless_has_attr,
     repeated_keys,
-    empty_list_concat
+    empty_list_concat,
+    with_expression,
+    collapsible_inherit_from
 }
