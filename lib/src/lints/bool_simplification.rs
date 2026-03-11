@@ -8,7 +8,9 @@ use rnix::{
 use rowan::ast::AstNode as _;
 
 /// ## What it does
-/// Checks for boolean expressions that can be simplified.
+/// Checks for boolean expressions that can be simplified:
+/// - `!(x == y)` → `x != y`
+/// - `!(x != y)` → `x == y`
 ///
 /// ## Why is this bad?
 /// Complex booleans affect readibility.
@@ -55,16 +57,16 @@ impl Rule for BoolSimplification {
             return None;
         };
 
-        let Some(BinOpKind::Equal) = bin_expr.operator() else {
-            return None;
+        let (message, flipped_op) = match bin_expr.operator()? {
+            BinOpKind::Equal => ("Try `!=` instead of `!(... == ...)`", "!="),
+            BinOpKind::NotEqual => ("Try `==` instead of `!(... != ...)`", "=="),
+            _ => return None,
         };
 
         let at = node.text_range();
-        let message = "Try `!=` instead of `!(... == ...)`";
-
         let lhs = bin_expr.lhs()?;
         let rhs = bin_expr.rhs()?;
-        let replacement = make::binary(lhs.syntax(), "!=", rhs.syntax())
+        let replacement = make::binary(lhs.syntax(), flipped_op, rhs.syntax())
             .syntax()
             .clone();
         Some(
