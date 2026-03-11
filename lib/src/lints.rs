@@ -20,5 +20,7 @@ lints! {
     repeated_keys,
     empty_list_concat,
     with_expression,
-    collapsible_inherit_from
+    collapsible_inherit_from,
+    empty_attrset_merge,
+    redundant_if_bool
 }
