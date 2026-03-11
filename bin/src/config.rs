@@ -273,13 +273,13 @@ impl ConfFile {
     pub fn discover<P: AsRef<Path>>(path: P) -> Result<Self, ConfigErr> {
         let cannonical_path = fs::canonicalize(path.as_ref()).map_err(ConfigErr::InvalidPath)?;
         for p in cannonical_path.ancestors() {
-            let statix_toml_path = if p.is_dir() {
+            let strictix_toml_path = if p.is_dir() {
                 p.join("strictix.toml")
             } else {
                 p.to_path_buf()
             };
-            if statix_toml_path.exists() {
-                return Self::from_path(statix_toml_path);
+            if strictix_toml_path.exists() {
+                return Self::from_path(strictix_toml_path);
             }
         }
         Ok(Self::default())

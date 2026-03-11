@@ -4,7 +4,7 @@
 
   perSystem = psArgs: {
     overlayAttrs = {
-      inherit (psArgs.config.packages) statix statix-vim;
+      inherit (psArgs.config.packages) strictix strictix-vim;
     };
   };
 }

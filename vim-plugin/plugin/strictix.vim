@@ -1,7 +1,7 @@
 function! ApplyStatixSuggestion()
     let l:l = line('.')
     let l:c = col('.')
-    let l:filter = "%!statix single -p " . l . "," . c . ""
+    let l:filter = "%!strictix single -p " . l . "," . c . ""
     execute l:filter
 
     silent if v:shell_error == 1

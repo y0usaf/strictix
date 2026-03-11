@@ -84,7 +84,7 @@ in
                 };
 
                 legacy = {
-                  name = "Build statix via flake-compat and install it using `nix-env`";
+                  name = "Build strictix via flake-compat and install it using `nix-env`";
                   runs-on = runner.name;
                   steps = [
                     steps.checkout
