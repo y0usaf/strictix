@@ -57,11 +57,14 @@ pub fn generate_tests(input: TokenStream) -> TokenStream {
         .map(|nix_expression| {
             let lint_test = make_test(&rule, TestKind::Lint, &nix_expression);
             let fix_test = make_test(&rule, TestKind::Fix, &nix_expression);
+            let fix_roundtrip_test = make_test(&rule, TestKind::FixRoundtrip, &nix_expression);
 
             quote! {
                 #lint_test
 
                 #fix_test
+
+                #fix_roundtrip_test
             }
         })
         .collect::<proc_macro2::TokenStream>()
@@ -72,6 +75,7 @@ pub fn generate_tests(input: TokenStream) -> TokenStream {
 enum TestKind {
     Lint,
     Fix,
+    FixRoundtrip,
 }
 
 fn make_test(rule: &Ident, kind: TestKind, nix_expression: &Expr) -> proc_macro2::TokenStream {
@@ -81,23 +85,38 @@ fn make_test(rule: &Ident, kind: TestKind, nix_expression: &Expr) -> proc_macro2
     let kind_str = match kind {
         TestKind::Lint => "lint",
         TestKind::Fix => "fix",
+        TestKind::FixRoundtrip => "fix_roundtrip",
     };
 
     let test_name = format!("{rule}_{kind_str}_{expression_hash}");
     let test_ident = Ident::new(&test_name, nix_expression.span());
     let snap_name = format!("{kind_str}_{expression_hash}");
 
-    let args = match kind {
-        TestKind::Lint => quote! {&["check"]},
-        TestKind::Fix => quote! {&["fix", "--dry-run"]},
-    };
+    match kind {
+        TestKind::Lint | TestKind::Fix => {
+            let args = match kind {
+                TestKind::Lint => quote! {&["check"]},
+                TestKind::Fix => quote! {&["fix", "--dry-run"]},
+                TestKind::FixRoundtrip => unreachable!(),
+            };
 
-    quote! {
-        #[test]
-        fn #test_ident() {
-            let expression = #nix_expression;
-            let stdout = _utils::test_cli(expression, #args).unwrap();
-            insta::assert_snapshot!(#snap_name, stdout, &format!("{expression:?}"));
+            quote! {
+                #[test]
+                fn #test_ident() {
+                    let expression = #nix_expression;
+                    let stdout = _utils::test_cli(expression, #args).unwrap();
+                    insta::assert_snapshot!(#snap_name, stdout, &format!("{expression:?}"));
+                }
+            }
+        }
+        TestKind::FixRoundtrip => {
+            quote! {
+                #[test]
+                fn #test_ident() {
+                    let expression = #nix_expression;
+                    _utils::assert_fix_roundtrip(expression).unwrap();
+                }
+            }
         }
     }
 }
