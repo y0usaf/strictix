@@ -7,7 +7,7 @@
   perSystem =
     psArgs@{ pkgs, ... }:
     {
-      packages = {
+      packages = rec {
         strictix = pkgs.rustPlatform.buildRustPackage {
           pname = "strictix";
           inherit ((lib.importTOML (root + "/bin/Cargo.toml")).package) version;
@@ -29,13 +29,7 @@
           cargoLock.lockFile = root + "/Cargo.lock";
           buildFeatures = [ "json" ];
           RUSTFLAGS = "--deny warnings";
-          nativeCheckInputs = [ pkgs.clippy ];
-
-          postCheck = ''
-            echo "Starting postCheck"
-            cargo clippy
-            echo "Finished postCheck"
-          '';
+          doCheck = false;
 
           meta = {
             mainProgram = "strictix";
@@ -45,12 +39,22 @@
           };
         };
 
+        strictix-checked = strictix.overrideAttrs (old: {
+          doCheck = true;
+          nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ pkgs.clippy ];
+          postCheck = ''
+            echo "Starting postCheck"
+            cargo clippy
+            echo "Finished postCheck"
+          '';
+        });
+
         default = psArgs.config.packages.strictix;
       };
     };
 
   partitions.dev.module.perSystem = psArgs: {
     treefmt.settings.global.excludes = [ "bin/tests/data/*.nix" ];
-    checks."packages/strictix" = psArgs.config.packages.strictix;
+    checks."packages/strictix" = psArgs.config.packages.strictix-checked;
   };
 }
