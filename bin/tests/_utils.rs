@@ -22,9 +22,7 @@ fn sanitize_output(output: Vec<u8>, path: &Path) -> anyhow::Result<String> {
 }
 
 pub fn run_cli(path: &Path, args: &[&str]) -> anyhow::Result<CliOutput> {
-    let output = Command::new("cargo")
-        .arg("run")
-        .arg("--")
+    let output = Command::new(env!("CARGO_BIN_EXE_strictix"))
         .args(args)
         .arg(path)
         .output()?;
