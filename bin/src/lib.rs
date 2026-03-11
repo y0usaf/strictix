@@ -16,4 +16,4 @@ use std::collections::HashMap;
 use lib::Lint;
 use rnix::SyntaxKind;
 
-pub type LintMap = HashMap<SyntaxKind, Vec<&'static Box<dyn Lint>>>;
+pub type LintMap = HashMap<SyntaxKind, Vec<&'static dyn Lint>>;

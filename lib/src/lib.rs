@@ -266,8 +266,7 @@ pub trait Metadata {
     fn note(&self) -> &'static str;
     fn code(&self) -> u32;
     fn report(&self) -> Report;
-    fn match_with(&self, with: &SyntaxKind) -> bool;
-    fn match_kind(&self) -> Vec<SyntaxKind>;
+    fn match_kind(&self) -> &'static [SyntaxKind];
 }
 
 /// Contains offline explanation for each lint
@@ -300,11 +299,11 @@ macro_rules! lints {
             mod $s;
         )*
         ::lazy_static::lazy_static! {
-            pub static ref LINTS: Vec<&'static Box<dyn $crate::Lint>> = {
+            pub static ref LINTS: Vec<&'static dyn $crate::Lint> = {
                 let mut v = Vec::new();
                 $(
                     {
-                        let temp_lint = &*$s::LINT;
+                        let temp_lint: &'static dyn $crate::Lint = &**$s::LINT;
                         v.push(temp_lint);
                     }
                 )*

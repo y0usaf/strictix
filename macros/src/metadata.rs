@@ -108,38 +108,20 @@ impl<'μ> LintMeta<'μ> {
         }
     }
 
-    fn generate_match_with_fn(&self) -> TokenStream2 {
-        match self.match_with {
-            MatchWith::Path(p) => {
-                quote! {
-                    fn match_with(&self, with: &SyntaxKind) -> bool {
-                        #p == *with
-                    }
-                }
-            }
-            MatchWith::Array(a) => {
-                quote! {
-                    fn match_with(&self, with: &SyntaxKind) -> bool {
-                        #a.contains(with)
-                    }
-                }
-            }
-        }
-    }
-
     fn generate_match_kind_fn(&self) -> TokenStream2 {
         match self.match_with {
             MatchWith::Path(p) => {
                 quote! {
-                    fn match_kind(&self) -> Vec<SyntaxKind> {
-                        vec![#p]
+                    fn match_kind(&self) -> &'static [SyntaxKind] {
+                        &[#p]
                     }
                 }
             }
             MatchWith::Array(a) => {
+                let elems = &a.elems;
                 quote! {
-                    fn match_kind(&self) -> Vec<SyntaxKind> {
-                        #a.to_vec()
+                    fn match_kind(&self) -> &'static [SyntaxKind] {
+                        &[#elems]
                     }
                 }
             }
@@ -160,7 +142,6 @@ pub fn generate_meta_impl(struct_name: &Ident, meta: &RawLintMeta) -> TokenStrea
     let name_fn = not_raw.generate_name_fn();
     let note_fn = not_raw.generate_note_fn();
     let code_fn = not_raw.generate_code_fn();
-    let match_with_fn = not_raw.generate_match_with_fn();
     let match_kind = not_raw.generate_match_kind_fn();
     let report_fn = LintMeta::generate_report_fn();
 
@@ -169,7 +150,6 @@ pub fn generate_meta_impl(struct_name: &Ident, meta: &RawLintMeta) -> TokenStrea
             #name_fn
             #note_fn
             #code_fn
-            #match_with_fn
             #match_kind
             #report_fn
         }
