@@ -6,6 +6,7 @@ use rnix::{
     ast::{Attr, Entry, HasEntry as _, Ident, Inherit, LetIn},
 };
 use rowan::ast::AstNode as _;
+use std::collections::HashMap;
 
 /// ## What it does
 /// Checks for `let-in` bindings that are used at most once — or not at all —
@@ -47,6 +48,9 @@ impl Rule for SingleUseLet {
         let let_in_expr = LetIn::cast(node.clone())?;
         let body = let_in_expr.body()?;
         let entries: Vec<_> = let_in_expr.entries().collect();
+        let body_refs = ident_ref_counts(body.syntax());
+        let entry_refs: Vec<_> = entries.iter().map(entry_ref_counts).collect();
+        let total_entry_refs = merge_ref_counts(&entry_refs);
 
         let mut report = self.report();
         let mut found = false;
@@ -63,7 +67,7 @@ impl Rule for SingleUseLet {
                 continue;
             };
 
-            let refs = ref_counts(kv, i, &entries, body.syntax(), &name);
+            let refs = ref_counts(&name, &body_refs, &total_entry_refs, &entry_refs[i]);
 
             if refs.total > 1 {
                 continue;
@@ -87,18 +91,13 @@ impl Rule for SingleUseLet {
                 // the binding removal (lower offset) stays valid.
                 let message = format!("`{name}` is only used once; consider inlining");
                 let value_node = kv.value()?.syntax().clone();
-                // Skip auto-fix for multiline values: indentation can't be
-                // correctly adjusted without a proper pretty-printer, and
-                // inlining complex multi-line expressions tends to mangle the
-                // surrounding code.
-                let value_is_multiline = value_node.to_string().contains('\n');
                 let removal = Suggestion::with_empty(binding_removal_range(kv.syntax()));
 
                 match find_ident_ref(body.syntax(), &name) {
                     Some(InlineTarget::Direct {
                         range: ref_range,
                         needs_parens,
-                    }) if !value_is_multiline => {
+                    }) => {
                         let replacement = if needs_parens {
                             make::parenthesize(&value_node).syntax().clone()
                         } else {
@@ -113,7 +112,7 @@ impl Rule for SingleUseLet {
                             .suggest(binding_at, message, removal);
                         fix_allocated = true;
                     }
-                    Some(InlineTarget::BareInherit { inherit_node }) if !value_is_multiline => {
+                    Some(InlineTarget::BareInherit { inherit_node }) => {
                         // Replace `inherit foo;` with `foo = value;`.
                         // Preserve the leading whitespace/indentation from the
                         // inherit node's text so the new binding is indented correctly.
@@ -174,33 +173,80 @@ struct RefCounts {
 }
 
 fn ref_counts(
-    kv: &rnix::ast::AttrpathValue,
-    index: usize,
-    entries: &[Entry],
-    body: &SyntaxNode,
     name: &str,
+    body_refs: &HashMap<String, usize>,
+    total_entry_refs: &HashMap<String, usize>,
+    own_entry_refs: &HashMap<String, usize>,
 ) -> RefCounts {
-    let in_own_value = kv.value().map_or(0, |v| count_ident_refs(v.syntax(), name));
+    let in_own_value = own_entry_refs.get(name).copied().unwrap_or(0);
 
-    let in_siblings: usize = entries
-        .iter()
-        .enumerate()
-        .filter(|(j, _)| *j != index)
-        .filter_map(|(_, e)| {
-            if let Entry::AttrpathValue(other_kv) = e {
-                other_kv.value().map(|v| count_ident_refs(v.syntax(), name))
-            } else {
-                None
-            }
-        })
-        .sum();
+    let in_siblings = total_entry_refs
+        .get(name)
+        .copied()
+        .unwrap_or(0)
+        .saturating_sub(in_own_value);
 
-    let in_body = count_ident_refs(body, name);
+    let in_body = body_refs.get(name).copied().unwrap_or(0);
 
     RefCounts {
         total: in_own_value + in_siblings + in_body,
         in_siblings,
         in_own_value,
+    }
+}
+
+fn entry_ref_counts(entry: &Entry) -> HashMap<String, usize> {
+    match entry {
+        Entry::AttrpathValue(kv) => kv
+            .value()
+            .map_or_else(HashMap::new, |value| ident_ref_counts(value.syntax())),
+        Entry::Inherit(inherit) => inherit_ref_counts(inherit),
+    }
+}
+
+fn merge_ref_counts(ref_maps: &[HashMap<String, usize>]) -> HashMap<String, usize> {
+    let mut merged = HashMap::new();
+
+    for ref_map in ref_maps {
+        for (name, count) in ref_map {
+            *merged.entry(name.clone()).or_insert(0) += count;
+        }
+    }
+
+    merged
+}
+
+fn inherit_ref_counts(inherit: &Inherit) -> HashMap<String, usize> {
+    let mut counts = inherit
+        .from()
+        .map_or_else(HashMap::new, |from| ident_ref_counts(from.syntax()));
+
+    for attr in inherit.attrs() {
+        *counts.entry(attr.to_string()).or_insert(0) += 1;
+    }
+
+    counts
+}
+
+fn ident_ref_counts(node: &SyntaxNode) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    collect_ident_refs(node, &mut counts);
+    counts
+}
+
+fn collect_ident_refs(node: &SyntaxNode, counts: &mut HashMap<String, usize>) {
+    if let Some(ident) = Ident::cast(node.clone()) {
+        let parent_is_attrpath = node
+            .parent()
+            .is_some_and(|p| p.kind() == SyntaxKind::NODE_ATTRPATH);
+        if !parent_is_attrpath {
+            *counts.entry(ident.to_string()).or_insert(0) += 1;
+        }
+        return;
+    }
+
+    for child in node.children() {
+        collect_ident_refs(&child, counts);
     }
 }
 
@@ -231,23 +277,6 @@ fn binding_removal_range(binding: &SyntaxNode) -> TextRange {
         None => binding.text_range().start(),
     };
     TextRange::new(start, end)
-}
-
-/// Count how many times `name` appears as a variable reference inside `node`,
-/// excluding attrpath components (attribute keys in bindings/selections).
-fn count_ident_refs(node: &SyntaxNode, name: &str) -> usize {
-    if let Some(ident) = Ident::cast(node.clone()) {
-        let parent_is_attrpath = node
-            .parent()
-            .is_some_and(|p| p.kind() == SyntaxKind::NODE_ATTRPATH);
-        if !parent_is_attrpath && ident.to_string() == name {
-            return 1;
-        }
-        return 0;
-    }
-    node.children()
-        .map(|child| count_ident_refs(&child, name))
-        .sum()
 }
 
 enum InlineTarget {

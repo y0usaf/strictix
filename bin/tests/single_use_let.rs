@@ -57,6 +57,38 @@ generate_tests! {
             in
               { inherit (attrs) a; }
         "},
+        // multiline binding used once in body — fix should still inline
+        indoc! {"
+            let
+              gpuArgs =
+                optionals (disableFeatures != []) [
+                  \"--disable-features=${concatStringsSep \",\" disableFeatures}\"
+                ]
+                ++ optionals (!smoothScroll) [
+                  \"--disable-smooth-scrolling\"
+                ];
+            in
+              concatStringsSep \" \" (gpuArgs ++ extraArgs)
+        "},
+        // multiline binding used in bare inherit — fix should rewrite to assignment
+        indoc! {"
+            let
+              settings =
+                {
+                  a = 1;
+                  b = 2;
+                };
+            in
+              { inherit settings; }
+        "},
+        // binding referenced from a sibling `inherit (x) ...;` entry — should NOT be flagged
+        indoc! {"
+            let
+              data = { version = 5; pins = {}; };
+              inherit (data) version;
+            in
+              if version == 5 then data.pins else {}
+        "},
         // multi-attr inherit — only one attr is single-use; diagnostic only
         indoc! {"
             let
