@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/unused_lambda_param.rs
+expression: "\"drv: { name = \\\"demo\\\"; }\""
+---
+[W31] Warning: This lambda parameter is never used
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ drv: { name = "demo"; }
+   · ─┬─  
+   ·  ╰─── drv is never used; replace it with _
+───╯

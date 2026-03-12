@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/repeated_keys.rs
+expression: "\"{ foo.bar = 1; }\""
+---
+

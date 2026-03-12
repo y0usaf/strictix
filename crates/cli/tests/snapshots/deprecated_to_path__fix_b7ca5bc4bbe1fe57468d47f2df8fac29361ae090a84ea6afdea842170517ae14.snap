@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/deprecated_to_path.rs
+expression: "\"builtins.toPath x\""
+---
+

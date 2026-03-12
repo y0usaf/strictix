@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/unused_pattern_bind.rs
+expression: "\"{ ... } @ args: 42\""
+---
+[W11] Warning: Found redundant pattern bind in function argument
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ { ... } @ args: 42
+   · ───────┬──────  
+   ·        ╰──────── This pattern bind is redundant, use args instead
+───╯

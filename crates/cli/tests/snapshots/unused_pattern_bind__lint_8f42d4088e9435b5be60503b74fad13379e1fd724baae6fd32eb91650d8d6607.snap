@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/unused_pattern_bind.rs
+expression: "\"{ x, y }: x + y\""
+---
+

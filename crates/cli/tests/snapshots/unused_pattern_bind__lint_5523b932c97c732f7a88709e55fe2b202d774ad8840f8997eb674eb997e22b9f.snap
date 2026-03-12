@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/unused_pattern_bind.rs
+expression: "\"attrs @ { x, ... }: x\""
+---
+[W32] Warning: This pattern binding is never used
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ attrs @ { x, ... }: x
+   · ─────────┬────────  
+   ·          ╰────────── attrs is never used; remove the redundant pattern binding
+───╯
