@@ -41,27 +41,34 @@ impl Rule for EmptyLetIn {
             && let inherits = let_in_expr.inherits()
             && entries.count() == 0
             && inherits.count() == 0
-            && let Some(body) = let_in_expr.body()
+            && let Some(_body) = let_in_expr.body()
         {
-            // ensure that the let-in-expr does not have comments
-            let has_comments = node
-                .children_with_tokens()
-                .any(|el| el.kind() == SyntaxKind::TOKEN_COMMENT);
-
             let at = node.text_range();
-            let replacement = body.syntax();
             let message = "This let-in expression has no entries";
-            Some(if has_comments {
-                self.report().diagnostic(at, message)
-            } else {
-                self.report().suggest(
-                    at,
-                    message,
-                    Suggestion::with_replacement(at, replacement.clone()),
-                )
-            })
+            let replacement = empty_let_replacement(&let_in_expr)?;
+            Some(
+                self.report()
+                    .suggest(at, message, Suggestion::with_text(at, replacement)),
+            )
         } else {
             None
         }
     }
+}
+
+fn empty_let_replacement(let_in_expr: &LetIn) -> Option<String> {
+    let let_node = let_in_expr.syntax();
+    let let_text = let_node.to_string();
+    let let_token = let_in_expr.let_token()?;
+    let in_token = let_in_expr.in_token()?;
+    let body = let_in_expr.body()?;
+
+    let let_start = usize::from(let_node.text_range().start());
+    let between_start = usize::from(let_token.text_range().end()) - let_start;
+    let between_end = usize::from(in_token.text_range().start()) - let_start;
+    let body_start = usize::from(body.syntax().text_range().start()) - let_start;
+    let between = &let_text[between_start..between_end];
+    let preserved_trivia = if between.contains('#') { between } else { "" };
+
+    Some(format!("{}{}", preserved_trivia, &let_text[body_start..]))
 }

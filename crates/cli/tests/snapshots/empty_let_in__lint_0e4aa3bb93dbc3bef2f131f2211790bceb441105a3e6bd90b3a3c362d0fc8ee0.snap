@@ -1,0 +1,13 @@
+---
+source: crates/cli/tests/empty_let_in.rs
+expression: "\"let # keep trailing comment\\nin\\n  null\\n\""
+---
+[02] Warning: Useless let-in expression
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ ╭─▶ let # keep trailing comment
+   ⋮ ⋮   
+ 3 │ ├─▶   null
+   · │            
+   · ╰──────────── This let-in expression has no entries
+───╯
