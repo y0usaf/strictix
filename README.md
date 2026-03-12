@@ -106,7 +106,7 @@ Inherited from `statix`:
 | Code | Name                     | Auto-fix | Description                                         |
 | ---- | ------------------------ | -------- | --------------------------------------------------- |
 | W01  | `bool_comparison`        | ✓        | `x == true` → `x`                                   |
-| W02  | `empty_let_in`           | ✓\*      | `let in expr` → `expr`                              |
+| W02  | `empty_let_in`           | ✓        | `let in expr` → `expr`                              |
 | W03  | `manual_inherit`         | ✓        | `x = y; inherit x;` style repetition → `inherit x`  |
 | W04  | `manual_inherit_from`    | ✓        | `a = x.y.z.a` → `inherit (x.y.z) a`                 |
 | W05  | `legacy_let_syntax`      | ✓        | `let { body = ...; }` → `let ... in ...`            |
@@ -118,7 +118,7 @@ Inherited from `statix`:
 | W11  | `redundant_pattern_bind` | ✓        | `{...} @ args: expr` → `args: expr`                 |
 | W12  | `unquoted_uri`           | ✓        | Quote bare URIs in string contexts                  |
 | W14  | `empty_inherit`          | ✓        | Remove empty `inherit;`                             |
-| W17  | `deprecated_to_path`     | ✓\*      | Warn on deprecated `toPath`/`builtins.toPath` usage |
+| W17  | `deprecated_to_path`     | ✓        | Warn on deprecated `toPath`/`builtins.toPath` usage |
 | W18  | `bool_simplification`    | ✓        | `!(x == y)` → `x != y`, `!(x != y)` → `x == y`      |
 | W19  | `useless_has_attr`       | ✓        | `if x ? a then x.a else d` → `x.a or d`             |
 | W20  | `repeated_keys`          | ✓\*      | Suggest grouping repeated attrpath prefixes         |
@@ -128,11 +128,11 @@ Added by `strictix`:
 
 | Code | Name                       | Auto-fix | Description                                                |
 | ---- | -------------------------- | -------- | ---------------------------------------------------------- |
-| W24  | `with_expression`          | —        | Warn on `with`; breaks tooling and causes shadowing        |
+| W24  | `with_expression`          | ✓\*      | Warn on `with`; breaks tooling and causes shadowing        |
 | W25  | `collapsible_inherit_from` | ✓        | `inherit (x) a; inherit (x) b;` → `inherit (x) a b;`       |
 | W26  | `empty_attrset_merge`      | ✓        | `{} // x` → `x`                                            |
 | W27  | `redundant_if_bool`        | ✓        | `if x then true else false` → `x`                          |
-| W28  | `if_else_empty_attrset`    | —        | Suggest `lib.optionalAttrs` over `if c then {...} else {}` |
+| W28  | `if_else_empty_attrset`    | ✓        | Suggest `lib.optionalAttrs` over `if c then {...} else {}` |
 | W29  | `unnecessary_rec`          | ✓        | Remove `rec` when no binding references a sibling          |
 | W30  | `single_use_let`           | ✓\*      | Inline or remove `let` bindings used at most once          |
 | W31  | `unused_lambda_param`      | ✓        | `x: expr` where `x` is unused → `_: expr`                  |
