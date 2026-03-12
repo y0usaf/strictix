@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/with_expression.rs
+expression: "\"with { hello = pkgs.hello; }; 1\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-with { hello = pkgs.hello; }; 1
++1

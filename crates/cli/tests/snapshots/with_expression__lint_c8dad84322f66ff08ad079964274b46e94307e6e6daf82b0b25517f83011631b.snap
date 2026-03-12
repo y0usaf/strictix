@@ -1,0 +1,25 @@
+---
+source: crates/cli/tests/with_expression.rs
+expression: "\"with { git = pkgs.git; curl = pkgs.curl; }; [ git curl ]\""
+---
+[24] Warning: Avoid `with` expressions
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ with { git = pkgs.git; curl = pkgs.curl; }; [ git curl ]
+   · ────────────────────────────┬───────────────────────────  
+   ·                             ╰───────────────────────────── with { git = pkgs.git; curl = pkgs.curl; }; introduces implicit scope; use explicit attribute access or inherit instead
+───╯
+[04] Warning: Assignment instead of inherit from
+   ╭─[<temp_file_path>:1:8]
+   │
+ 1 │ with { git = pkgs.git; curl = pkgs.curl; }; [ git curl ]
+   ·        ───────┬───────  
+   ·               ╰───────── This assignment is better written with inherit
+───╯
+[04] Warning: Assignment instead of inherit from
+   ╭─[<temp_file_path>:1:24]
+   │
+ 1 │ with { git = pkgs.git; curl = pkgs.curl; }; [ git curl ]
+   ·                        ────────┬────────  
+   ·                                ╰────────── This assignment is better written with inherit
+───╯
