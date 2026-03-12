@@ -1,0 +1,12 @@
+---
+source: crates/cli/tests/unnecessary_rec.rs
+expression: "\"rec {\\n  a = 1;\\n  b = 2;\\n}\\n\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,5 +1,5 @@
+-rec {
++{
+   a = 1;
+   b = 2;
+ }

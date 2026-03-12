@@ -1,0 +1,18 @@
+---
+source: crates/cli/tests/useless_parens.rs
+expression: "\"let a = 0; in (null)\""
+---
+[W08] Warning: These parentheses can be omitted
+   ╭─[<temp_file_path>:1:15]
+   │
+ 1 │ let a = 0; in (null)
+   ·               ───┬──  
+   ·                  ╰──── Useless parentheses around body of let expression
+───╯
+[W30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:1:5]
+   │
+ 1 │ let a = 0; in (null)
+   ·     ───┬──  
+   ·        ╰──── a is never used
+───╯

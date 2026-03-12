@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/bool_comparison.rs
+expression: "\"i == j\""
+---
+

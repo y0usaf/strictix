@@ -1,0 +1,18 @@
+---
+source: crates/cli/tests/single_use_let.rs
+assertion_line: 7
+expression: "\"let\\n  settings =\\n    {\\n      a = 1;\\n      b = 2;\\n    };\\nin\\n  { inherit settings; }\\n\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,9 +1,5 @@
+-let
+-  settings =
+-    {
++{ settings = {
+       a = 1;
+       b = 2;
+-    };
+-in
+-  { inherit settings; }
++    }; }

@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/single_use_let.rs
+expression: "\"let\\n  x = someExpr;\\nin\\n  \\\"value: ${x}\\\"\\n\""
+---
+

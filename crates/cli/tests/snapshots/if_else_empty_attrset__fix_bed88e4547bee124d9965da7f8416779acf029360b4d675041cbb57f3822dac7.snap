@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/if_else_empty_attrset.rs
+expression: "\"base // (if config.foo.enable then { bar = 1; } else {})\\n\""
+---
+

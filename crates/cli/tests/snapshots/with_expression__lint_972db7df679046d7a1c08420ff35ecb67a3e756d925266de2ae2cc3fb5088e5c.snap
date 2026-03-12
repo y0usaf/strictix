@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/with_expression.rs
+expression: "\"with pkgs; [ git curl ]\""
+---
+[W24] Warning: Avoid `with` expressions
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ with pkgs; [ git curl ]
+   · ───────────┬───────────  
+   ·            ╰───────────── with pkgs; introduces implicit scope; use explicit attribute access or inherit instead
+───╯

@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/manual_inherit_from.rs
+expression: "\"let x.y.z = 2; in { z = x.y.z; }\""
+---
+[W04] Warning: Assignment instead of inherit from
+   ╭─[<temp_file_path>:1:21]
+   │
+ 1 │ let x.y.z = 2; in { z = x.y.z; }
+   ·                     ─────┬────  
+   ·                          ╰────── This assignment is better written with inherit
+───╯

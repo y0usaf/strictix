@@ -1,0 +1,13 @@
+---
+source: crates/cli/tests/single_use_let.rs
+expression: "\"let\\n  a = 1;\\n  b = 2;\\nin\\n  a + b\\n\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,6 +1,2 @@
+-let
+-  a = 1;
+-  b = 2;
+-in
+-  a + b
++(1) + (2)

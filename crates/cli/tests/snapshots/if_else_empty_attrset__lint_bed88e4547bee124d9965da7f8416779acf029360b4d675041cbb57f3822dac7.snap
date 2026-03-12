@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/if_else_empty_attrset.rs
+expression: "\"base // (if config.foo.enable then { bar = 1; } else {})\\n\""
+---
+[W28] Warning: Prefer `lib.optionalAttrs` over `if cond then attrs else {}`
+   ╭─[<temp_file_path>:1:10]
+   │
+ 1 │ base // (if config.foo.enable then { bar = 1; } else {})
+   ·          ───────────────────────┬──────────────────────  
+   ·                                 ╰──────────────────────── Use lib.optionalAttrs (config.foo.enable) { ... } instead of if ... then { ... } else {}
+───╯

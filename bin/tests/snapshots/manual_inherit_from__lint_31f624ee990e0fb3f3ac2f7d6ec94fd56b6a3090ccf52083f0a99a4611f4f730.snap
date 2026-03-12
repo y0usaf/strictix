@@ -1,5 +1,0 @@
----
-source: bin/tests/manual_inherit_from.rs
-expression: "\"{ z = x.y.z or \\\"default\\\"; }\""
----
-

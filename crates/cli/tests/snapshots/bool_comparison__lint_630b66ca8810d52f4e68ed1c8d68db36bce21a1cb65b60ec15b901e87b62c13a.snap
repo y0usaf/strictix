@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/bool_comparison.rs
+expression: "\"false != h\""
+---
+[W01] Warning: Unnecessary comparison with boolean
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ false != h
+   · ─────┬────  
+   ·      ╰────── Comparing h with boolean literal false
+───╯

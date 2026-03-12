@@ -1,0 +1,12 @@
+---
+source: crates/cli/tests/unnecessary_rec.rs
+expression: "\"rec {\\n  a = 1;\\n  b = 2;\\n}\\n\""
+---
+[W29] Warning: This `rec` attrset has no self-referential bindings
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ ╭─▶ rec {
+ 4 │ ├─▶ }
+   · │       
+   · ╰─────── Remove rec: no binding references a sibling binding
+───╯

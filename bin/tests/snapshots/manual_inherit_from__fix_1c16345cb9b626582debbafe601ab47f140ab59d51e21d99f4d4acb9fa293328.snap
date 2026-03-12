@@ -1,9 +1,0 @@
----
-source: bin/tests/manual_inherit_from.rs
-expression: "\"let x.y.z = 2; in { z = x.y.z; }\""
----
---- <temp_file_path>
-+++ <temp_file_path> [fixed]
-@@ -1 +1 @@
--let x.y.z = 2; in { z = x.y.z; }
-+let x.y.z = 2; in { inherit (x.y) z; }

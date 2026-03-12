@@ -1,0 +1,14 @@
+---
+source: crates/cli/tests/single_use_let.rs
+expression: "\"let\\n  dev = \\\"/dev/sda\\\";\\nin\\n  ''mount ${dev} /mnt''\\n\""
+---
+[W30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:2:3]
+   │
+ 2 │   dev = "/dev/sda";
+   ·   ────────┬────────  
+   ·           ╰────────── dev is only used once; consider inlining
+ 4 │   ''mount ${dev} /mnt''
+   ·           ───┬──  
+   ·              ╰──── dev is only used once; consider inlining
+───╯

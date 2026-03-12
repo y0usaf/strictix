@@ -1,5 +1,0 @@
----
-source: bin/tests/manual_inherit_from.rs
-expression: "\"let x.y.z = 2; in { a = x.y.z; }\""
----
-
