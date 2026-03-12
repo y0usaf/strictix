@@ -92,8 +92,22 @@ impl Report {
     }
     /// Apply all diagnostics. Assumption: diagnostics do not overlap
     pub fn apply(&self, src: &mut String) {
-        for d in &self.diagnostics {
-            d.apply(src);
+        let mut diagnostics = self
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.suggestion.is_some())
+            .collect::<Vec<_>>();
+
+        diagnostics.sort_by(|a, b| {
+            let a = a.suggestion.as_ref().unwrap().at;
+            let b = b.suggestion.as_ref().unwrap().at;
+            b.start()
+                .cmp(&a.start())
+                .then_with(|| b.end().cmp(&a.end()))
+        });
+
+        for diagnostic in diagnostics {
+            diagnostic.apply(src);
         }
     }
     /// Create a report out of a parse error
