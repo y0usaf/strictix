@@ -76,7 +76,9 @@ impl Rule for SingleUseLet {
 
             let binding_at = kv.syntax().text_range();
 
-            if refs.total == 0 {
+            let external_refs = refs.in_siblings + body_refs.get(&name).copied().unwrap_or(0);
+
+            if external_refs == 0 {
                 let message = format!("`{name}` is never used");
                 if fix_allocated {
                     report = report.diagnostic(binding_at, message);
@@ -86,15 +88,15 @@ impl Rule for SingleUseLet {
                     fix_allocated = true;
                 }
                 found = true;
-            } else if !fix_allocated && refs.in_siblings == 0 && refs.in_own_value == 0 {
-                // Single use in body: inline with two ordered suggestions.
-                // Reference replacement (higher offset) is applied first so
-                // the binding removal (lower offset) stays valid.
+            } else if !fix_allocated && external_refs == 1 && refs.in_own_value == 0 {
+                // Single use outside the binding itself: inline with two
+                // ordered suggestions. The higher offset replacement is
+                // applied before the binding removal.
                 let message = format!("`{name}` is only used once; consider inlining");
                 let value_node = kv.value()?.syntax().clone();
                 let removal = Suggestion::with_empty(binding_removal_range(kv.syntax()));
 
-                match find_ident_ref(body.syntax(), &name) {
+                match find_external_ident_ref(&entries, i, body.syntax(), &name) {
                     Some(InlineTarget::Direct {
                         range: ref_range,
                         needs_parens,
@@ -114,16 +116,8 @@ impl Rule for SingleUseLet {
                         fix_allocated = true;
                     }
                     Some(InlineTarget::BareInherit { inherit_node }) => {
-                        // Replace `inherit foo;` with `foo = value;`.
-                        // Preserve the leading whitespace/indentation from the
-                        // inherit node's text so the new binding is indented correctly.
-                        let inherit_text = inherit_node.to_string();
-                        let prefix = inherit_text
-                            .find("inherit")
-                            .map_or("", |i| &inherit_text[..i]);
-                        let value_stripped = value_node.to_string();
-                        let value_stripped = value_stripped.trim_start();
-                        let replacement = format!("{prefix}{name} = {value_stripped};");
+                        let replacement =
+                            bare_inherit_replacement(&inherit_node, &name, &value_node)?;
                         let inherit_range = inherit_node.text_range();
                         report = report
                             .suggest(
@@ -135,21 +129,17 @@ impl Rule for SingleUseLet {
                         fix_allocated = true;
                     }
                     Some(InlineTarget::StringInterpol { interpol_range }) => {
-                        // Replace `${foo}` with the literal string content.
-                        // Only applies when the value is a simple string literal
-                        // with no escape sequences or nested interpolations.
-                        if let Some(content) = simple_string_content(&value_node) {
-                            report = report
-                                .suggest(
+                        report = report
+                            .suggest(
+                                interpol_range,
+                                &message,
+                                Suggestion::with_text(
                                     interpol_range,
-                                    &message,
-                                    Suggestion::with_text(interpol_range, content),
-                                )
-                                .suggest(binding_at, message, removal);
-                            fix_allocated = true;
-                        } else {
-                            report = report.diagnostic(binding_at, message);
-                        }
+                                    interpol_replacement(&value_node),
+                                ),
+                            )
+                            .suggest(binding_at, message, removal);
+                        fix_allocated = true;
                     }
                     _ => {
                         report = report.diagnostic(binding_at, message);
@@ -295,6 +285,32 @@ enum InlineTarget {
     StringInterpol { interpol_range: TextRange },
 }
 
+fn find_external_ident_ref(
+    entries: &[Entry],
+    current_index: usize,
+    body: &SyntaxNode,
+    name: &str,
+) -> Option<InlineTarget> {
+    for (index, entry) in entries.iter().enumerate() {
+        if index == current_index {
+            continue;
+        }
+
+        let target = match entry {
+            Entry::AttrpathValue(kv) => kv
+                .value()
+                .and_then(|value| find_ident_ref(value.syntax(), name)),
+            Entry::Inherit(inherit) => find_ident_ref(inherit.syntax(), name),
+        };
+
+        if target.is_some() {
+            return target;
+        }
+    }
+
+    find_ident_ref(body, name)
+}
+
 /// Walk `node` looking for the first reference to `name` and return how it
 /// should be inlined.
 fn find_ident_ref(node: &SyntaxNode, name: &str) -> Option<InlineTarget> {
@@ -303,11 +319,9 @@ fn find_ident_ref(node: &SyntaxNode, name: &str) -> Option<InlineTarget> {
         let parent_kind = parent.as_ref().map(SyntaxNode::kind);
 
         if parent_kind == Some(SyntaxKind::NODE_INHERIT) {
-            // Bare `inherit foo;` — only fixable when it is the sole attribute.
             let inherit_node = parent?;
             let inherit = Inherit::cast(inherit_node.clone())?;
-            if inherit.from().is_none() && inherit.attrs().count() == 1 && ident.to_string() == name
-            {
+            if inherit.from().is_none() && ident.to_string() == name {
                 return Some(InlineTarget::BareInherit { inherit_node });
             }
             return None;
@@ -332,6 +346,40 @@ fn find_ident_ref(node: &SyntaxNode, name: &str) -> Option<InlineTarget> {
     }
     node.children()
         .find_map(|child| find_ident_ref(&child, name))
+}
+
+fn bare_inherit_replacement(
+    inherit_node: &SyntaxNode,
+    name: &str,
+    value_node: &SyntaxNode,
+) -> Option<String> {
+    let inherit = Inherit::cast(inherit_node.clone())?;
+    let inherit_text = inherit_node.to_string();
+    let prefix = inherit_text
+        .find("inherit")
+        .map_or("", |index| &inherit_text[..index]);
+    let value_text = value_node.to_string();
+    let value_text = value_text.trim_start();
+
+    let remaining = inherit
+        .attrs()
+        .map(|attr| attr.to_string())
+        .filter(|attr| attr != name)
+        .collect::<Vec<_>>();
+
+    let mut replacement = format!("{prefix}{name} = {value_text};");
+    if !remaining.is_empty() {
+        replacement.push(' ');
+        replacement.push_str("inherit ");
+        replacement.push_str(&remaining.join(" "));
+        replacement.push(';');
+    }
+
+    Some(replacement)
+}
+
+fn interpol_replacement(value_node: &SyntaxNode) -> String {
+    simple_string_content(value_node).unwrap_or_else(|| format!("${{{value_node}}}"))
 }
 
 /// If `value_node` is a plain `"…"` string with no interpolations or escape

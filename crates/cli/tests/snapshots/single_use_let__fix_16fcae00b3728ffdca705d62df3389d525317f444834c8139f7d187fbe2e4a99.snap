@@ -1,12 +1,12 @@
 ---
 source: crates/cli/tests/single_use_let.rs
-expression: "\"let\\n  x = 1;\\nin\\n  { inherit x y; }\\n\""
+expression: "\"let\\n  loop = loop;\\nin\\n  1\\n\""
 ---
 --- <temp_file_path>
 +++ <temp_file_path> [fixed]
 @@ -1,5 +1,2 @@
 -let
--  x = 1;
+-  loop = loop;
 -in
--  { inherit x y; }
-+{ x = 1; inherit y; }
+-  1
++1

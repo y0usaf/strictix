@@ -2,4 +2,11 @@
 source: crates/cli/tests/single_use_let.rs
 expression: "\"let\\n  x = someExpr;\\nin\\n  \\\"value: ${x}\\\"\\n\""
 ---
-
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,5 +1,2 @@
+-let
+-  x = someExpr;
+-in
+-  "value: ${x}"
++"value: ${someExpr}"

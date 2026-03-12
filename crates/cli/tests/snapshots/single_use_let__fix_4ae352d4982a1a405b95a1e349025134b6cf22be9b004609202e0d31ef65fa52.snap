@@ -1,0 +1,13 @@
+---
+source: crates/cli/tests/single_use_let.rs
+expression: "\"let\\n  base = pkgs.hello;\\n  wrapped = base.override { };\\nin\\n  wrapped\\n\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,6 +1,2 @@
+-let
+-  base = pkgs.hello;
+-  wrapped = base.override { };
+-in
+-  wrapped
++(pkgs.hello.override { })

@@ -8,4 +8,8 @@ expression: "\"let\\n  x = 1;\\nin\\n  { inherit x y; }\\n\""
  2 │   x = 1;
    ·   ───┬──  
    ·      ╰──── x is only used once; consider inlining
+   · 
+ 4 │   { inherit x y; }
+   ·     ──────┬─────  
+   ·           ╰─────── x is only used once; consider inlining
 ───╯
