@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/with_expression.rs
+expression: "\"with pkgs; [ git curl ]\""
+---
+

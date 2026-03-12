@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/useless_parens.rs
+expression: "\"[(builtins.pam or map)]\""
+---
+

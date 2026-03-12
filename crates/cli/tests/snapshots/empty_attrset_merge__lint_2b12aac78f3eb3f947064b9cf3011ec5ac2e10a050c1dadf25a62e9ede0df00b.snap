@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/empty_attrset_merge.rs
+expression: "\"{ a = 1; } // {}\""
+---
+[W26] Warning: Unnecessary merge with empty attrset
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ { a = 1; } // {}
+   · ────────┬───────  
+   ·         ╰───────── Merging with an empty attrset {} is a no-op
+───╯

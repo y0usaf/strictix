@@ -1,0 +1,12 @@
+---
+source: crates/cli/tests/collapsible_inherit_from.rs
+expression: "\"{\\n  inherit (spec) command;\\n  inherit (spec) args;\\n}\\n\""
+---
+[W25] Warning: These inherit statements can be merged
+   ╭─[<temp_file_path>:2:3]
+   │
+ 2 │ ╭─▶   inherit (spec) command;
+ 3 │ ├─▶   inherit (spec) args;
+   · │                            
+   · ╰──────────────────────────── Merge inherit (spec) ...; statements into one
+───╯

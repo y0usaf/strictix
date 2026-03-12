@@ -27,21 +27,19 @@
 
         imports = [
           inputs.flake-parts.flakeModules.partitions
-          ./docs/flake-part.nix
-          ./flake-parts/cachix.nix
-          ./flake-parts/ci.nix
-          ./flake-parts/dependabot.nix
-          ./flake-parts/dev-shell.nix
-          ./flake-parts/dogfood.nix
-          ./flake-parts/files.nix
-          ./flake-parts/fmt.nix
-          ./flake-parts/git-hooks.nix
-          ./flake-parts/git-ignore.nix
-          ./flake-parts/license.nix
-          ./flake-parts/overlay.nix
-          ./flake-parts/rust.nix
-          ./flake-parts/strictix.nix
-          ./vim-plugin/flake-part.nix
+          ./nix/parts/docs.nix
+          ./nix/parts/cachix.nix
+          ./nix/parts/dev-shell.nix
+          ./nix/parts/dogfood.nix
+          ./nix/parts/files.nix
+          ./nix/parts/fmt.nix
+          ./nix/parts/git-hooks.nix
+          ./nix/parts/git-ignore.nix
+          ./nix/parts/license.nix
+          ./nix/parts/overlay.nix
+          ./nix/parts/rust.nix
+          ./nix/parts/strictix.nix
+          ./integrations/vim/flake-part.nix
         ];
 
         partitionedAttrs = lib.genAttrs [
@@ -49,7 +47,7 @@
           "apps"
         ] (_: "dev");
 
-        partitions.dev.extraInputsFlake = ./dev-flake;
+        partitions.dev.extraInputsFlake = ./nix/dev;
       }
     );
 }

@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/eta_reduction.rs
+expression: "\"let f = { double = x: x *2; val = 2; }; in map (f: f.double f.val) [ f ]\""
+---
+

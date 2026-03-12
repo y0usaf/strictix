@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/empty_inherit.rs
+expression: "\"{ inherit; }\""
+---
+[W14] Warning: Found empty inherit statement
+   ╭─[<temp_file_path>:1:3]
+   │
+ 1 │ { inherit; }
+   ·   ────┬───  
+   ·       ╰───── Remove this empty inherit statement
+───╯

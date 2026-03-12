@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/redundant_if_bool.rs
+expression: "\"if cond then true else false\""
+---
+[W27] Warning: Redundant `if` expression with boolean literals
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ if cond then true else false
+   · ──────────────┬─────────────  
+   ·               ╰─────────────── Use the condition directly instead of if cond then true else false
+───╯

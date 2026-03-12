@@ -1,0 +1,16 @@
+---
+source: crates/cli/tests/single_use_let.rs
+assertion_line: 7
+expression: "\"let\\n  settings =\\n    {\\n      a = 1;\\n      b = 2;\\n    };\\nin\\n  { inherit settings; }\\n\""
+---
+[W30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:2:3]
+   │
+ 2 │ ╭─▶   settings =
+ 6 │ ├─▶     };
+   · │            
+   · ╰──────────── settings is only used once; consider inlining
+ 8 │       { inherit settings; }
+   ·         ────────┬────────  
+   ·                 ╰────────── settings is only used once; consider inlining
+───╯

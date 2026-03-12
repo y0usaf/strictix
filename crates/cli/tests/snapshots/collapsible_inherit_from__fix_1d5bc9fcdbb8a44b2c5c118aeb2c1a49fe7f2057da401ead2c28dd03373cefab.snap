@@ -1,0 +1,12 @@
+---
+source: crates/cli/tests/collapsible_inherit_from.rs
+expression: "\"{\\n  inherit (spec) command;\\n  inherit (spec) args;\\n}\\n\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,5 +1,4 @@
+ {
+-  inherit (spec) command;
+-  inherit (spec) args;
++  inherit (spec) command args;
+ }

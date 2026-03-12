@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/manual_inherit.rs
+expression: "\"let y = 2; in { x.y = y; }\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-let y = 2; in { x.y = y; }
++{ x.y = 2; }

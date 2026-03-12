@@ -1,5 +1,0 @@
----
-source: bin/tests/single_use_let.rs
-expression: "\"let\\n  x = 1;\\nin\\n  { inherit x y; }\\n\""
----
-

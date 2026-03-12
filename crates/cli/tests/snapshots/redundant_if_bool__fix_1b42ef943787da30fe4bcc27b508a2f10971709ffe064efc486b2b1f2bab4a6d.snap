@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/redundant_if_bool.rs
+expression: "\"if cond then false else true\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-if cond then false else true
++!cond

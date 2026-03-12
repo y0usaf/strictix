@@ -1,5 +1,0 @@
----
-source: bin/tests/single_use_let.rs
-assertion_line: 7
-expression: "\"let\\n  data = { version = 5; pins = {}; };\\n  inherit (data) version;\\nin\\n  if version == 5 then data.pins else {}\\n\""
----
