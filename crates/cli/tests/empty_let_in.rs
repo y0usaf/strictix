@@ -10,10 +10,14 @@ generate_tests! {
         "let in null",
         indoc! {"
             let
-              # don't fix this, we have a comment
-              # raise the lint though
+              # preserve the comment while fixing
             in
             null
-        "}
+        "},
+        indoc! {"
+            let # keep trailing comment
+            in
+              null
+        "},
     ],
 }

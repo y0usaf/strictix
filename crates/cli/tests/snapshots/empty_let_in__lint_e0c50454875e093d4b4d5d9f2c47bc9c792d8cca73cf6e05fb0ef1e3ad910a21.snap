@@ -1,0 +1,13 @@
+---
+source: crates/cli/tests/empty_let_in.rs
+expression: "\"let\\n  # preserve the comment while fixing\\nin\\nnull\\n\""
+---
+[02] Warning: Useless let-in expression
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ ╭─▶ let
+   ⋮ ⋮   
+ 4 │ ├─▶ null
+   · │          
+   · ╰────────── This let-in expression has no entries
+───╯

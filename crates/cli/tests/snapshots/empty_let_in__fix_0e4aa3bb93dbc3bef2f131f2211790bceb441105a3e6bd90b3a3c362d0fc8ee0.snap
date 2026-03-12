@@ -1,0 +1,12 @@
+---
+source: crates/cli/tests/empty_let_in.rs
+expression: "\"let # keep trailing comment\\nin\\n  null\\n\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,4 +1,3 @@
+-let # keep trailing comment
+-in
+-  null
++ # keep trailing comment
++null
