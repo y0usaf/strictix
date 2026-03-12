@@ -9,5 +9,15 @@ generate_tests! {
         indoc! {"
             base // (if config.foo.enable then { bar = 1; } else {})
         "},
+        indoc! {"
+            if cond then {
+              foo = 1;
+              bar =
+                let
+                  baz = 2;
+                in
+                  baz;
+            } else {}
+        "},
     ],
 }
