@@ -1,0 +1,16 @@
+---
+source: crates/cli/tests/single_use_let.rs
+expression: "\"let\\n  base = pkgs.hello;\\n  wrapped = base.override { };\\nin\\n  wrapped\\n\""
+---
+[30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:2:3]
+   │
+ 2 │   base = pkgs.hello;
+   ·   ─────────┬────────  
+   ·            ╰────────── base is only used once; consider inlining
+ 3 │   wrapped = base.override { };
+   ·   ────────────┬─┬─────────────  
+   ·               ╰───────────────── base is only used once; consider inlining
+   ·                 │               
+   ·                 ╰─────────────── wrapped is only used once; consider inlining
+───╯

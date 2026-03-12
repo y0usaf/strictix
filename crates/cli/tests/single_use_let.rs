@@ -89,7 +89,7 @@ generate_tests! {
             in
               if version == 5 then data.pins else {}
         "},
-        // multi-attr inherit — only one attr is single-use; diagnostic only
+        // multi-attr inherit — fix only the targeted attr and preserve the others
         indoc! {"
             let
               x = 1;
@@ -102,6 +102,21 @@ generate_tests! {
               x = someExpr;
             in
               \"value: ${x}\"
+        "},
+        // single use in sibling binding — fix inlines before removing the source binding
+        indoc! {"
+            let
+              base = pkgs.hello;
+              wrapped = base.override { };
+            in
+              wrapped
+        "},
+        // recursive self-reference but no external uses — safe to drop as dead code
+        indoc! {"
+            let
+              loop = loop;
+            in
+              1
         "},
     ],
 }
