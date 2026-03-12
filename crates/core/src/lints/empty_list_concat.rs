@@ -47,10 +47,10 @@ impl Rule for EmptyListConcat {
         let at = node.text_range();
         let message = "Concatenation with the empty list, `[]`, is a no-op";
 
-        let empty_array = if is_empty_array(&lhs) {
-            rhs
+        let replacement = if is_empty_array(&lhs) {
+            simplify_concat_expr(&rhs)?
         } else if is_empty_array(&rhs) {
-            lhs
+            simplify_concat_expr(&lhs)?
         } else {
             return None;
         };
@@ -58,7 +58,7 @@ impl Rule for EmptyListConcat {
         Some(self.report().suggest(
             at,
             message,
-            Suggestion::with_replacement(at, empty_array.syntax().clone()),
+            Suggestion::with_replacement(at, replacement.syntax().clone()),
         ))
     }
 }
@@ -68,4 +68,25 @@ fn is_empty_array(expr: &Expr) -> bool {
         return false;
     };
     list.items().count() == 0
+}
+
+fn simplify_concat_expr(expr: &Expr) -> Option<Expr> {
+    let Expr::BinOp(bin_expr) = expr else {
+        return Some(expr.clone());
+    };
+
+    let Some(BinOpKind::Concat) = bin_expr.operator() else {
+        return Some(expr.clone());
+    };
+
+    let lhs = bin_expr.lhs()?;
+    let rhs = bin_expr.rhs()?;
+
+    if is_empty_array(&lhs) {
+        simplify_concat_expr(&rhs)
+    } else if is_empty_array(&rhs) {
+        simplify_concat_expr(&lhs)
+    } else {
+        Some(expr.clone())
+    }
 }
