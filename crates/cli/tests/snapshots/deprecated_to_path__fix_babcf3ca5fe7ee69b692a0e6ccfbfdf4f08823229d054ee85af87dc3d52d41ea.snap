@@ -6,4 +6,4 @@ expression: "\"toPath \\\"/abc/def\\\"\""
 +++ <temp_file_path> [fixed]
 @@ -1 +1 @@
 -toPath "/abc/def"
-+/. + "/abc/def"
++let __strictix_to_path_arg = builtins.toString "/abc/def"; in if builtins.substring 0 1 __strictix_to_path_arg == "/" then /. + __strictix_to_path_arg else ./. + "/${__strictix_to_path_arg}"

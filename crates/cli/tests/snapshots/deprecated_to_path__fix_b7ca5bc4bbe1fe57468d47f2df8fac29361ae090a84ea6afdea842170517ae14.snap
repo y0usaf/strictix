@@ -2,4 +2,8 @@
 source: crates/cli/tests/deprecated_to_path.rs
 expression: "\"builtins.toPath x\""
 ---
-
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-builtins.toPath x
++let __strictix_to_path_arg = builtins.toString x; in if builtins.substring 0 1 __strictix_to_path_arg == "/" then /. + __strictix_to_path_arg else ./. + "/${__strictix_to_path_arg}"

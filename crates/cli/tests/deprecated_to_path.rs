@@ -9,5 +9,7 @@ generate_tests! {
         "toPath x",
         r#"toPath "/abc/def""#,
         r#"builtins.toPath "/some/path""#,
+        r#"toPath __strictix_to_path_arg"#,
+        r#"toPath (if cond then "/abs" else "rel")"#,
     ],
 }

@@ -1,10 +1,7 @@
 use crate::{Metadata, Report, Rule, Suggestion};
 
 use macros::lint;
-use rnix::{
-    NodeOrToken, SyntaxElement, SyntaxKind,
-    ast::{Apply, Expr},
-};
+use rnix::{NodeOrToken, SyntaxElement, SyntaxKind, ast::Apply};
 use rowan::ast::AstNode as _;
 
 /// ## What it does
@@ -57,34 +54,31 @@ impl Rule for DeprecatedToPath {
             "`{lambda_path}` is deprecated, see `:doc builtins.toPath` within the REPL for more"
         );
 
-        Some(match absolute_string_replacement(&apply) {
-            Some(replacement) => {
-                self.report()
-                    .suggest(at, message, Suggestion::with_text(at, replacement))
-            }
-            None => self.report().diagnostic(at, message),
-        })
+        Some(self.report().suggest(
+            at,
+            message,
+            Suggestion::with_text(at, to_path_replacement(&apply)),
+        ))
     }
 }
 
-fn absolute_string_replacement(apply: &Apply) -> Option<String> {
-    let argument = apply.argument()?;
-    let Expr::Str(string) = argument else {
-        return None;
-    };
+fn to_path_replacement(apply: &Apply) -> String {
+    let apply_text = apply.syntax().to_string();
+    let binding = fresh_name(&apply_text, "__strictix_to_path_arg");
+    let argument = apply
+        .argument()
+        .map(|argument| argument.syntax().to_string())
+        .unwrap_or_default();
 
-    if string
-        .syntax()
-        .children()
-        .any(|child| child.kind() == SyntaxKind::NODE_INTERPOL)
-    {
-        return None;
+    format!(
+        "let {binding} = builtins.toString ({argument}); in if builtins.substring 0 1 {binding} == \"/\" then /. + {binding} else ./. + \"/${{{binding}}}\""
+    )
+}
+
+fn fresh_name(haystack: &str, base: &str) -> String {
+    let mut candidate = base.to_string();
+    while haystack.contains(&candidate) {
+        candidate.push('_');
     }
-
-    let string_text = string.to_string();
-    if !string_text.starts_with("\"/") {
-        return None;
-    }
-
-    Some(format!("/. + {string_text}"))
+    candidate
 }
