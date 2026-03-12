@@ -52,7 +52,8 @@ impl Parse for MacroInvocation {
 
 pub fn generate_tests(input: TokenStream) -> TokenStream {
     let MacroInvocation { rule, expressions } = parse_macro_input!(input as MacroInvocation);
-    expressions
+    let property_test = make_property_test(&rule, &expressions);
+    let generated_tests = expressions
         .into_iter()
         .map(|nix_expression| {
             let lint_test = make_test(&rule, TestKind::Lint, &nix_expression);
@@ -67,8 +68,14 @@ pub fn generate_tests(input: TokenStream) -> TokenStream {
                 #fix_roundtrip_test
             }
         })
-        .collect::<proc_macro2::TokenStream>()
-        .into()
+        .collect::<proc_macro2::TokenStream>();
+
+    quote! {
+        #generated_tests
+
+        #property_test
+    }
+    .into()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -116,6 +123,36 @@ fn make_test(rule: &Ident, kind: TestKind, nix_expression: &Expr) -> proc_macro2
                     let expression = #nix_expression;
                     _utils::assert_fix_roundtrip(expression).unwrap();
                 }
+            }
+        }
+    }
+}
+
+fn make_property_test(
+    rule: &Ident,
+    expressions: &Punctuated<Expr, Comma>,
+) -> proc_macro2::TokenStream {
+    let test_name = format!("{rule}_fix_properties");
+    let test_ident = Ident::new(&test_name, rule.span());
+    let expression_cases = expressions.iter().map(|expression| {
+        quote! { proptest::strategy::Just(#expression) }
+    });
+    let rule_name = rule.to_string();
+
+    quote! {
+        proptest::proptest! {
+            #![proptest_config(proptest::test_runner::Config {
+                failure_persistence: None,
+                .. proptest::test_runner::Config::default()
+            })]
+
+            #[test]
+            fn #test_ident(
+                expression in proptest::prop_oneof![#(#expression_cases),*],
+                prefix in _utils::trivia_strategy(),
+                suffix in _utils::trivia_strategy(),
+            ) {
+                _utils::assert_rewrite_invariants(#rule_name, expression, &prefix, &suffix).unwrap();
             }
         }
     }
