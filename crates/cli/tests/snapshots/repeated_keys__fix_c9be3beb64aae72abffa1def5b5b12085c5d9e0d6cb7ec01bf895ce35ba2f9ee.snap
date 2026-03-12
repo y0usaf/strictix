@@ -1,0 +1,23 @@
+---
+source: crates/cli/tests/repeated_keys.rs
+expression: "\"{\\n  foo.a = 1;\\n  bar = 2;\\n  foo.b =\\n    let\\n      x = 1;\\n    in\\n      x;\\n  foo.c = 3;\\n}\\n\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,11 +1,10 @@
+ {
+-  foo.a = 1;
++  foo = {
++    a = 1;
++    b =
++        1;
++    c = 3;
++  };
+   bar = 2;
+-  foo.b =
+-    let
+-      x = 1;
+-    in
+-      x;
+-  foo.c = 3;
+ }

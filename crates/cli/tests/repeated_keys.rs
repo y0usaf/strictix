@@ -38,5 +38,25 @@ generate_tests! {
               foo.baz.bar5 = 5;
             }
         "},
+        indoc! {"
+            {
+              foo.a = 1;
+              bar = 2;
+              foo.b =
+                let
+                  x = 1;
+                in
+                  x;
+              foo.c = 3;
+            }
+        "},
+        indoc! {"
+            {
+              foo.a = 1;
+              # keep this comment near the removed occurrence
+              foo.b = 2;
+              foo.c = 3;
+            }
+        "},
     ],
 }
