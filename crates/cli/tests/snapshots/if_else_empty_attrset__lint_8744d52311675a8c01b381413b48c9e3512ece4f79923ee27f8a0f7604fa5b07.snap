@@ -1,0 +1,24 @@
+---
+source: crates/cli/tests/if_else_empty_attrset.rs
+expression: "\"if cond then {\\n  foo = 1;\\n  bar =\\n    let\\n      baz = 2;\\n    in\\n      baz;\\n} else {}\\n\""
+---
+[28] Warning: Prefer `lib.optionalAttrs` over `if cond then attrs else {}`
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ ╭─▶ if cond then {
+   ⋮ ⋮   
+ 8 │ ├─▶ } else {}
+   · │               
+   · ╰─────────────── Use lib.optionalAttrs (cond) { ... } instead of if ... then { ... } else {}
+───╯
+[30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:5:7]
+   │
+ 5 │       baz = 2;
+   ·       ────┬───  
+   ·           ╰───── baz is only used once; consider inlining
+   · 
+ 7 │       baz;
+   ·       ─┬─  
+   ·        ╰─── baz is only used once; consider inlining
+───╯

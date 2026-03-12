@@ -1,4 +1,4 @@
-use crate::{Metadata, Report, Rule};
+use crate::{Metadata, Report, Rule, Suggestion};
 
 use macros::lint;
 use rnix::{
@@ -61,12 +61,19 @@ impl Rule for IfElseEmptyAttrset {
         }
 
         let at = node.text_range();
-        Some(self.report().diagnostic(
+        Some(self.report().suggest(
             at,
             format!(
                 "Use `lib.optionalAttrs ({}) {{ ... }}` instead of `if ... then {{ ... }} else {{}}`",
                 cond.syntax()
             ),
+            Suggestion::with_text(at, optional_attrs_replacement(cond.syntax(), then_set.syntax())),
         ))
     }
+}
+
+fn optional_attrs_replacement(cond: &rnix::SyntaxNode, then_body: &rnix::SyntaxNode) -> String {
+    format!(
+        "builtins.listToAttrs (if {cond} then builtins.mapAttrsToList (name: value: {{ inherit name value; }}) {then_body} else [])"
+    )
 }
