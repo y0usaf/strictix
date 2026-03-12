@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/unused_pattern_bind.rs
+expression: "\"args @ { x, y }: x + y\""
+---
+[W32] Warning: This pattern binding is never used
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ args @ { x, y }: x + y
+   · ───────┬───────  
+   ·        ╰───────── args is never used; remove the redundant pattern binding
+───╯

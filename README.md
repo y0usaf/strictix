@@ -113,14 +113,15 @@ Inherited from `statix`:
 | W06  | `collapsible_let_in`     | ✓        | Merge nested `let in` expressions                   |
 | W07  | `eta_reduction`          | ✓        | `x: f x` → `f`                                      |
 | W08  | `useless_parens`         | ✓        | Remove unnecessary parentheses                      |
+| W09  | `unquoted_splice`        | ✓        | Quote bare `${...}` splices in string contexts      |
 | W10  | `empty_pattern`          | ✓        | `{...}: expr` → `_: expr`                           |
 | W11  | `redundant_pattern_bind` | ✓        | `{...} @ args: expr` → `args: expr`                 |
 | W12  | `unquoted_uri`           | ✓        | Quote bare URIs in string contexts                  |
 | W14  | `empty_inherit`          | ✓        | Remove empty `inherit;`                             |
-| W17  | `deprecated_to_path`     | —        | Warn on deprecated `toPath`/`builtins.toPath` usage |
+| W17  | `deprecated_to_path`     | ✓\*      | Warn on deprecated `toPath`/`builtins.toPath` usage |
 | W18  | `bool_simplification`    | ✓        | `!(x == y)` → `x != y`, `!(x != y)` → `x == y`      |
 | W19  | `useless_has_attr`       | ✓        | `if x ? a then x.a else d` → `x.a or d`             |
-| W20  | `repeated_keys`          | —        | Suggest grouping repeated attrpath prefixes         |
+| W20  | `repeated_keys`          | ✓\*      | Suggest grouping repeated attrpath prefixes         |
 | W23  | `empty_list_concat`      | ✓        | `[] ++ x` → `x`                                     |
 
 Added by `strictix`:

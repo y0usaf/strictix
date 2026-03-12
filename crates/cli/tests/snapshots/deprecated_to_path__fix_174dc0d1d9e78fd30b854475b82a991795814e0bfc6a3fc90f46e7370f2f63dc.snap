@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/deprecated_to_path.rs
+expression: "\"builtins.toPath \\\"/some/path\\\"\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-builtins.toPath "/some/path"
++/. + "/some/path"

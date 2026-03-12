@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/unused_lambda_param.rs
+expression: "\"drv: { name = \\\"demo\\\"; }\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-drv: { name = "demo"; }
++_: { name = "demo"; }

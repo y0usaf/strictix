@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/unused_lambda_param.rs
+expression: "\"x: x\""
+---
+
