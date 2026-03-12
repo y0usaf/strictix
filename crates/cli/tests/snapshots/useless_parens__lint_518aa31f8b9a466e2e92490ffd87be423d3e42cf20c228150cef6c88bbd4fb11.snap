@@ -2,14 +2,14 @@
 source: crates/cli/tests/useless_parens.rs
 expression: "\"let h = ({ inherit (builtins) map; }); in null\""
 ---
-[W30] Warning: Let binding used only once; consider inlining
+[30] Warning: Let binding used only once; consider inlining
    ╭─[<temp_file_path>:1:5]
    │
  1 │ let h = ({ inherit (builtins) map; }); in null
    ·     ─────────────────┬────────────────  
    ·                      ╰────────────────── h is never used
 ───╯
-[W08] Warning: These parentheses can be omitted
+[08] Warning: These parentheses can be omitted
    ╭─[<temp_file_path>:1:9]
    │
  1 │ let h = ({ inherit (builtins) map; }); in null

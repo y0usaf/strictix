@@ -2,7 +2,7 @@
 source: crates/cli/tests/single_use_let.rs
 expression: "\"let\\n  a = 1;\\n  b = 2;\\nin\\n  a + b\\n\""
 ---
-[W30] Warning: Let binding used only once; consider inlining
+[30] Warning: Let binding used only once; consider inlining
    ╭─[<temp_file_path>:2:3]
    │
  2 │   a = 1;
@@ -11,6 +11,7 @@ expression: "\"let\\n  a = 1;\\n  b = 2;\\nin\\n  a + b\\n\""
  3 │   b = 2;
    ·   ───┬──  
    ·      ╰──── b is only used once; consider inlining
+   · 
  5 │   a + b
    ·   ┬  
    ·   ╰── a is only used once; consider inlining

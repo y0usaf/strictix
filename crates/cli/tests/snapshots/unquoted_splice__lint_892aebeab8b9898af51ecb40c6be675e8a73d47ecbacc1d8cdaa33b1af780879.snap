@@ -2,7 +2,7 @@
 source: crates/cli/tests/unquoted_splice.rs
 expression: "\"nixpkgs.legacyPackages.${system}\""
 ---
-[W09] Warning: Found unquoted splice expression
+[09] Warning: Found unquoted splice expression
    ╭─[<temp_file_path>:1:24]
    │
  1 │ nixpkgs.legacyPackages.${system}

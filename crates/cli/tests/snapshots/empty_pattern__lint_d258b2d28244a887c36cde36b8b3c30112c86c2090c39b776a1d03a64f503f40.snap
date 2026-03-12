@@ -2,7 +2,7 @@
 source: crates/cli/tests/empty_pattern.rs
 expression: "\"({ ... } @ inputs: inputs)\""
 ---
-[W11] Warning: Found redundant pattern bind in function argument
+[11] Warning: Found redundant pattern bind in function argument
    ╭─[<temp_file_path>:1:2]
    │
  1 │ ({ ... } @ inputs: inputs)
