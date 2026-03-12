@@ -2,7 +2,7 @@
 source: crates/cli/tests/empty_let_in.rs
 expression: "\"let in null\""
 ---
-[W02] Warning: Useless let-in expression
+[02] Warning: Useless let-in expression
    ╭─[<temp_file_path>:1:1]
    │
  1 │ let in null

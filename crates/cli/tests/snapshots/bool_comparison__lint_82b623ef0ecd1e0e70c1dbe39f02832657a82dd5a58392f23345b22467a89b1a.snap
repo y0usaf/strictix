@@ -2,7 +2,7 @@
 source: crates/cli/tests/bool_comparison.rs
 expression: "\"true == true\""
 ---
-[W01] Warning: Unnecessary comparison with boolean
+[01] Warning: Unnecessary comparison with boolean
    ╭─[<temp_file_path>:1:1]
    │
  1 │ true == true

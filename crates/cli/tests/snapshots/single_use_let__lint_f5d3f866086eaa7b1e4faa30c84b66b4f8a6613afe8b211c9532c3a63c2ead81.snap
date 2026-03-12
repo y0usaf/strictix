@@ -2,12 +2,13 @@
 source: crates/cli/tests/single_use_let.rs
 expression: "\"let\\n  x = 1;\\nin\\n  { inherit x; }\\n\""
 ---
-[W30] Warning: Let binding used only once; consider inlining
+[30] Warning: Let binding used only once; consider inlining
    ╭─[<temp_file_path>:2:3]
    │
  2 │   x = 1;
    ·   ───┬──  
    ·      ╰──── x is only used once; consider inlining
+   · 
  4 │   { inherit x; }
    ·     ─────┬────  
    ·          ╰────── x is only used once; consider inlining

@@ -2,7 +2,7 @@
 source: crates/cli/tests/repeated_keys.rs
 expression: "\"{\\n  foo.bar = 1;\\n  foo.bar.\\\"hello\\\" = 1;\\n  foo.again = 1;\\n}\\n\""
 ---
-[W20] Warning: Avoid repeated keys in attribute sets
+[20] Warning: Avoid repeated keys in attribute sets
    ╭─[<temp_file_path>:2:3]
    │
  2 │ ╭─▶   foo.bar = 1;
