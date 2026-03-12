@@ -1,6 +1,6 @@
 use std::{
     default::Default,
-    fmt, fs,
+    env, fmt, fs,
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -229,6 +229,9 @@ impl FromStr for OutFormat {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ConfFile {
     #[serde(default = "Vec::new")]
+    enabled: Vec<String>,
+
+    #[serde(default = "Vec::new")]
     disabled: Vec<String>,
 
     #[serde(default = "Vec::new")]
@@ -243,6 +246,8 @@ impl ConfFile {
     }
     pub fn discover<P: AsRef<Path>>(path: P) -> Result<Self, ConfigErr> {
         let canonical_path = fs::canonicalize(path.as_ref()).map_err(ConfigErr::InvalidPath)?;
+        let mut config = Self::from_global_path()?;
+
         for p in canonical_path.ancestors() {
             let strictix_toml_path = if p.is_dir() {
                 p.join("strictix.toml")
@@ -250,17 +255,23 @@ impl ConfFile {
                 p.to_path_buf()
             };
             if strictix_toml_path.exists() {
-                return Self::from_path(strictix_toml_path);
+                config.merge(Self::from_path(strictix_toml_path)?);
+                return Ok(config);
             }
         }
-        Ok(Self::default())
+        Ok(config)
     }
     #[must_use]
     pub fn dump(&self) -> String {
         let ideal_config = {
+            let enabled = vec![];
             let disabled = vec![];
             let ignore = vec![".direnv".into()];
-            Self { disabled, ignore }
+            Self {
+                enabled,
+                disabled,
+                ignore,
+            }
         };
         toml::ser::to_string_pretty(&ideal_config).unwrap()
     }
@@ -269,11 +280,141 @@ impl ConfFile {
         utils::lint_map_of(
             (*LINTS)
                 .iter()
+                .filter(|l| {
+                    self.enabled.is_empty() || self.enabled.iter().any(|name| name == l.name())
+                })
                 .filter(|l| !self.disabled.iter().any(|check| check == l.name()))
                 .copied()
                 .collect::<Vec<_>>()
                 .as_slice(),
         )
+    }
+
+    fn merge(&mut self, other: Self) {
+        if !other.enabled.is_empty() {
+            self.enabled = other.enabled;
+        }
+        self.disabled.extend(other.disabled);
+        self.ignore.extend(other.ignore);
+    }
+
+    fn from_global_path() -> Result<Self, ConfigErr> {
+        let Some(path) = Self::global_path() else {
+            return Ok(Self::default());
+        };
+        if path.exists() {
+            Self::from_path(path)
+        } else {
+            Ok(Self::default())
+        }
+    }
+
+    fn global_path() -> Option<PathBuf> {
+        if let Some(config_home) = env::var_os("XDG_CONFIG_HOME") {
+            return Some(
+                PathBuf::from(config_home)
+                    .join("strictix")
+                    .join("config.toml"),
+            );
+        }
+
+        env::var_os("HOME").map(|home| {
+            PathBuf::from(home)
+                .join(".config")
+                .join("strictix")
+                .join("config.toml")
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConfFile;
+
+    use std::{env, fs};
+
+    use tempfile::tempdir;
+
+    fn set_env_var(key: &str, value: &std::path::Path) {
+        // Tests mutate process-global environment and are kept local to this module.
+        unsafe { env::set_var(key, value) };
+    }
+
+    fn remove_env_var(key: &str) {
+        // Tests mutate process-global environment and are kept local to this module.
+        unsafe { env::remove_var(key) };
+    }
+
+    #[test]
+    fn discovers_global_config_from_xdg_path() {
+        let temp = tempdir().unwrap();
+        let config_dir = temp.path().join("xdg").join("strictix");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("config.toml"),
+            "enabled = [\"with_expression\"]\ndisabled = [\"empty_pattern\"]\n",
+        )
+        .unwrap();
+
+        set_env_var("XDG_CONFIG_HOME", &temp.path().join("xdg"));
+        remove_env_var("HOME");
+
+        let config = ConfFile::discover(temp.path()).unwrap();
+        let lints = config.lints();
+
+        assert!(
+            lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "with_expression")
+        );
+        assert!(
+            !lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "empty_pattern")
+        );
+        assert_eq!(lints.values().flatten().count(), 1);
+    }
+
+    #[test]
+    fn project_config_overrides_global_allowlist() {
+        let temp = tempdir().unwrap();
+        let xdg_home = temp.path().join("xdg");
+        let config_dir = xdg_home.join("strictix");
+        let project_dir = temp.path().join("project");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(
+            config_dir.join("config.toml"),
+            "enabled = [\"with_expression\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            project_dir.join("strictix.toml"),
+            "enabled = [\"empty_pattern\"]\n",
+        )
+        .unwrap();
+
+        set_env_var("XDG_CONFIG_HOME", &xdg_home);
+        remove_env_var("HOME");
+
+        let config = ConfFile::discover(&project_dir).unwrap();
+        let lints = config.lints();
+
+        assert!(
+            lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "empty_pattern")
+        );
+        assert!(
+            !lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "with_expression")
+        );
+        assert_eq!(lints.values().flatten().count(), 1);
     }
 }
 
