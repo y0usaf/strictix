@@ -8,10 +8,10 @@
         program = lib.getExe (
           pkgs.writeShellApplication {
             name = "cachix-push";
-            runtimeInputs = with pkgs; [
-              nix
-              jq
-              cachix
+            runtimeInputs = [
+              pkgs.nix
+              pkgs.jq
+              pkgs.cachix
             ];
             text = ''
               nix build --json \

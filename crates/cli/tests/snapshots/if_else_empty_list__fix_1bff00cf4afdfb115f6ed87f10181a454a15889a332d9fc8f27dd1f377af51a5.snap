@@ -1,0 +1,14 @@
+---
+source: crates/cli/tests/if_else_empty_list.rs
+expression: "\"if cond then [\\n  foo\\n  bar\\n  baz\\n] else []\\n\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,6 +1,6 @@
+-if cond then [
++lib.optionals cond [
+   foo
+   bar
+   baz
+-] else []
++]
