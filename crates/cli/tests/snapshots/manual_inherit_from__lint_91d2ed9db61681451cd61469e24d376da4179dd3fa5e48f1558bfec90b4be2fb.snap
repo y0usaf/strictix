@@ -6,6 +6,6 @@ expression: "\"let x.y.z.w = 2; in { w = x.y.z.w; }\""
    ╭─[<temp_file_path>:1:23]
    │
  1 │ let x.y.z.w = 2; in { w = x.y.z.w; }
-   ·                       ──────┬─────  
-   ·                             ╰─────── This assignment is better written with inherit
+   │                       ──────┬─────  
+   │                             ╰─────── This assignment is better written with inherit
 ───╯

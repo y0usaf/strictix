@@ -6,15 +6,15 @@ expression: "\"let a = 2; in { a = a; }\""
    ╭─[<temp_file_path>:1:5]
    │
  1 │ let a = 2; in { a = a; }
-   ·     ───┬──          ┬  
-   ·        ╰─────────────── a is only used once; consider inlining
-   ·                     │  
-   ·                     ╰── a is only used once; consider inlining
+   │     ───┬──          ┬  
+   │        ╰─────────────── a is only used once; consider inlining
+   │                     │  
+   │                     ╰── a is only used once; consider inlining
 ───╯
 [03] Warning: Assignment instead of inherit
    ╭─[<temp_file_path>:1:17]
    │
  1 │ let a = 2; in { a = a; }
-   ·                 ───┬──  
-   ·                    ╰──── This assignment is better written with inherit
+   │                 ───┬──  
+   │                    ╰──── This assignment is better written with inherit
 ───╯

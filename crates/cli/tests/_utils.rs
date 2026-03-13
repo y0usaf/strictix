@@ -152,7 +152,9 @@ fn apply_rule_fixes(lint_name: &str, source: &str) -> anyhow::Result<String> {
         let before_pass = rewritten.clone();
         for report in reorder(reports) {
             let before = rewritten.clone();
-            let range = report.range();
+            let range = report
+                .range()
+                .expect("report passed suggestion filter but has no range");
             report.apply(&mut rewritten);
             assert_report_stability(&before, &rewritten, range, lint_name);
         }
@@ -230,17 +232,17 @@ fn reorder(mut reports: Vec<Report>) -> Vec<Report> {
     use std::collections::VecDeque;
 
     reports.sort_by(|a, b| {
-        let a_range = a.range();
-        let b_range = b.range();
-        a_range.end().partial_cmp(&b_range.end()).unwrap()
+        let a_range = a.range().expect("report in reorder has no range");
+        let b_range = b.range().expect("report in reorder has no range");
+        a_range.end().cmp(&b_range.end())
     });
 
     reports
         .into_iter()
         .fold(VecDeque::new(), |mut deque: VecDeque<Report>, report| {
-            let report_range = report.range();
-            if let Some(front_range) = deque.front().map(Report::range) {
-                if report_range.start() > front_range.end() {
+            let report_range = report.range().expect("report in reorder has no range");
+            if let Some(front_range) = deque.front().and_then(Report::range) {
+                if report_range.start() >= front_range.end() {
                     deque.push_front(report);
                 }
             } else {

@@ -6,19 +6,19 @@ expression: "\"{\\n  foo.a = 1;\\n  # keep this comment near the removed occurre
    ╭─[<temp_file_path>:2:3]
    │
  2 │         foo.a = 1;
-   ·         ──┬──┬────  
-   ·           ╰───────── The key foo is first assigned here ...
-   ·              │      
-   ·              ╰────── ... and here. Try foo = { a=...; b=...; c=...; } instead.
+   │         ──┬──┬────  
+   │           ╰───────── The key foo is first assigned here ...
+   │              │      
+   │              ╰────── ... and here. Try foo = { a=...; b=...; c=...; } instead.
  3 │ ╭───▶   # keep this comment near the removed occurrence
  4 │ ├───▶   foo.b = 2;
-   · │       ──┬──     │  
-   · │         ╰────────── ... repeated here ...
-   · │                 │  
-   · ╰──────────────────── ... and here. Try foo = { a=...; b=...; c=...; } instead.
-   ·                   │  
-   ·   ╭───────────────╯  
+   │ │       ──┬──     │  
+   │ │         ╰────────── ... repeated here ...
+   │ │                 │  
+   │ ╰──────────────────── ... and here. Try foo = { a=...; b=...; c=...; } instead.
+   │                   │  
+   │   ╭───────────────╯  
  5 │   ├─▶   foo.c = 3;
-   ·   │                  
-   ·   ╰────────────────── ... and here. Try foo = { a=...; b=...; c=...; } instead.
+   │   │                  
+   │   ╰────────────────── ... and here. Try foo = { a=...; b=...; c=...; } instead.
 ───╯

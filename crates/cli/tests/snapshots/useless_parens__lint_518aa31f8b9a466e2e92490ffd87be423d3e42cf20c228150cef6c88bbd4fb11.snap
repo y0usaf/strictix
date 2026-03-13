@@ -6,13 +6,13 @@ expression: "\"let h = ({ inherit (builtins) map; }); in null\""
    ╭─[<temp_file_path>:1:5]
    │
  1 │ let h = ({ inherit (builtins) map; }); in null
-   ·     ─────────────────┬────────────────  
-   ·                      ╰────────────────── h is never used
+   │     ─────────────────┬────────────────  
+   │                      ╰────────────────── h is never used
 ───╯
 [08] Warning: These parentheses can be omitted
    ╭─[<temp_file_path>:1:9]
    │
  1 │ let h = ({ inherit (builtins) map; }); in null
-   ·         ──────────────┬──────────────  
-   ·                       ╰──────────────── Useless parentheses around value in binding
+   │         ──────────────┬──────────────  
+   │                       ╰──────────────── Useless parentheses around value in binding
 ───╯

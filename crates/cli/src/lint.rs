@@ -68,11 +68,13 @@ pub mod main {
                 "✓".fg(Color::Green),
                 files.fg(Color::Fixed(8)),
             );
-            std::process::exit(0);
+            return Ok(());
         }
 
         for r in &results {
-            stdout.write(r, &vfs, check_config.format).unwrap();
+            if stdout.write(r, &vfs, check_config.format).is_err() {
+                break;
+            }
         }
 
         let warning_count: usize = results.iter().map(|r| r.reports.len()).sum();
@@ -90,6 +92,6 @@ pub mod main {
             if file_count == 1 { "file" } else { "files" },
         );
 
-        std::process::exit(1);
+        Err(StatixErr::LintsFailed)
     }
 }

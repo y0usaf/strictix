@@ -7,6 +7,6 @@ expression: "\"{\\n  inherit (spec) command;\\n  inherit (spec) args;\\n}\\n\""
    │
  2 │ ╭─▶   inherit (spec) command;
  3 │ ├─▶   inherit (spec) args;
-   · │                            
-   · ╰──────────────────────────── Merge inherit (spec) ...; statements into one
+   │ │                            
+   │ ╰──────────────────────────── Merge inherit (spec) ...; statements into one
 ───╯

@@ -47,8 +47,8 @@ fn write_stderr<T: Write>(
     vfs: &ReadOnlyVfs,
 ) -> io::Result<()> {
     let file_id = lint_result.file_id;
-    let src = str::from_utf8(vfs.get(file_id)).unwrap();
-    let path = vfs.file_path(file_id);
+    let src = str::from_utf8(vfs.get(file_id).expect("invalid file id")).unwrap();
+    let path = vfs.file_path(file_id).expect("invalid file id");
     let range = |at: TextRange| at.start().into()..at.end().into();
     let src_id = path.to_str().unwrap_or("<unknown>");
     for report in &lint_result.reports {
@@ -97,9 +97,9 @@ fn write_errfmt<T: Write>(
     vfs: &ReadOnlyVfs,
 ) -> io::Result<()> {
     let file_id = lint_result.file_id;
-    let src = str::from_utf8(vfs.get(file_id)).unwrap();
+    let src = str::from_utf8(vfs.get(file_id).expect("invalid file id")).unwrap();
     let line_index = LineIndex::new(src);
-    let path = vfs.file_path(file_id);
+    let path = vfs.file_path(file_id).expect("invalid file id");
     for report in &lint_result.reports {
         for diagnostic in &report.diagnostics {
             let (line, col) = line_index.position(diagnostic.at.start());
@@ -197,8 +197,8 @@ mod json {
         vfs: &ReadOnlyVfs,
     ) -> io::Result<()> {
         let file_id = lint_result.file_id;
-        let path = vfs.file_path(file_id);
-        let src = vfs.get_str(file_id);
+        let path = vfs.file_path(file_id).expect("invalid file id");
+        let src = vfs.get_str(file_id).expect("invalid file id");
         let line_index = super::LineIndex::new(src);
         let report = lint_result
             .reports

@@ -18,14 +18,11 @@ struct MacroInvocation {
 impl Parse for MacroInvocation {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         const RULE_VALUE: &str = "rule";
-        const EXPRESSSIONS_VALUE: &str = "expressions";
+        const EXPRESSIONS_VALUE: &str = "expressions";
         let rule_attribute = input.parse::<Ident>()?;
 
         if rule_attribute != RULE_VALUE {
-            return Err(Error::new(
-                rule_attribute.span(),
-                "expected `{RULE_VALUE:?}`",
-            ));
+            return Err(Error::new(rule_attribute.span(), "expected `rule`"));
         }
 
         input.parse::<Token![:]>()?;
@@ -33,11 +30,8 @@ impl Parse for MacroInvocation {
         input.parse::<Token![,]>()?;
         let expressions = input.parse::<Ident>()?;
 
-        if expressions != EXPRESSSIONS_VALUE {
-            return Err(Error::new(
-                expressions.span(),
-                "expected `{EXPRESSSIONS_VALUE:?}`",
-            ));
+        if expressions != EXPRESSIONS_VALUE {
+            return Err(Error::new(expressions.span(), "expected `expressions`"));
         }
 
         input.parse::<Token![:]>()?;

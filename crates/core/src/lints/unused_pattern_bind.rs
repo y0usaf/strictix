@@ -1,9 +1,9 @@
-use crate::{Metadata, Report, Rule, Suggestion};
+use crate::{Metadata, Report, Rule, Suggestion, utils};
 
 use macros::lint;
 use rnix::{
-    NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode,
-    ast::{Ident, Lambda, Pattern},
+    NodeOrToken, SyntaxElement, SyntaxKind,
+    ast::{Lambda, Pattern},
 };
 use rowan::ast::AstNode as _;
 
@@ -52,7 +52,7 @@ impl Rule for UnusedPatternBind {
         let lambda = node.ancestors().find_map(Lambda::cast)?;
         let body = lambda.body()?;
 
-        if mentions_ident(&ident, body.syntax()) {
+        if utils::mentions_ident(&ident.to_string(), body.syntax()) {
             return None;
         }
 
@@ -73,12 +73,4 @@ impl Rule for UnusedPatternBind {
             Suggestion::with_text(at, replacement),
         ))
     }
-}
-
-fn mentions_ident(ident: &Ident, node: &SyntaxNode) -> bool {
-    if let Some(node_ident) = Ident::cast(node.clone()) {
-        return node_ident.to_string() == ident.to_string();
-    }
-
-    node.children().any(|child| mentions_ident(ident, &child))
 }

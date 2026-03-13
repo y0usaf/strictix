@@ -6,10 +6,10 @@ expression: "\"let\\n  dev = \\\"/dev/sda\\\";\\nin\\n  ''mount ${dev} /mnt''\\n
    ╭─[<temp_file_path>:2:3]
    │
  2 │   dev = "/dev/sda";
-   ·   ────────┬────────  
-   ·           ╰────────── dev is only used once; consider inlining
-   · 
+   │   ────────┬────────  
+   │           ╰────────── dev is only used once; consider inlining
+   │ 
  4 │   ''mount ${dev} /mnt''
-   ·           ───┬──  
-   ·              ╰──── dev is only used once; consider inlining
+   │           ───┬──  
+   │              ╰──── dev is only used once; consider inlining
 ───╯

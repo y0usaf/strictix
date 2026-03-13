@@ -6,10 +6,10 @@ expression: "\"let\\n  x = 1;\\nin\\n  { inherit x; }\\n\""
    ╭─[<temp_file_path>:2:3]
    │
  2 │   x = 1;
-   ·   ───┬──  
-   ·      ╰──── x is only used once; consider inlining
-   · 
+   │   ───┬──  
+   │      ╰──── x is only used once; consider inlining
+   │ 
  4 │   { inherit x; }
-   ·     ─────┬────  
-   ·          ╰────── x is only used once; consider inlining
+   │     ─────┬────  
+   │          ╰────── x is only used once; consider inlining
 ───╯

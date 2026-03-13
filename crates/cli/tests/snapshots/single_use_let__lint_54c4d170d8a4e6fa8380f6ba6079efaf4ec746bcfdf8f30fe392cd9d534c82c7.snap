@@ -6,10 +6,10 @@ expression: "\"let\\n  x = someExpr;\\nin\\n  \\\"value: ${x}\\\"\\n\""
    ╭─[<temp_file_path>:2:3]
    │
  2 │   x = someExpr;
-   ·   ──────┬──────  
-   ·         ╰──────── x is only used once; consider inlining
-   · 
+   │   ──────┬──────  
+   │         ╰──────── x is only used once; consider inlining
+   │ 
  4 │   "value: ${x}"
-   ·           ──┬─  
-   ·             ╰─── x is only used once; consider inlining
+   │           ──┬─  
+   │             ╰─── x is only used once; consider inlining
 ───╯

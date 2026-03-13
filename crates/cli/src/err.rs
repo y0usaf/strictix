@@ -18,16 +18,8 @@ pub enum ConfigErr {
     ConfFileVersionParse(String),
 }
 
-// #[derive(Error, Debug)]
-// pub enum LintErr {
-//     #[error("[{0}] syntax error: {1}")]
-//     Parse(PathBuf, ParseError),
-// }
-
 #[derive(Error, Debug)]
 pub enum FixErr {
-    // #[error("[{0}] syntax error: {1}")]
-    // Parse(PathBuf, ParseError),
     #[error("path error: {0}")]
     InvalidPath(#[from] io::Error),
 }
@@ -52,8 +44,6 @@ pub enum ExplainErr {
 
 #[derive(Error, Debug)]
 pub enum StatixErr {
-    // #[error("linter error: {0}")]
-    // Lint(#[from] LintErr),
     #[error("fixer error: {0}")]
     Fix(#[from] FixErr),
     #[error("single fix error: {0}")]
@@ -62,4 +52,6 @@ pub enum StatixErr {
     Config(#[from] ConfigErr),
     #[error("explain error: {0}")]
     Explain(#[from] ExplainErr),
+    #[error("lint check failed")]
+    LintsFailed,
 }

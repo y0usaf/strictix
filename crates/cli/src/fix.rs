@@ -87,7 +87,13 @@ pub mod main {
 
     pub fn single(single_config: &SingleConfig) -> Result<(), StatixErr> {
         let vfs = single_config.vfs()?;
-        let entry = vfs.iter().next().unwrap();
+        let entry = vfs
+            .iter()
+            .next()
+            .ok_or(FixErr::InvalidPath(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "empty VFS",
+            )))?;
         let path = entry.file_path.display().to_string();
         let original_src = entry.contents;
         let (line, col) = single_config.position;

@@ -6,6 +6,6 @@ expression: "\"{} // { a = 1; }\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ {} // { a = 1; }
-   · ────────┬───────  
-   ·         ╰───────── Merging with an empty attrset {} is a no-op
+   │ ────────┬───────  
+   │         ╰───────── Merging with an empty attrset {} is a no-op
 ───╯

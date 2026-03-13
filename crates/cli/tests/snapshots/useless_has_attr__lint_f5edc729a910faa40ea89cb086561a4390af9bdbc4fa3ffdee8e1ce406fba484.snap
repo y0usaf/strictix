@@ -6,6 +6,6 @@ expression: "\"if x ? a then x.a else b.c\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ if x ? a then x.a else b.c
-   · ─────────────┬────────────  
-   ·              ╰────────────── Consider using x.a or b.c instead of this if expression
+   │ ─────────────┬────────────  
+   │              ╰────────────── Consider using x.a or b.c instead of this if expression
 ───╯

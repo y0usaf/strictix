@@ -6,40 +6,40 @@ expression: "\"let\\n  a = 2;\\n  b = 3;\\nin\\n  let\\n    c = 5;\\n    d = 6;\
    ╭─[<temp_file_path>:1:1]
    │
  1 │ ╭───▶ let
-   ⋮ ⋮     
+   ┆ ┆     
  5 │ │ ╭─▶   let
-   ⋮ ⋮ ⋮   
+   ┆ ┆ ┆   
  9 │ │ ├─▶   a + b + c + d
-   · │ │                 │   
-   · │ ╰───────────────────── This let in expression is nested
-   · │                   │   
-   · ╰───────────────────┴─── This let in expression contains a nested let in expression
+   │ │ │                 │   
+   │ │ ╰───────────────────── This let in expression is nested
+   │ │                   │   
+   │ ╰───────────────────┴─── This let in expression contains a nested let in expression
 ───╯
 [30] Warning: Let binding used only once; consider inlining
    ╭─[<temp_file_path>:2:3]
    │
  2 │   a = 2;
-   ·   ───┬──  
-   ·      ╰──── a is only used once; consider inlining
+   │   ───┬──  
+   │      ╰──── a is only used once; consider inlining
  3 │   b = 3;
-   ·   ───┬──  
-   ·      ╰──── b is only used once; consider inlining
-   · 
+   │   ───┬──  
+   │      ╰──── b is only used once; consider inlining
+   │ 
  9 │   a + b + c + d
-   ·   ┬  
-   ·   ╰── a is only used once; consider inlining
+   │   ┬  
+   │   ╰── a is only used once; consider inlining
 ───╯
 [30] Warning: Let binding used only once; consider inlining
    ╭─[<temp_file_path>:6:5]
    │
  6 │     c = 5;
-   ·     ───┬──  
-   ·        ╰──── c is only used once; consider inlining
+   │     ───┬──  
+   │        ╰──── c is only used once; consider inlining
  7 │     d = 6;
-   ·     ───┬──  
-   ·        ╰──── d is only used once; consider inlining
-   · 
+   │     ───┬──  
+   │        ╰──── d is only used once; consider inlining
+   │ 
  9 │   a + b + c + d
-   ·           ┬  
-   ·           ╰── c is only used once; consider inlining
+   │           ┬  
+   │           ╰── c is only used once; consider inlining
 ───╯

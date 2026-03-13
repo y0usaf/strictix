@@ -6,10 +6,10 @@ expression: "\"let\\n  attrs = { a = 1; };\\nin\\n  { inherit (attrs) a; }\\n\""
    ╭─[<temp_file_path>:2:3]
    │
  2 │   attrs = { a = 1; };
-   ·   ─────────┬─────────  
-   ·            ╰─────────── attrs is only used once; consider inlining
-   · 
+   │   ─────────┬─────────  
+   │            ╰─────────── attrs is only used once; consider inlining
+   │ 
  4 │   { inherit (attrs) a; }
-   ·              ──┬──  
-   ·                ╰──── attrs is only used once; consider inlining
+   │              ──┬──  
+   │                ╰──── attrs is only used once; consider inlining
 ───╯

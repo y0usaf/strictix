@@ -1,9 +1,9 @@
-use crate::{Metadata, Report, Rule, Suggestion, make};
+use crate::{Metadata, Report, Rule, Suggestion, make, utils};
 
 use macros::lint;
 use rnix::{
-    NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode,
-    ast::{Ident, Lambda, Param},
+    NodeOrToken, SyntaxElement, SyntaxKind,
+    ast::{Lambda, Param},
 };
 use rowan::ast::AstNode as _;
 
@@ -52,7 +52,7 @@ impl Rule for UnusedLambdaParam {
         }
 
         let body = lambda_expr.body()?;
-        if mentions_ident(&ident, body.syntax()) {
+        if utils::mentions_ident(&ident.to_string(), body.syntax()) {
             return None;
         }
 
@@ -63,12 +63,4 @@ impl Rule for UnusedLambdaParam {
             Suggestion::with_replacement(at, make::ident("_").syntax().clone()),
         ))
     }
-}
-
-fn mentions_ident(ident: &Ident, node: &SyntaxNode) -> bool {
-    if let Some(node_ident) = Ident::cast(node.clone()) {
-        return node_ident.to_string() == ident.to_string();
-    }
-
-    node.children().any(|child| mentions_ident(ident, &child))
 }

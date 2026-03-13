@@ -6,13 +6,13 @@ expression: "\"with { hello = pkgs.hello; }; 1\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ with { hello = pkgs.hello; }; 1
-   · ───────────────┬───────────────  
-   ·                ╰───────────────── with { hello = pkgs.hello; }; introduces implicit scope; use explicit attribute access or inherit instead
+   │ ───────────────┬───────────────  
+   │                ╰───────────────── with { hello = pkgs.hello; }; introduces implicit scope; use explicit attribute access or inherit instead
 ───╯
 [04] Warning: Assignment instead of inherit from
    ╭─[<temp_file_path>:1:8]
    │
  1 │ with { hello = pkgs.hello; }; 1
-   ·        ─────────┬─────────  
-   ·                 ╰─────────── This assignment is better written with inherit
+   │        ─────────┬─────────  
+   │                 ╰─────────── This assignment is better written with inherit
 ───╯

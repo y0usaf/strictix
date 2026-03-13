@@ -6,6 +6,6 @@ expression: "\"with pkgs; [ git curl ]\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ with pkgs; [ git curl ]
-   · ───────────┬───────────  
-   ·            ╰───────────── with pkgs; introduces implicit scope; use explicit attribute access or inherit instead
+   │ ───────────┬───────────  
+   │            ╰───────────── with pkgs; introduces implicit scope; use explicit attribute access or inherit instead
 ───╯

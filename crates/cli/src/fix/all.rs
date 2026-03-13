@@ -21,9 +21,9 @@ fn reorder(mut reports: Vec<Report>) -> Vec<Report> {
     use std::collections::VecDeque;
 
     reports.sort_by(|a, b| {
-        let a_range = a.range();
-        let b_range = b.range();
-        a_range.end().partial_cmp(&b_range.end()).unwrap()
+        let a_end = a.range().map(rnix::TextRange::end);
+        let b_end = b.range().map(rnix::TextRange::end);
+        a_end.cmp(&b_end)
     });
 
     reports
@@ -31,8 +31,14 @@ fn reorder(mut reports: Vec<Report>) -> Vec<Report> {
         .fold(VecDeque::new(), |mut deque: VecDeque<Report>, new_elem| {
             let front = deque.front();
             let new_range = new_elem.range();
-            if let Some(front_range) = front.map(lib::Report::range) {
-                if new_range.start() > front_range.end() {
+            if let Some(Some(front_range)) = front.map(lib::Report::range) {
+                if let Some(new_range) = new_range {
+                    // TextRange::end() is exclusive, so start >= end means
+                    // ranges are non-overlapping (abutting ranges are safe to apply together)
+                    if new_range.start() >= front_range.end() {
+                        deque.push_front(new_elem);
+                    }
+                } else {
                     deque.push_front(new_elem);
                 }
             } else {
@@ -54,9 +60,11 @@ impl<'a> Iterator for FixResult<'a> {
         let reordered = reorder(all_reports);
         let fixed = reordered
             .iter()
-            .map(|r| Fixed {
-                at: r.range(),
-                code: r.code,
+            .filter_map(|r| {
+                Some(Fixed {
+                    at: r.range()?,
+                    code: r.code,
+                })
             })
             .collect::<Vec<_>>();
         for report in reordered {
@@ -71,9 +79,22 @@ impl<'a> Iterator for FixResult<'a> {
     }
 }
 
+const MAX_FIX_PASSES: usize = 10;
+
 pub fn all_with<'a>(src: &'a str, lints: &'a LintMap) -> Option<FixResult<'a>> {
     let src = Cow::from(src);
     let _ = Root::parse(&src).ok().ok()?;
     let initial = FixResult::empty(src, lints);
-    initial.into_iter().last()
+    let mut last = None;
+    let mut passes = 0usize;
+    for result in initial.into_iter().take(MAX_FIX_PASSES) {
+        passes += 1;
+        last = Some(result);
+    }
+    if passes == MAX_FIX_PASSES {
+        eprintln!(
+            "warning: fix did not converge after {MAX_FIX_PASSES} passes; some fixes may be incomplete"
+        );
+    }
+    last
 }

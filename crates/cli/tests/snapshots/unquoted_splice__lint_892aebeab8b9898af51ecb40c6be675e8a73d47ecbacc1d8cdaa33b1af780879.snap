@@ -6,6 +6,6 @@ expression: "\"nixpkgs.legacyPackages.${system}\""
    ╭─[<temp_file_path>:1:24]
    │
  1 │ nixpkgs.legacyPackages.${system}
-   ·                        ────┬────  
-   ·                            ╰────── Consider quoting this splice expression
+   │                        ────┬────  
+   │                            ╰────── Consider quoting this splice expression
 ───╯

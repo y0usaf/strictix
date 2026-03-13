@@ -41,9 +41,9 @@ use rowan::ast::AstNode as _;
     code = 5,
     match_with = SyntaxKind::NODE_LEGACY_LET
 )]
-struct ManualInherit;
+struct LegacyLetSyntax;
 
-impl Rule for ManualInherit {
+impl Rule for LegacyLetSyntax {
     fn validate(&self, node: &SyntaxElement) -> Option<Report> {
         let NodeOrToken::Node(node) = node else {
             return None;

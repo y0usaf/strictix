@@ -6,6 +6,6 @@ expression: "\"let\\n  x = 1;\\nin\\n  null\\n\""
    ╭─[<temp_file_path>:2:3]
    │
  2 │   x = 1;
-   ·   ───┬──  
-   ·      ╰──── x is never used
+   │   ───┬──  
+   │      ╰──── x is never used
 ───╯

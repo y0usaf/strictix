@@ -19,6 +19,11 @@ fn generate_self_impl(struct_name: &Ident) -> TokenStream2 {
     }
 }
 
+/// Derives `Lint`, `Metadata`, `Explain`, and `Rule` impls for a lint struct.
+///
+/// The generated code references `crate::Lint`, `crate::Metadata`, `crate::Report`,
+/// and other items from `strictix-core`. This macro is intended for use within the
+/// `strictix-core` crate only.
 #[proc_macro_attribute]
 pub fn lint(attr: TokenStream, item: TokenStream) -> TokenStream {
     let struct_item = parse_macro_input!(item as ItemStruct);
@@ -32,9 +37,8 @@ pub fn lint(attr: TokenStream, item: TokenStream) -> TokenStream {
     (quote! {
         #struct_item
 
-        ::lazy_static::lazy_static! {
-            pub static ref LINT: Box<dyn crate::Lint> = Box::new(#struct_name::new());
-        }
+        pub static LINT: std::sync::LazyLock<Box<dyn crate::Lint>> =
+            std::sync::LazyLock::new(|| Box::new(#struct_name::new()));
 
         #self_impl
         #meta_impl

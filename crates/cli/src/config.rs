@@ -1,6 +1,6 @@
 use std::{
     default::Default,
-    env, fmt, fs,
+    env, fmt, fs, io,
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 use vfs::ReadOnlyVfs;
 
 #[derive(Parser, Debug)]
-#[clap(version, author, about)]
+#[command(version, author, about)]
 pub struct Opts {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     pub cmd: SubCommand,
 }
 
@@ -38,29 +38,29 @@ pub enum SubCommand {
 #[derive(Parser, Debug)]
 pub struct Check {
     /// File or directory to run check on
-    #[clap(default_value = ".", parse(from_os_str))]
+    #[arg(default_value = ".")]
     target: PathBuf,
 
     /// Globs of file patterns to skip
-    #[clap(short, long)]
+    #[arg(short, long)]
     ignore: Vec<String>,
 
     /// Don't respect .gitignore files
-    #[clap(short, long)]
+    #[arg(short, long)]
     unrestricted: bool,
 
     /// Output format.
     #[cfg_attr(feature = "json", doc = "Supported values: stderr, errfmt, json")]
     #[cfg_attr(not(feature = "json"), doc = "Supported values: stderr, errfmt")]
-    #[clap(short = 'o', long, default_value_t, parse(try_from_str))]
+    #[arg(short = 'o', long, default_value_t)]
     pub format: OutFormat,
 
     /// Path to strictix.toml or its parent directory
-    #[clap(short = 'c', long = "config", default_value = ".")]
+    #[arg(short = 'c', long = "config", default_value = ".")]
     pub conf_path: PathBuf,
 
     /// Enable "streaming" mode, accept file on stdin, output diagnostics on stdout
-    #[clap(short, long = "stdin")]
+    #[arg(short, long = "stdin")]
     pub streaming: bool,
 }
 
@@ -79,27 +79,27 @@ impl Check {
 #[derive(Parser, Debug)]
 pub struct Fix {
     /// File or directory to run fix on
-    #[clap(default_value = ".", parse(from_os_str))]
+    #[arg(default_value = ".")]
     target: PathBuf,
 
     /// Globs of file patterns to skip
-    #[clap(short, long)]
+    #[arg(short, long)]
     ignore: Vec<String>,
 
     /// Don't respect .gitignore files
-    #[clap(short, long)]
+    #[arg(short, long)]
     unrestricted: bool,
 
     /// Do not fix files in place, display a diff instead
-    #[clap(short, long = "dry-run")]
+    #[arg(short, long = "dry-run")]
     pub diff_only: bool,
 
     /// Path to strictix.toml or its parent directory
-    #[clap(short = 'c', long = "config", default_value = ".")]
+    #[arg(short = 'c', long = "config", default_value = ".")]
     pub conf_path: PathBuf,
 
     /// Enable "streaming" mode, accept file on stdin, output diagnostics on stdout
-    #[clap(short, long = "stdin")]
+    #[arg(short, long = "stdin")]
     pub streaming: bool,
 }
 
@@ -143,23 +143,22 @@ impl Fix {
 #[derive(Parser, Debug)]
 pub struct Single {
     /// File to run single-fix on
-    #[clap(parse(from_os_str))]
     pub target: Option<PathBuf>,
 
     /// Position to attempt a fix at
-    #[clap(short, long, parse(try_from_str = parse_line_col))]
+    #[arg(short, long, value_parser = parse_line_col)]
     pub position: (usize, usize),
 
     /// Do not fix files in place, display a diff instead
-    #[clap(short, long = "dry-run")]
+    #[arg(short, long = "dry-run")]
     pub diff_only: bool,
 
     /// Enable "streaming" mode, accept file on stdin, output diagnostics on stdout
-    #[clap(short, long = "stdin")]
+    #[arg(short, long = "stdin")]
     pub streaming: bool,
 
     /// Path to strictix.toml or its parent directory
-    #[clap(short = 'c', long = "config", default_value = ".")]
+    #[arg(short = 'c', long = "config", default_value = ".")]
     pub conf_path: PathBuf,
 }
 
@@ -176,7 +175,7 @@ impl Single {
 #[derive(Parser, Debug)]
 pub struct Explain {
     /// Warning code to explain
-    #[clap(parse(try_from_str = parse_warning_code))]
+    #[arg(value_parser = parse_warning_code)]
     pub target: u32,
 }
 
@@ -244,6 +243,8 @@ impl ConfFile {
         let config_file = fs::read_to_string(path).map_err(ConfigErr::InvalidPath)?;
         toml::de::from_str(&config_file).map_err(ConfigErr::ConfFileParse)
     }
+    /// Discover config by walking ancestors of `path` (defaults to CWD via `--config`),
+    /// not the lint target. This is intentional: config applies per-project, not per-file.
     pub fn discover<P: AsRef<Path>>(path: P) -> Result<Self, ConfigErr> {
         let canonical_path = fs::canonicalize(path.as_ref()).map_err(ConfigErr::InvalidPath)?;
         let mut config = Self::from_global_path()?;
@@ -440,7 +441,7 @@ fn parse_warning_code(src: &str) -> Result<u32, ConfigErr> {
             .collect::<String>()
             .parse::<u32>()
             .map_err(|_| ConfigErr::InvalidWarningCode(src.to_owned())),
-        _ => Ok(0),
+        _ => Err(ConfigErr::InvalidWarningCode(src.to_owned())),
     }
 }
 
@@ -492,8 +493,15 @@ fn single_file_vfs(streaming: bool, target: Option<&Path>) -> Result<ReadOnlyVfs
         return stdin_vfs();
     }
 
-    let src = std::fs::read_to_string(target.unwrap()).map_err(ConfigErr::InvalidPath)?;
-    Ok(ReadOnlyVfs::singleton("<stdin>", src.as_bytes()))
+    let target = target.ok_or_else(|| {
+        ConfigErr::InvalidPath(io::Error::new(
+            io::ErrorKind::NotFound,
+            "no target file provided",
+        ))
+    })?;
+    let src = std::fs::read_to_string(target).map_err(ConfigErr::InvalidPath)?;
+    let path = target.to_str().unwrap_or("<stdin>");
+    Ok(ReadOnlyVfs::singleton(path, src.as_bytes()))
 }
 
 fn filesystem_vfs(

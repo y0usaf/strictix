@@ -6,6 +6,6 @@ expression: "\"let a.b = 2; in { c = a.c; }\""
    ╭─[<temp_file_path>:1:19]
    │
  1 │ let a.b = 2; in { c = a.c; }
-   ·                   ────┬───  
-   ·                       ╰───── This assignment is better written with inherit
+   │                   ────┬───  
+   │                       ╰───── This assignment is better written with inherit
 ───╯

@@ -1,14 +1,13 @@
 use std::{
-    collections::HashMap,
     default::Default,
     path::{Path, PathBuf},
 };
 
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use rayon::prelude::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
-pub struct FileId(pub usize);
+pub struct FileId(usize);
 
 #[derive(Debug, Default)]
 pub struct Interner {
@@ -31,7 +30,7 @@ impl Interner {
 #[derive(Default)]
 pub struct ReadOnlyVfs {
     interner: Interner,
-    data: HashMap<FileId, Vec<u8>>,
+    data: IndexMap<FileId, Vec<u8>>,
 }
 
 impl ReadOnlyVfs {
@@ -52,37 +51,42 @@ impl ReadOnlyVfs {
         self.data.is_empty()
     }
     #[must_use]
-    pub fn file_path(&self, file_id: FileId) -> &Path {
-        self.interner.lookup(file_id).unwrap()
+    pub fn file_path(&self, file_id: FileId) -> Option<&Path> {
+        self.interner.lookup(file_id)
     }
     #[must_use]
-    pub fn get(&self, file_id: FileId) -> &Vec<u8> {
-        self.data.get(&file_id).unwrap()
+    pub fn get(&self, file_id: FileId) -> Option<&Vec<u8>> {
+        self.data.get(&file_id)
     }
     #[must_use]
-    pub fn get_str(&self, file_id: FileId) -> &str {
-        std::str::from_utf8(self.get(file_id)).unwrap()
+    pub fn get_str(&self, file_id: FileId) -> Option<&str> {
+        self.get(file_id)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
     }
-    pub fn get_mut(&mut self, file_id: FileId) -> &mut Vec<u8> {
-        self.data.get_mut(&file_id).unwrap()
+    pub fn get_mut(&mut self, file_id: FileId) -> Option<&mut Vec<u8>> {
+        self.data.get_mut(&file_id)
     }
     pub fn set_file_contents<P: AsRef<Path>>(&mut self, path: P, contents: &[u8]) {
         let file_id = self.alloc_file_id(path);
         self.data.insert(file_id, contents.to_owned());
     }
     pub fn iter(&self) -> impl Iterator<Item = VfsEntry<'_>> {
-        self.data.keys().map(move |file_id| VfsEntry {
-            file_id: *file_id,
-            file_path: self.file_path(*file_id),
-            contents: self.get_str(*file_id),
+        self.data.keys().filter_map(move |file_id| {
+            Some(VfsEntry {
+                file_id: *file_id,
+                file_path: self.file_path(*file_id)?,
+                contents: self.get_str(*file_id)?,
+            })
         })
     }
     #[must_use]
     pub fn par_iter(&self) -> impl ParallelIterator<Item = VfsEntry<'_>> {
-        self.data.par_iter().map(move |(file_id, _)| VfsEntry {
-            file_id: *file_id,
-            file_path: self.file_path(*file_id),
-            contents: self.get_str(*file_id),
+        self.data.par_iter().filter_map(move |(file_id, _)| {
+            Some(VfsEntry {
+                file_id: *file_id,
+                file_path: self.file_path(*file_id)?,
+                contents: self.get_str(*file_id)?,
+            })
         })
     }
 }
@@ -104,6 +108,6 @@ mod test {
         let id1 = vfs.alloc_file_id(f1);
         let data = "hello".as_bytes().to_vec();
         vfs.set_file_contents(f1, &data);
-        assert_eq!(vfs.get(id1), &data);
+        assert_eq!(vfs.get(id1).unwrap(), &data);
     }
 }

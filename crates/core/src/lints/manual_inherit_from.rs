@@ -38,9 +38,9 @@ use rowan::ast::AstNode as _;
     code = 4,
     match_with = SyntaxKind::NODE_ATTRPATH_VALUE,
 )]
-struct ManualInherit;
+struct ManualInheritFrom;
 
-impl Rule for ManualInherit {
+impl Rule for ManualInheritFrom {
     fn validate(&self, node: &SyntaxElement) -> Option<Report> {
         let NodeOrToken::Node(node) = node else {
             return None;

@@ -6,6 +6,6 @@ expression: "\"toPath x\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ toPath x
-   · ────┬───  
-   ·     ╰───── toPath is deprecated, see :doc builtins.toPath within the REPL for more
+   │ ────┬───  
+   │     ╰───── toPath is deprecated, see :doc builtins.toPath within the REPL for more
 ───╯

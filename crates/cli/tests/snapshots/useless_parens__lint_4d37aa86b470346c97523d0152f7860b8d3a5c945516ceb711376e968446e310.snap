@@ -6,13 +6,13 @@ expression: "\"let a = (1 + 2); in null\""
    ╭─[<temp_file_path>:1:5]
    │
  1 │ let a = (1 + 2); in null
-   ·     ──────┬─────  
-   ·           ╰─────── a is never used
+   │     ──────┬─────  
+   │           ╰─────── a is never used
 ───╯
 [08] Warning: These parentheses can be omitted
    ╭─[<temp_file_path>:1:9]
    │
  1 │ let a = (1 + 2); in null
-   ·         ───┬───  
-   ·            ╰───── Useless parentheses around value in binding
+   │         ───┬───  
+   │            ╰───── Useless parentheses around value in binding
 ───╯

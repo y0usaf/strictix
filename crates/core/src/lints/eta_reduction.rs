@@ -1,9 +1,9 @@
-use crate::{Metadata, Report, Rule, Suggestion};
+use crate::{Metadata, Report, Rule, Suggestion, utils};
 
 use macros::lint;
 use rnix::{
-    NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode,
-    ast::{Expr, Ident, Lambda, Param},
+    NodeOrToken, SyntaxElement, SyntaxKind,
+    ast::{Expr, Lambda, Param},
 };
 use rowan::ast::AstNode as _;
 
@@ -69,7 +69,7 @@ impl Rule for EtaReduction {
 
         let lambda_node = body.lambda()?;
 
-        if mentions_ident(&ident, lambda_node.syntax()) {
+        if utils::mentions_ident(&ident.to_string(), lambda_node.syntax()) {
             return None;
         }
 
@@ -87,13 +87,5 @@ impl Rule for EtaReduction {
             message,
             Suggestion::with_replacement(at, replacement.syntax().clone()),
         ))
-    }
-}
-
-fn mentions_ident(ident: &Ident, node: &SyntaxNode) -> bool {
-    if let Some(node_ident) = Ident::cast(node.clone()) {
-        node_ident.to_string() == ident.to_string()
-    } else {
-        node.children().any(|child| mentions_ident(ident, &child))
     }
 }

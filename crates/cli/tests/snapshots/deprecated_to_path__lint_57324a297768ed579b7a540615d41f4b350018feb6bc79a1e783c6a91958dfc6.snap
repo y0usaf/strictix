@@ -6,6 +6,6 @@ expression: "\"toPath __strictix_to_path_arg\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ toPath __strictix_to_path_arg
-   · ──────────────┬──────────────  
-   ·               ╰──────────────── toPath is deprecated, see :doc builtins.toPath within the REPL for more
+   │ ──────────────┬──────────────  
+   │               ╰──────────────── toPath is deprecated, see :doc builtins.toPath within the REPL for more
 ───╯
