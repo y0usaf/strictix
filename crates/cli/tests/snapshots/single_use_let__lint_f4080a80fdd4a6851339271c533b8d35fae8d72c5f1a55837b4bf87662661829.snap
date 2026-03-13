@@ -6,10 +6,10 @@ expression: "\"let\\n  x = pkgs.hello;\\nin\\n  x.meta.description\\n\""
    ╭─[<temp_file_path>:2:3]
    │
  2 │   x = pkgs.hello;
-   ·   ───────┬───────  
-   ·          ╰───────── x is only used once; consider inlining
-   · 
+   │   ───────┬───────  
+   │          ╰───────── x is only used once; consider inlining
+   │ 
  4 │   x.meta.description
-   ·   ┬  
-   ·   ╰── x is only used once; consider inlining
+   │   ┬  
+   │   ╰── x is only used once; consider inlining
 ───╯

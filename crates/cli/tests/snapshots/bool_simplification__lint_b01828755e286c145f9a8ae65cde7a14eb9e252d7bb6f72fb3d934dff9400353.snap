@@ -6,6 +6,6 @@ expression: "\"!(a == b)\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ !(a == b)
-   · ────┬────  
-   ·     ╰────── Try != instead of !(... == ...)
+   │ ────┬────  
+   │     ╰────── Try != instead of !(... == ...)
 ───╯

@@ -6,6 +6,6 @@ expression: "\"false == m ? n\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ false == m ? n
-   · ───────┬──────  
-   ·        ╰──────── Comparing m ? n with boolean literal false
+   │ ───────┬──────  
+   │        ╰──────── Comparing m ? n with boolean literal false
 ───╯

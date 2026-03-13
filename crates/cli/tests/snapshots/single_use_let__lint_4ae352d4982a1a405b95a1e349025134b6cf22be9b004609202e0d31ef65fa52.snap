@@ -6,11 +6,11 @@ expression: "\"let\\n  base = pkgs.hello;\\n  wrapped = base.override { };\\nin\
    ╭─[<temp_file_path>:2:3]
    │
  2 │   base = pkgs.hello;
-   ·   ─────────┬────────  
-   ·            ╰────────── base is only used once; consider inlining
+   │   ─────────┬────────  
+   │            ╰────────── base is only used once; consider inlining
  3 │   wrapped = base.override { };
-   ·   ────────────┬─┬─────────────  
-   ·               ╰───────────────── base is only used once; consider inlining
-   ·                 │               
-   ·                 ╰─────────────── wrapped is only used once; consider inlining
+   │   ────────────┬─┬─────────────  
+   │               ╰───────────────── base is only used once; consider inlining
+   │                 │               
+   │                 ╰─────────────── wrapped is only used once; consider inlining
 ───╯

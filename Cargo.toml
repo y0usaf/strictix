@@ -2,10 +2,10 @@
 resolver = "3"
 
 members = [
-    "crates/cli",
-    "crates/core",
-    "crates/strictix-macros",
-    "crates/strictix-vfs",
+  "crates/cli",
+  "crates/core",
+  "crates/strictix-macros",
+  "crates/strictix-vfs",
 ]
 
 [workspace.package]
@@ -14,14 +14,13 @@ license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 anyhow = "1.0.100"
-ariadne = "0.1.3"
-clap = { version = "3.0.0-beta.4", features = ["derive"] }
+ariadne = "0.4"
+clap = { features = ["derive"], version = "4" }
 hex = "0.4.3"
 ignore = "0.4.18"
-indexmap = "1.6.2"
+indexmap = { features = ["rayon"], version = "2" }
 indoc = "2.0.6"
 insta = { features = ["filters"], version = "1.43.2" }
-lazy_static = "1.0"
 lib = { package = "strictix-core", path = "./crates/core" }
 macros = { package = "strictix-macros", path = "./crates/strictix-macros" }
 paste = "1.0.15"
@@ -38,7 +37,7 @@ strip-ansi-escapes = "0.1.1"
 syn = { features = ["full"], version = "2.0" }
 tempfile = "3.23.0"
 thiserror = "1.0.30"
-toml = "0.5.8"
+toml = "0.8"
 vfs = { package = "strictix-vfs", path = "./crates/strictix-vfs" }
 
 [workspace.lints.clippy]

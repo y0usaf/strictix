@@ -6,6 +6,6 @@ expression: "\"base // (if config.foo.enable then { bar = 1; } else {})\\n\""
    ╭─[<temp_file_path>:1:10]
    │
  1 │ base // (if config.foo.enable then { bar = 1; } else {})
-   ·          ───────────────────────┬──────────────────────  
-   ·                                 ╰──────────────────────── Use lib.optionalAttrs (config.foo.enable) { ... } instead of if ... then { ... } else {}
+   │          ───────────────────────┬──────────────────────  
+   │                                 ╰──────────────────────── Replace if ... then { ... } else {} with a builtins.listToAttrs expansion for config.foo.enable
 ───╯

@@ -6,6 +6,6 @@ expression: "\"false == true\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ false == true
-   · ──────┬──────  
-   ·       ╰──────── Comparing true with boolean literal false
+   │ ──────┬──────  
+   │       ╰──────── Comparing true with boolean literal false
 ───╯

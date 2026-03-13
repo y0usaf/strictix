@@ -6,8 +6,8 @@ expression: "\"let # keep trailing comment\\nin\\n  null\\n\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ ╭─▶ let # keep trailing comment
-   ⋮ ⋮   
+   ┆ ┆   
  3 │ ├─▶   null
-   · │            
-   · ╰──────────── This let-in expression has no entries
+   │ │            
+   │ ╰──────────── This let-in expression has no entries
 ───╯

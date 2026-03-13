@@ -64,7 +64,7 @@ impl Rule for IfElseEmptyAttrset {
         Some(self.report().suggest(
             at,
             format!(
-                "Use `lib.optionalAttrs ({}) {{ ... }}` instead of `if ... then {{ ... }} else {{}}`",
+                "Replace `if ... then {{ ... }} else {{}}` with a `builtins.listToAttrs` expansion for `{}`",
                 cond.syntax()
             ),
             Suggestion::with_text(at, optional_attrs_replacement(cond.syntax(), then_set.syntax())),

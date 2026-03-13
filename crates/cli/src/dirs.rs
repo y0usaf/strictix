@@ -51,8 +51,13 @@ impl Iterator for Walker {
                     && let Match::None | Match::Whitelist(_) = self.ignore.matched(&dir, true)
                 {
                     let mut found = false;
-                    for entry in fs::read_dir(&dir).ok()? {
-                        let entry = entry.ok()?;
+                    let Ok(read_dir) = fs::read_dir(&dir) else {
+                        continue;
+                    };
+                    for entry in read_dir {
+                        let Ok(entry) = entry else {
+                            continue;
+                        };
                         let path = entry.path();
                         if path.is_dir() {
                             self.dirs.push(path);

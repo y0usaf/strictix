@@ -6,6 +6,6 @@ expression: "\"toPath (if cond then \\\"/abs\\\" else \\\"rel\\\")\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ toPath (if cond then "/abs" else "rel")
-   · ───────────────────┬───────────────────  
-   ·                    ╰───────────────────── toPath is deprecated, see :doc builtins.toPath within the REPL for more
+   │ ───────────────────┬───────────────────  
+   │                    ╰───────────────────── toPath is deprecated, see :doc builtins.toPath within the REPL for more
 ───╯

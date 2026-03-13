@@ -3,7 +3,7 @@
   partitions.dev.module = devPartition: {
     imports = [ devPartition.inputs.treefmt.flakeModule ];
 
-    perSystem = psArgs: {
+    perSystem = _: {
       pre-commit.settings.hooks.treefmt.enable = true;
 
       treefmt = {

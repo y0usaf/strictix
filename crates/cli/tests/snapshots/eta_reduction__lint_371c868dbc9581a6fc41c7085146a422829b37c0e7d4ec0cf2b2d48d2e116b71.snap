@@ -6,15 +6,15 @@ expression: "\"let double = x: x * 2; in map (x: double x) [1 2 3]\""
    ╭─[<temp_file_path>:1:5]
    │
  1 │ let double = x: x * 2; in map (x: double x) [1 2 3]
-   ·     ─────────┬────────            ───┬──  
-   ·              ╰──────────────────────────── double is only used once; consider inlining
-   ·                                      │    
-   ·                                      ╰──── double is only used once; consider inlining
+   │     ─────────┬────────            ───┬──  
+   │              ╰──────────────────────────── double is only used once; consider inlining
+   │                                      │    
+   │                                      ╰──── double is only used once; consider inlining
 ───╯
 [07] Warning: This function expression is eta reducible
    ╭─[<temp_file_path>:1:32]
    │
  1 │ let double = x: x * 2; in map (x: double x) [1 2 3]
-   ·                                ─────┬─────  
-   ·                                     ╰─────── Found eta-reduction: double
+   │                                ─────┬─────  
+   │                                     ╰─────── Found eta-reduction: double
 ───╯

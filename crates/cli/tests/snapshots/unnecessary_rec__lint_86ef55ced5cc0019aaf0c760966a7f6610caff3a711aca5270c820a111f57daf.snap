@@ -6,8 +6,8 @@ expression: "\"rec {\\n  a = 1;\\n  b = 2;\\n}\\n\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ ╭─▶ rec {
-   ⋮ ⋮   
+   ┆ ┆   
  4 │ ├─▶ }
-   · │       
-   · ╰─────── Remove rec: no binding references a sibling binding
+   │ │       
+   │ ╰─────── Remove rec: no binding references a sibling binding
 ───╯

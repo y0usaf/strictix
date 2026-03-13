@@ -51,19 +51,27 @@ impl Rule for UnnecessaryRec {
         // Only applies to rec attrsets
         let rec_token = attrset.rec_token()?;
 
+        // If any entry has a compound key (a.b = ...), skip this attrset
+        // because compound keys create implicit nested attrsets that may
+        // interact with rec in subtle ways.
+        let has_compound_key = attrset.entries().any(|entry| {
+            let Entry::AttrpathValue(kv) = entry else {
+                return false;
+            };
+            kv.attrpath().is_some_and(|ap| ap.attrs().count() > 1)
+        });
+        if has_compound_key {
+            return None;
+        }
+
         // Collect all simple (ident) top-level binding names
-        let binding_names: Vec<String> = attrset
+        let mut binding_names: Vec<String> = attrset
             .entries()
             .filter_map(|entry| {
                 let Entry::AttrpathValue(kv) = entry else {
                     return None;
                 };
-                let mut attrs = kv.attrpath()?.attrs();
-                let first = attrs.next()?;
-                // Only single-component ident keys (not `a.b` or `${...}`)
-                if attrs.next().is_some() {
-                    return None;
-                }
+                let first = kv.attrpath()?.attrs().next()?;
                 let Attr::Ident(ident) = first else {
                     return None;
                 };
@@ -71,19 +79,42 @@ impl Rule for UnnecessaryRec {
             })
             .collect();
 
+        // Also collect names introduced by inherit statements
+        for entry in attrset.entries() {
+            if let Entry::Inherit(inherit) = entry {
+                for attr in inherit.attrs() {
+                    if let Attr::Ident(ident) = attr {
+                        binding_names.push(ident.to_string());
+                    }
+                }
+            }
+        }
+
         if binding_names.is_empty() {
             return None;
         }
 
         // Check if any binding value references any sibling binding name
         let any_self_ref = attrset.entries().any(|entry| {
-            let Entry::AttrpathValue(kv) = entry else {
-                return false;
-            };
-            let Some(value) = kv.value() else {
-                return false;
-            };
-            mentions_any_name(value.syntax(), &binding_names)
+            match entry {
+                Entry::AttrpathValue(kv) => {
+                    let Some(value) = kv.value() else {
+                        return false;
+                    };
+                    mentions_any_name(value.syntax(), &binding_names)
+                }
+                Entry::Inherit(inherit) => {
+                    if let Some(from_expr) = inherit.from() {
+                        // inherit (expr) a b; — check if expr references siblings
+                        mentions_any_name(from_expr.syntax(), &binding_names)
+                    } else {
+                        // bare `inherit x;` always binds from the enclosing scope;
+                        // `rec` does not affect where it resolves, so it is never
+                        // a self-reference that justifies keeping `rec`.
+                        false
+                    }
+                }
+            }
         });
 
         if any_self_ref {

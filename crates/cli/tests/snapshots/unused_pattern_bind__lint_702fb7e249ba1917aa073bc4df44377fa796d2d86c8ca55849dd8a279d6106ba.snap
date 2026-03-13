@@ -6,6 +6,6 @@ expression: "\"args @ { x, y }: x + y\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ args @ { x, y }: x + y
-   · ───────┬───────  
-   ·        ╰───────── args is never used; remove the redundant pattern binding
+   │ ───────┬───────  
+   │        ╰───────── args is never used; remove the redundant pattern binding
 ───╯

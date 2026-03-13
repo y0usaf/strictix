@@ -6,12 +6,12 @@ expression: "\"let\\n  settings =\\n    {\\n      a = 1;\\n      b = 2;\\n    };
    ╭─[<temp_file_path>:2:3]
    │
  2 │ ╭─▶   settings =
-   ⋮ ⋮   
+   ┆ ┆   
  6 │ ├─▶     };
-   · │            
-   · ╰──────────── settings is only used once; consider inlining
-   · 
+   │ │            
+   │ ╰──────────── settings is only used once; consider inlining
+   │ 
  8 │       { inherit settings; }
-   ·         ────────┬────────  
-   ·                 ╰────────── settings is only used once; consider inlining
+   │         ────────┬────────  
+   │                 ╰────────── settings is only used once; consider inlining
 ───╯

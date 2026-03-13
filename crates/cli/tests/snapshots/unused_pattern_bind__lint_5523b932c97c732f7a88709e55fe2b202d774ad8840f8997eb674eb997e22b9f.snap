@@ -6,6 +6,6 @@ expression: "\"attrs @ { x, ... }: x\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ attrs @ { x, ... }: x
-   · ─────────┬────────  
-   ·          ╰────────── attrs is never used; remove the redundant pattern binding
+   │ ─────────┬────────  
+   │          ╰────────── attrs is never used; remove the redundant pattern binding
 ───╯

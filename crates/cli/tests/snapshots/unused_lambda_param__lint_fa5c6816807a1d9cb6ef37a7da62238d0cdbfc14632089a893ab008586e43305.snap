@@ -6,8 +6,8 @@ expression: "\"x: let y = 1; in x + y\""
    ╭─[<temp_file_path>:1:8]
    │
  1 │ x: let y = 1; in x + y
-   ·        ───┬──        ┬  
-   ·           ╰───────────── y is only used once; consider inlining
-   ·                      │  
-   ·                      ╰── y is only used once; consider inlining
+   │        ───┬──        ┬  
+   │           ╰───────────── y is only used once; consider inlining
+   │                      │  
+   │                      ╰── y is only used once; consider inlining
 ───╯

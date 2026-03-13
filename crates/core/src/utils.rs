@@ -35,6 +35,13 @@ pub fn bool_literal_node(node: &SyntaxNode) -> Option<bool> {
     })
 }
 
+pub fn mentions_ident(ident: &str, node: &SyntaxNode) -> bool {
+    if let Some(node_ident) = Ident::cast(node.clone()) {
+        return node_ident.to_string() == ident;
+    }
+    node.children().any(|child| mentions_ident(ident, &child))
+}
+
 pub fn unary_not(node: &SyntaxNode) -> SyntaxNode {
     if unary_not_needs_parens(node) {
         make::unary_not(make::parenthesize(node).syntax())

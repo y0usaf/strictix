@@ -6,8 +6,8 @@ expression: "\"let\\n  # preserve the comment while fixing\\nin\\nnull\\n\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ ╭─▶ let
-   ⋮ ⋮   
+   ┆ ┆   
  4 │ ├─▶ null
-   · │          
-   · ╰────────── This let-in expression has no entries
+   │ │          
+   │ ╰────────── This let-in expression has no entries
 ───╯

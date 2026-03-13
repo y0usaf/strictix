@@ -6,6 +6,6 @@ expression: "\"builtins.toPath \\\"/some/path\\\"\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ builtins.toPath "/some/path"
-   · ──────────────┬─────────────  
-   ·               ╰─────────────── builtins.toPath is deprecated, see :doc builtins.toPath within the REPL for more
+   │ ──────────────┬─────────────  
+   │               ╰─────────────── builtins.toPath is deprecated, see :doc builtins.toPath within the REPL for more
 ───╯

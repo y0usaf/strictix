@@ -6,6 +6,6 @@ expression: "\"if cond then false else true\""
    ╭─[<temp_file_path>:1:1]
    │
  1 │ if cond then false else true
-   · ──────────────┬─────────────  
-   ·               ╰─────────────── Use !cond instead of if cond then false else true
+   │ ──────────────┬─────────────  
+   │               ╰─────────────── Use !cond instead of if cond then false else true
 ───╯

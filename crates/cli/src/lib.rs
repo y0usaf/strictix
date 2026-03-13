@@ -6,7 +6,6 @@ pub mod explain;
 pub mod fix;
 pub mod lint;
 pub mod list;
-pub mod session;
 pub mod traits;
 
 mod utils;

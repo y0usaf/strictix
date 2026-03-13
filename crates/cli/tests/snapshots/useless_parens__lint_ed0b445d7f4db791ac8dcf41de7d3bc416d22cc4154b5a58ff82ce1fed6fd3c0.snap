@@ -6,13 +6,13 @@ expression: "\"let a = 0; in (null)\""
    ╭─[<temp_file_path>:1:15]
    │
  1 │ let a = 0; in (null)
-   ·               ───┬──  
-   ·                  ╰──── Useless parentheses around body of let expression
+   │               ───┬──  
+   │                  ╰──── Useless parentheses around body of let expression
 ───╯
 [30] Warning: Let binding used only once; consider inlining
    ╭─[<temp_file_path>:1:5]
    │
  1 │ let a = 0; in (null)
-   ·     ───┬──  
-   ·        ╰──── a is never used
+   │     ───┬──  
+   │        ╰──── a is never used
 ───╯

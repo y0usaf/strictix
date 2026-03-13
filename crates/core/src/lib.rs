@@ -85,10 +85,10 @@ impl Report {
             .map(|d| d.at)
             .reduce(rnix::TextRange::cover)
     }
-    /// Unsafe but handy replacement for above
+    /// A convenience wrapper around `total_suggestion_range`
     #[must_use]
-    pub fn range(&self) -> TextRange {
-        self.total_suggestion_range().unwrap()
+    pub fn range(&self) -> Option<TextRange> {
+        self.total_suggestion_range()
     }
     /// Apply all diagnostics. Assumption: diagnostics do not overlap
     pub fn apply(&self, src: &mut String) {
@@ -113,25 +113,21 @@ impl Report {
     /// Create a report out of a parse error
     #[must_use]
     pub fn from_parse_err(err: &ParseError) -> Self {
+        let zero = TextRange::empty(0u32.into());
         let at = match err {
             ParseError::Unexpected(at)
             | ParseError::UnexpectedExtra(at)
             | ParseError::UnexpectedWanted(_, at, _)
             | ParseError::UnexpectedDoubleBind(at)
-            | ParseError::DuplicatedArgs(at, _) => at,
-            ParseError::UnexpectedEOF | ParseError::UnexpectedEOFWanted(_) => {
-                &TextRange::empty(0u32.into())
-            }
-            _ => panic!("report a bug, pepper forgot to handle a parse error"),
+            | ParseError::DuplicatedArgs(at, _) => *at,
+            _ => zero,
         };
         let mut message = err.to_string();
-        message
-            .as_mut_str()
-            .get_mut(0..1)
-            .unwrap()
-            .make_ascii_uppercase();
+        if let Some(first) = message.as_mut_str().get_mut(0..1) {
+            first.make_ascii_uppercase();
+        }
         Self::new("Syntax error", 0)
-            .diagnostic(*at, message)
+            .diagnostic(at, message)
             .severity(Severity::Error)
     }
 }
@@ -194,7 +190,6 @@ impl Serialize for Diagnostic {
 #[derive(Debug)]
 pub enum Replacement {
     Empty,
-    SyntaxElement(SyntaxElement),
     Text(String),
 }
 
@@ -210,7 +205,6 @@ impl std::fmt::Display for Replacement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Replacement::Empty => Ok(()),
-            Replacement::SyntaxElement(syntax_element) => write!(f, "{syntax_element}"),
             Replacement::Text(s) => write!(f, "{s}"),
         }
     }
@@ -218,10 +212,10 @@ impl std::fmt::Display for Replacement {
 
 impl Suggestion {
     #[must_use]
-    pub fn with_replacement(at: TextRange, fix: impl Into<SyntaxElement>) -> Self {
+    pub fn with_replacement(at: TextRange, fix: impl std::fmt::Display) -> Self {
         Self {
             at,
-            fix: Replacement::SyntaxElement(fix.into()),
+            fix: Replacement::Text(fix.to_string()),
         }
     }
     #[must_use]
@@ -245,8 +239,6 @@ impl Suggestion {
         src.replace_range(start..end, &self.fix.to_string());
     }
 }
-
-unsafe impl Send for Suggestion {}
 
 #[cfg(feature = "json-out")]
 impl Serialize for Suggestion {
@@ -312,8 +304,8 @@ macro_rules! lints {
         $(
             mod $s;
         )*
-        ::lazy_static::lazy_static! {
-            pub static ref LINTS: Vec<&'static dyn $crate::Lint> = {
+        pub static LINTS: std::sync::LazyLock<Vec<&'static dyn $crate::Lint>> =
+            std::sync::LazyLock::new(|| {
                 let mut v = Vec::new();
                 $(
                     {
@@ -322,7 +314,6 @@ macro_rules! lints {
                     }
                 )*
                 v
-            };
-        }
+            });
     }
 }

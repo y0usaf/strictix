@@ -20,7 +20,12 @@ fn main_() -> Result<(), StatixErr> {
 }
 
 fn main() {
-    if let Err(e) = main_() {
-        eprintln!("{e}");
+    match main_() {
+        Ok(()) => {}
+        Err(StatixErr::LintsFailed) => std::process::exit(1),
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
     }
 }

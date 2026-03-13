@@ -6,6 +6,6 @@ expression: "\"({ ... }: 42)\""
    ╭─[<temp_file_path>:1:2]
    │
  1 │ ({ ... }: 42)
-   ·  ───┬───  
-   ·     ╰───── This pattern is empty, use _ instead
+   │  ───┬───  
+   │     ╰───── This pattern is empty, use _ instead
 ───╯

@@ -6,8 +6,8 @@ expression: "\"let y = 2; in { x.y = y; }\""
    ╭─[<temp_file_path>:1:5]
    │
  1 │ let y = 2; in { x.y = y; }
-   ·     ───┬──            ┬  
-   ·        ╰───────────────── y is only used once; consider inlining
-   ·                       │  
-   ·                       ╰── y is only used once; consider inlining
+   │     ───┬──            ┬  
+   │        ╰───────────────── y is only used once; consider inlining
+   │                       │  
+   │                       ╰── y is only used once; consider inlining
 ───╯
