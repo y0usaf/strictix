@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/if_else_empty_list.rs
+expression: "\"if a && b then [ foo ] else []\\n\""
+---
+[33] Warning: Prefer `lib.optionals` over `if cond then [...] else []`
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ if a && b then [ foo ] else []
+   │ ───────────────┬──────────────  
+   │                ╰──────────────── Use lib.optionals to express conditional list inclusion
+───╯

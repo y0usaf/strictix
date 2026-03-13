@@ -27,5 +27,6 @@ lints! {
     unnecessary_rec,
     single_use_let,
     unused_lambda_param,
-    unused_pattern_bind
+    unused_pattern_bind,
+    if_else_empty_list
 }

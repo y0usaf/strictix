@@ -137,6 +137,7 @@ Added by `strictix`:
 | W30  | `single_use_let`           | ✓\*      | Inline or remove `let` bindings used at most once          |
 | W31  | `unused_lambda_param`      | ✓        | `x: expr` where `x` is unused → `_: expr`                  |
 | W32  | `unused_pattern_bind`      | ✓        | `args @ { x }: x` where `args` is unused → `{ x }: x`      |
+| W33  | `if_else_empty_list`       | ✓        | `if c then [...] else []` → `lib.optionals c [...]`        |
 
 `*` Conditional autofix: some flagged cases are intentionally left as diagnostics when a rewrite would be unsafe or would discard comments.
 
