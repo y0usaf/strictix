@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/repeated_expression.rs
+assertion_line: 7
 expression: "\"let\\n  x = 1;\\nin\\n  pkgs.stdenv.mkDerivation { } // pkgs.stdenv.mkDerivation { }\\n\""
 ---
 [30] Warning: Let binding used only once; consider inlining
@@ -13,8 +14,8 @@ expression: "\"let\\n  x = 1;\\nin\\n  pkgs.stdenv.mkDerivation { } // pkgs.stde
    ╭─[<temp_file_path>:4:3]
    │
  4 │   pkgs.stdenv.mkDerivation { } // pkgs.stdenv.mkDerivation { }
-   │   ────────────┬───────────        ────────────┬───────────  
-   │               ╰───────────────────────────────────────────── pkgs.stdenv.mkDerivation is repeated; consider extracting into a let binding
-   │                                               │             
-   │                                               ╰───────────── pkgs.stdenv.mkDerivation is repeated; consider extracting into a let binding
+   │   ──────────────┬─────────────    ──────────────┬─────────────  
+   │                 ╰─────────────────────────────────────────────── pkgs.stdenv.mkDerivation { } is repeated; consider extracting into a let binding
+   │                                                 │               
+   │                                                 ╰─────────────── pkgs.stdenv.mkDerivation { } is repeated; consider extracting into a let binding
 ───╯

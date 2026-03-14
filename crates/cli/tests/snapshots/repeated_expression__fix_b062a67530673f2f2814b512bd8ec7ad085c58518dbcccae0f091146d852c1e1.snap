@@ -2,12 +2,4 @@
 source: crates/cli/tests/repeated_expression.rs
 expression: "\"let\\n  a = pkgs.hello.meta.description;\\n  b = pkgs.hello.meta.license;\\nin\\n  null\\n\""
 ---
---- <temp_file_path>
-+++ <temp_file_path> [fixed]
-@@ -1,6 +1,2 @@
--let
--  a = pkgs.hello.meta.description;
--  b = pkgs.hello.meta.license;
--in
--  null
-+null
+

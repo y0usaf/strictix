@@ -28,5 +28,6 @@ lints! {
     single_use_let,
     unused_lambda_param,
     unused_pattern_bind,
-    if_else_empty_list
+    if_else_empty_list,
+    repeated_expression,
 }
