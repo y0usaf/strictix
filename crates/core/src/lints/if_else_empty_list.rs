@@ -1,4 +1,4 @@
-use crate::{Metadata, Report, Rule, Suggestion};
+use crate::{Metadata, Report, Rule, Suggestion, utils};
 
 use macros::lint;
 use rnix::{
@@ -61,14 +61,16 @@ impl Rule for IfElseEmptyList {
         }
 
         let at = node.text_range();
-        let cond_text = cond.syntax().to_string();
-        let cond_text = cond_text.trim();
         Some(self.report().suggest(
             at,
             "Use `lib.optionals` to express conditional list inclusion",
             Suggestion::with_text(
                 at,
-                format!("lib.optionals ({cond_text}) {}", then_list.syntax()),
+                format!(
+                    "lib.optionals {} {}",
+                    utils::fmt_as_fn_arg(cond.syntax()),
+                    then_list.syntax()
+                ),
             ),
         ))
     }

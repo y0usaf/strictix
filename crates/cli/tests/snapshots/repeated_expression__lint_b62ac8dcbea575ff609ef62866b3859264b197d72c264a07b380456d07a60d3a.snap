@@ -2,10 +2,14 @@
 source: crates/cli/tests/repeated_expression.rs
 expression: "\"let\\n  a = pkgs.hello.meta;\\nin\\n  pkgs.hello.bin\\n\""
 ---
-[30] Warning: Let binding used only once; consider inlining
-   ╭─[<temp_file_path>:2:3]
+[34] Warning: Expression repeated; consider extracting into a let binding
+   ╭─[<temp_file_path>:2:7]
    │
  2 │   a = pkgs.hello.meta;
-   │   ──────────┬─────────  
-   │             ╰─────────── a is never used
+   │       ───────┬───────  
+   │              ╰───────── pkgs.hello is repeated; consider extracting into a let binding
+   │ 
+ 4 │   pkgs.hello.bin
+   │   ───────┬──────  
+   │          ╰──────── pkgs.hello is repeated; consider extracting into a let binding
 ───╯

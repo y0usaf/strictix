@@ -4,6 +4,7 @@ use rnix::{
     ast::{Expr, Ident},
 };
 use rowan::ast::AstNode as _;
+use std::collections::{HashMap, HashSet};
 
 pub fn with_preceeding_whitespace(node: &SyntaxNode) -> TextRange {
     let start = node.prev_sibling_or_token().map_or_else(
@@ -42,6 +43,26 @@ pub fn mentions_ident(ident: &str, node: &SyntaxNode) -> bool {
     node.children().any(|child| mentions_ident(ident, &child))
 }
 
+/// Format a syntax node as a function argument, adding parentheses if needed
+/// to avoid ambiguity (e.g. `a && b` → `(a && b)`, `cond` → `cond`).
+pub fn fmt_as_fn_arg(node: &SyntaxNode) -> String {
+    let text = node.to_string();
+    let text = text.trim();
+    let needs_parens = match Expr::cast(node.clone()) {
+        Some(Expr::Ident(_) | Expr::Paren(_) | Expr::List(_) | Expr::Str(_) | Expr::AttrSet(_)) => {
+            false
+        }
+        // `foo.bar or default` needs parens to avoid `or` being parsed as an argument
+        Some(Expr::Select(select)) => select.or_token().is_some(),
+        _ => true,
+    };
+    if needs_parens {
+        format!("({text})")
+    } else {
+        text.to_owned()
+    }
+}
+
 pub fn unary_not(node: &SyntaxNode) -> SyntaxNode {
     if unary_not_needs_parens(node) {
         make::unary_not(make::parenthesize(node).syntax())
@@ -60,4 +81,65 @@ fn unary_not_needs_parens(node: &SyntaxNode) -> bool {
             | SyntaxKind::NODE_IDENT
             | SyntaxKind::NODE_HAS_ATTR
     )
+}
+
+/// Returns every select-expression prefix (≥2 dot-separated components) that
+/// appears in 2 or more `NODE_SELECT` nodes anywhere within `scope`.
+///
+/// Used by `single_use_let` to suppress inlining advice when a binding's
+/// value participates in a repeated expression — i.e. when `repeated_expression`
+/// would fire on the same let-in.
+pub fn repeated_select_prefixes(scope: &SyntaxNode) -> HashSet<String> {
+    let mut selects: Vec<String> = Vec::new();
+    collect_select_texts(scope, &mut selects);
+
+    let mut prefix_counts: HashMap<String, usize> = HashMap::new();
+    for raw in &selects {
+        let text = normalize_select(raw);
+        let parts: Vec<&str> = text.split('.').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let mut prefix = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                prefix.push('.');
+            }
+            prefix.push_str(part);
+            if i >= 1 {
+                *prefix_counts.entry(prefix.clone()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    prefix_counts
+        .into_iter()
+        .filter(|(_, count)| *count >= 2)
+        .map(|(p, _)| p)
+        .collect()
+}
+
+/// Returns `true` if `value_text` (the normalized text of a binding's RHS) is
+/// a repeated select expression or an extension of one within `scope`.
+pub fn value_is_repeated_select(value_text: &str, repeated: &HashSet<String>) -> bool {
+    repeated.iter().any(|p| {
+        value_text == p
+            || (value_text.starts_with(p.as_str())
+                && value_text.as_bytes().get(p.len()) == Some(&b'.'))
+    })
+}
+
+/// Normalize whitespace in a select expression text so that expressions
+/// written with varying trivia still compare equal.
+pub fn normalize_select(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn collect_select_texts(node: &SyntaxNode, result: &mut Vec<String>) {
+    if node.kind() == SyntaxKind::NODE_SELECT {
+        result.push(node.to_string());
+    }
+    for child in node.children() {
+        collect_select_texts(&child, result);
+    }
 }

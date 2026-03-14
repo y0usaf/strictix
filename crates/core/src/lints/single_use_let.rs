@@ -1,4 +1,4 @@
-use crate::{Metadata, Report, Rule, Suggestion, make};
+use crate::{Metadata, Report, Rule, Suggestion, make, utils};
 
 use macros::lint;
 use rnix::{
@@ -53,6 +53,12 @@ impl Rule for SingleUseLet {
         let entry_refs: Vec<_> = entries.iter().map(entry_ref_counts).collect();
         let total_entry_refs = merge_ref_counts(&entry_refs);
 
+        // Collect all select-expression prefixes that appear 2+ times in this
+        // let-in. Bindings whose value participates in a repeated expression
+        // are skipped: `repeated_expression` (W34) already guides the user to
+        // keep and use those bindings rather than inline them.
+        let repeated_prefixes = utils::repeated_select_prefixes(node);
+
         let mut report = self.report();
         let mut found = false;
         // Only one binding gets fix suggestions per pass to avoid offset
@@ -72,6 +78,18 @@ impl Rule for SingleUseLet {
 
             if refs.total > 1 {
                 continue;
+            }
+
+            // If the binding's value is (or starts with) a repeated select
+            // expression, W34 already covers this — suppress the W30 diagnostic
+            // so the user isn't pushed to inline something worth extracting.
+            if !repeated_prefixes.is_empty() {
+                if let Some(value) = kv.value() {
+                    let value_text = utils::normalize_select(&value.syntax().to_string());
+                    if utils::value_is_repeated_select(&value_text, &repeated_prefixes) {
+                        continue;
+                    }
+                }
             }
 
             let binding_at = kv.syntax().text_range();

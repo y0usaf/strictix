@@ -2,11 +2,4 @@
 source: crates/cli/tests/repeated_expression.rs
 expression: "\"let\\n  a = pkgs.hello.meta;\\nin\\n  pkgs.hello.bin\\n\""
 ---
---- <temp_file_path>
-+++ <temp_file_path> [fixed]
-@@ -1,5 +1,2 @@
--let
--  a = pkgs.hello.meta;
--in
--  pkgs.hello.bin
-+pkgs.hello.bin
+
