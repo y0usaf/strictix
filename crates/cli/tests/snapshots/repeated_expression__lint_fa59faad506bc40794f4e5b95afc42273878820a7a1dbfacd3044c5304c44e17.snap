@@ -1,0 +1,30 @@
+---
+source: crates/cli/tests/repeated_expression.rs
+expression: "\"let\\n  a = nixpkgs.lib.types.str;\\n  b = nixpkgs.lib.types.str;\\n  c = nixpkgs.lib.types.str;\\nin\\n  null\\n\""
+---
+[30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:2:3]
+   │
+ 2 │   a = nixpkgs.lib.types.str;
+   │   ─────────────┬────────────  
+   │                ╰────────────── a is never used
+ 3 │   b = nixpkgs.lib.types.str;
+   │   ─────────────┬────────────  
+   │                ╰────────────── b is never used
+ 4 │   c = nixpkgs.lib.types.str;
+   │   ─────────────┬────────────  
+   │                ╰────────────── c is never used
+───╯
+[34] Warning: Expression repeated; consider extracting into a let binding
+   ╭─[<temp_file_path>:2:7]
+   │
+ 2 │   a = nixpkgs.lib.types.str;
+   │       ──────────┬──────────  
+   │                 ╰──────────── nixpkgs.lib.types.str is repeated; consider extracting into a let binding
+ 3 │   b = nixpkgs.lib.types.str;
+   │       ──────────┬──────────  
+   │                 ╰──────────── nixpkgs.lib.types.str is repeated; consider extracting into a let binding
+ 4 │   c = nixpkgs.lib.types.str;
+   │       ──────────┬──────────  
+   │                 ╰──────────── nixpkgs.lib.types.str is repeated; consider extracting into a let binding
+───╯

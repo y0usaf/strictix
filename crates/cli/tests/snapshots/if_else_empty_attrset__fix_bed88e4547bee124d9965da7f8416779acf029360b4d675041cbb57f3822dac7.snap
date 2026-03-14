@@ -6,4 +6,4 @@ expression: "\"base // (if config.foo.enable then { bar = 1; } else {})\\n\""
 +++ <temp_file_path> [fixed]
 @@ -1,2 +1,2 @@
 -base // (if config.foo.enable then { bar = 1; } else {})
-+base // (builtins.listToAttrs (if config.foo.enable then builtins.mapAttrsToList (name: value: { inherit name value; }) { bar = 1; } else []))
++base // (lib.optionalAttrs config.foo.enable { bar = 1; })

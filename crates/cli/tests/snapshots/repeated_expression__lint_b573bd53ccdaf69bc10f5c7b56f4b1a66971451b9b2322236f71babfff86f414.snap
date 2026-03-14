@@ -1,0 +1,18 @@
+---
+source: crates/cli/tests/repeated_expression.rs
+expression: "\"let\\n  a = pkgs.hello.meta.description;\\n  b = pkgs.hello.bin;\\nin\\n  { inherit a b; }\\n\""
+---
+[30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:2:3]
+   │
+ 2 │   a = pkgs.hello.meta.description;
+   │   ────────────────┬───────────────  
+   │                   ╰───────────────── a is only used once; consider inlining
+ 3 │   b = pkgs.hello.bin;
+   │   ─────────┬─────────  
+   │            ╰─────────── b is only used once; consider inlining
+   │ 
+ 5 │   { inherit a b; }
+   │     ──────┬─────  
+   │           ╰─────── a is only used once; consider inlining
+───╯
