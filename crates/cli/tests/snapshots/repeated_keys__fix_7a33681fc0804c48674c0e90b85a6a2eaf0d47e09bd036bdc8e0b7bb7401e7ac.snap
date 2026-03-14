@@ -1,0 +1,17 @@
+---
+source: crates/cli/tests/repeated_keys.rs
+expression: "\"{\\n  \\\"foo\\\".a = 1;\\n  \\\"foo\\\".b = 2;\\n  \\\"foo\\\".c = 3;\\n}\\n\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,6 +1,8 @@
+ {
+-  "foo".a = 1;
+-  "foo".b = 2;
+-  "foo".c = 3;
++  "foo" = {
++    a = 1;
++    b = 2;
++    c = 3;
++  };
+ }
