@@ -55,8 +55,10 @@ impl Rule for RepeatedKeys {
         let mut components = attrpath.attrs();
         let first_component = components.next()?;
 
-        let Attr::Ident(first_component_ident) = first_component else {
-            return None;
+        let first_component_text = match &first_component {
+            Attr::Ident(ident) => ident.to_string(),
+            Attr::Str(s) => s.to_string(),
+            _ => return None,
         };
 
         // ensure that there are >1 components
@@ -71,9 +73,7 @@ impl Rule for RepeatedKeys {
 
         let occurrences = parent_attr_set
             .entries()
-            .filter_map(|entry| {
-                repeated_key_occurrence(&entry, first_component_ident.to_string().as_str())
-            })
+            .filter_map(|entry| repeated_key_occurrence(&entry, first_component_text.as_str()))
             .collect::<Vec<_>>();
 
         if occurrences.first()?.0 != attrpath.syntax().text_range() {
@@ -87,7 +87,7 @@ impl Rule for RepeatedKeys {
         let mut iter = occurrences.iter();
 
         let (first_annotation, first_subkey, _) = iter.next().unwrap();
-        let first_message = format!("The key `{first_component_ident}` is first assigned here ...");
+        let first_message = format!("The key `{first_component_text}` is first assigned here ...");
 
         let (second_annotation, second_subkey, _) = iter.next().unwrap();
         let second_message = "... repeated here ...";
@@ -102,7 +102,7 @@ impl Rule for RepeatedKeys {
             };
             write!(
                 message,
-                " Try `{first_component_ident} = {{ {}=...; {}=...; {}=...; }}` instead.",
+                " Try `{first_component_text} = {{ {}=...; {}=...; {}=...; }}` instead.",
                 first_subkey.join("."),
                 second_subkey.join("."),
                 third_subkey.join("."),
@@ -116,11 +116,9 @@ impl Rule for RepeatedKeys {
             .diagnostic(*first_annotation, first_message)
             .diagnostic(*second_annotation, second_message);
 
-        if let Some(rewrite) = grouped_rewrite(
-            &parent_attr_set,
-            &first_component_ident.to_string(),
-            &occurrences,
-        ) {
+        if let Some(rewrite) =
+            grouped_rewrite(&parent_attr_set, &first_component_text, &occurrences)
+        {
             report = report.suggest(
                 rewrite.first_range,
                 third_message.clone(),
@@ -157,11 +155,13 @@ fn repeated_key_occurrence(entry: &Entry, first_component: &str) -> Option<Occur
     let attrpath = attrpath_value.attrpath()?;
     let mut components = attrpath.attrs();
     let first = components.next()?;
-    let Attr::Ident(ident) = first else {
-        return None;
+    let first_text = match first {
+        Attr::Ident(ident) => ident.to_string(),
+        Attr::Str(s) => s.to_string(),
+        _ => return None,
     };
 
-    if ident.to_string() != first_component {
+    if first_text != first_component {
         return None;
     }
 
@@ -263,11 +263,13 @@ fn direct_assignment(entry: &Entry, first_component: &str, suffix: &[String]) ->
     let Some(first) = components.next() else {
         return false;
     };
-    let Attr::Ident(ident) = first else {
-        return false;
+    let first_text = match first {
+        Attr::Ident(ident) => ident.to_string(),
+        Attr::Str(s) => s.to_string(),
+        _ => return false,
     };
 
-    if ident.to_string() != first_component {
+    if first_text != first_component {
         return false;
     }
 

@@ -10,6 +10,14 @@ generate_tests! {
         // fine
         "{ foo.bar = 1; }",
 
+        // fine: string key, only 2 occurrences
+        indoc! {"
+            {
+              \"foo\".a = 1;
+              \"foo\".b = 2;
+            }
+        "},
+
         // do not raise on rec
         indoc! {"
             rec {
@@ -56,6 +64,25 @@ generate_tests! {
               # keep this comment near the removed occurrence
               foo.b = 2;
               foo.c = 3;
+            }
+        "},
+
+        // string key repeated 3 times
+        indoc! {"
+            {
+              \"foo\".a = 1;
+              \"foo\".b = 2;
+              \"foo\".c = 3;
+            }
+        "},
+
+        // string key repeated more than 3 times
+        indoc! {"
+            {
+              \"foo\".bar1 = 1;
+              \"foo\".bar2 = 2;
+              \"foo\".bar3 = 3;
+              \"foo\".bar4 = 4;
             }
         "},
     ],
