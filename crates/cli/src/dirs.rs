@@ -99,6 +99,9 @@ pub fn build_ignore_set<P: AsRef<Path>>(
 
         // ignore .git by default, nobody cares about .git, i'm sure
         gitignore.add_line(None, ".git")?;
+
+        // ignore npins by default, it's auto-generated
+        gitignore.add_line(None, "npins")?;
     }
 
     for i in ignore {
