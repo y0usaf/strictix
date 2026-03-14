@@ -3,7 +3,7 @@ use crate::{Metadata, Report, Rule, Suggestion};
 use macros::lint;
 use rnix::{
     NodeOrToken, SyntaxElement, SyntaxKind, TextRange,
-    ast::{Expr, LetIn},
+    ast::{Attr, Entry, Expr, HasEntry as _, Inherit, LetIn},
 };
 use rowan::{Direction, ast::AstNode as _};
 
@@ -52,9 +52,17 @@ impl Rule for CollapsibleLetIn {
         let let_in_expr = LetIn::cast(node.clone())?;
         let body = let_in_expr.body()?;
 
-        let Expr::LetIn(_) = body else {
+        let Expr::LetIn(ref inner_let) = body else {
             return None;
         };
+
+        // Collapsing is only safe if neither let defines the same name as the other.
+        // Duplicate bindings in the same `let` block are a parse/eval error.
+        let outer_names = let_binding_names(&let_in_expr);
+        let inner_names = let_binding_names(inner_let);
+        if outer_names.iter().any(|n| inner_names.contains(n)) {
+            return None;
+        }
 
         let first_annotation = node.text_range();
         let first_message = "This `let in` expression contains a nested `let in` expression";
@@ -87,5 +95,37 @@ impl Rule for CollapsibleLetIn {
                     Suggestion::with_empty(replacement_at),
                 ),
         )
+    }
+}
+
+/// Collect all top-level binding names introduced by a `let-in` expression.
+fn let_binding_names(let_in: &LetIn) -> Vec<String> {
+    let mut names = Vec::new();
+    for entry in let_in.entries() {
+        match entry {
+            Entry::AttrpathValue(kv) => {
+                let Some(attrpath) = kv.attrpath() else {
+                    continue;
+                };
+                let Some(first) = attrpath.attrs().next() else {
+                    continue;
+                };
+                if let Attr::Ident(ident) = first {
+                    names.push(ident.to_string());
+                }
+            }
+            Entry::Inherit(inherit) => {
+                collect_inherit_names(&inherit, &mut names);
+            }
+        }
+    }
+    names
+}
+
+fn collect_inherit_names(inherit: &Inherit, names: &mut Vec<String>) {
+    for attr in inherit.attrs() {
+        if let Attr::Ident(ident) = attr {
+            names.push(ident.to_string());
+        }
     }
 }

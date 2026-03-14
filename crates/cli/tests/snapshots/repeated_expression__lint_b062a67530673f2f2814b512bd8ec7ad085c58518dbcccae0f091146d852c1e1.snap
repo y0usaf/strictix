@@ -1,0 +1,14 @@
+---
+source: crates/cli/tests/repeated_expression.rs
+expression: "\"let\\n  a = pkgs.hello.meta.description;\\n  b = pkgs.hello.meta.license;\\nin\\n  null\\n\""
+---
+[30] Warning: Let binding used only once; consider inlining
+   ╭─[<temp_file_path>:2:3]
+   │
+ 2 │   a = pkgs.hello.meta.description;
+   │   ────────────────┬───────────────  
+   │                   ╰───────────────── a is never used
+ 3 │   b = pkgs.hello.meta.license;
+   │   ──────────────┬─────────────  
+   │                 ╰─────────────── b is never used
+───╯

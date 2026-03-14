@@ -7,5 +7,5 @@ expression: "\"base // (if config.foo.enable then { bar = 1; } else {})\\n\""
    │
  1 │ base // (if config.foo.enable then { bar = 1; } else {})
    │          ───────────────────────┬──────────────────────  
-   │                                 ╰──────────────────────── Replace if ... then { ... } else {} with a builtins.listToAttrs expansion for config.foo.enable
+   │                                 ╰──────────────────────── Replace if ... then { ... } else {} with lib.optionalAttrs
 ───╯

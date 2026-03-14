@@ -1,0 +1,14 @@
+---
+source: crates/cli/tests/repeated_expression.rs
+expression: "\"let\\n  a = nixpkgs.lib.types.str;\\n  b = nixpkgs.lib.types.str;\\n  c = nixpkgs.lib.types.str;\\nin\\n  null\\n\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1,7 +1,2 @@
+-let
+-  a = nixpkgs.lib.types.str;
+-  b = nixpkgs.lib.types.str;
+-  c = nixpkgs.lib.types.str;
+-in
+-  null
++null
