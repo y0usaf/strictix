@@ -6,8 +6,9 @@ use rowan::ast::AstNode as _;
 use std::collections::HashMap;
 
 /// ## What it does
-/// Checks for non-trivial attribute-access expressions (e.g. `pkgs.hello.meta`)
-/// that appear verbatim more than once within the same `let-in` expression.
+/// Checks for attribute-access expressions with a common prefix of at least
+/// 3 components (e.g. `pkgs.hello.meta`) that appear more than once within
+/// the same `let-in` expression.
 ///
 /// ## Why is this bad?
 /// Repeating the same sub-expression adds noise and makes future changes
@@ -15,25 +16,29 @@ use std::collections::HashMap;
 /// readability and reduces the risk of the copies diverging. This lint is the
 /// counterpart to `single_use_let`.
 ///
+/// Shallow prefixes (2 components like `config.user`) are not flagged since
+/// extracting them rarely improves readability when the suffixes diverge
+/// (e.g. `.name` vs `.appearance.wallust`).
+///
 /// ## Example
 ///
 /// ```nix
 /// let
 ///   a = pkgs.hello.meta.description;
-///   b = pkgs.hello.bin;
+///   b = pkgs.hello.meta.license;
 /// in
-///   { inherit a b; }
+///   null
 /// ```
 ///
 /// Extract the repeated sub-expression:
 ///
 /// ```nix
 /// let
-///   hello = pkgs.hello;
-///   a = hello.meta.description;
-///   b = hello.bin;
+///   meta = pkgs.hello.meta;
+///   a = meta.description;
+///   b = meta.license;
 /// in
-///   { inherit a b; }
+///   null
 /// ```
 #[lint(
     name = "repeated_expression",
@@ -90,10 +95,16 @@ impl Rule for RepeatedExpression {
             }
         }
 
-        // Identify prefixes that appear in 2+ select nodes.
+        // Identify prefixes that appear in 2+ select nodes AND have at least 3
+        // components. Requiring 3 components avoids false positives for shallow
+        // prefixes like `config.user` where the suffixes diverge significantly
+        // (e.g. `.name` vs `.appearance.wallust`).
         let repeated: std::collections::HashSet<String> = prefix_ranges
             .iter()
-            .filter(|(_, ranges)| ranges.len() >= 2)
+            .filter(|(prefix, ranges)| {
+                let parts = prefix.split('.').count();
+                ranges.len() >= 2 && parts >= 3
+            })
             .map(|(p, _)| p.clone())
             .collect();
 
@@ -142,18 +153,15 @@ fn collect_selects(node: &SyntaxNode, result: &mut Vec<(String, TextRange)>) {
             .parent()
             .filter(|p| p.kind() == SyntaxKind::NODE_APPLY)
             .and_then(|p| p.children().next())
-            .map(|first| first == *node)
-            .unwrap_or(false);
+            .is_some_and(|first| first == *node);
         if in_fn_position {
             // Walk up through consecutive function-position NODE_APPLYs.
-            let mut current = node.parent().unwrap();
+            let Some(mut current) = node.parent() else {
+                return;
+            };
             while let Some(parent) = current.parent() {
                 if parent.kind() == SyntaxKind::NODE_APPLY
-                    && parent
-                        .children()
-                        .next()
-                        .map(|c| c == current)
-                        .unwrap_or(false)
+                    && parent.children().next().is_some_and(|c| c == current)
                 {
                     current = parent;
                 } else {
