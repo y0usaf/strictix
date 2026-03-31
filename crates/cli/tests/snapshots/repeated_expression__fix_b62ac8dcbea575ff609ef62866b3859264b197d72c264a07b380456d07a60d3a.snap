@@ -1,5 +1,0 @@
----
-source: crates/cli/tests/repeated_expression.rs
-expression: "\"let\\n  a = pkgs.hello.meta;\\nin\\n  pkgs.hello.bin\\n\""
----
-
