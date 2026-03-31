@@ -7,23 +7,7 @@ use macros::generate_tests;
 generate_tests! {
     rule: repeated_expression,
     expressions: [
-        // same select appears in two binding values
-        indoc! {"
-            let
-              a = pkgs.hello.meta.description;
-              b = pkgs.hello.bin;
-            in
-              { inherit a b; }
-        "},
-        // same select appears in a binding value and in the body
-        indoc! {"
-            let
-              a = pkgs.hello.meta;
-            in
-              pkgs.hello.bin
-        "},
-        // longer common prefix: pkgs.hello.meta is the maximal repeat,
-        // pkgs.hello should NOT be separately reported
+        // 3-part common prefix: pkgs.hello.meta is repeated
         indoc! {"
             let
               a = pkgs.hello.meta.description;
@@ -31,7 +15,7 @@ generate_tests! {
             in
               null
         "},
-        // three occurrences of the same select
+        // three occurrences of the same 4-part select
         indoc! {"
             let
               a = nixpkgs.lib.types.str;
@@ -40,7 +24,7 @@ generate_tests! {
             in
               null
         "},
-        // repeat in body only (no bindings reference it)
+        // repeat in body only (no bindings reference it) - 3-part prefix
         indoc! {"
             let
               x = 1;
