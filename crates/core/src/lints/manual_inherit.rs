@@ -66,7 +66,7 @@ impl Rule for ManualInherit {
             return None;
         }
 
-        let replacement = make::inherit_stmt(&[key]).syntax().clone();
+        let replacement = make::inherit_stmt(&[key])?.syntax().clone();
 
         Some(self.report().suggest(
             node.text_range(),

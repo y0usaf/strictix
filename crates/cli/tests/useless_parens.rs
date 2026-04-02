@@ -14,8 +14,6 @@ generate_tests! {
         "let a = (1 + 2); in null",
         "let h = ({ inherit (builtins) map; }); in null",
 
-        // LATER: binary exprs, function args etc.
-
         // parens around let body
         "let a = 0; in (null)",
 

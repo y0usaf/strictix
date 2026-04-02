@@ -63,9 +63,6 @@ impl ReadOnlyVfs {
         self.get(file_id)
             .and_then(|bytes| std::str::from_utf8(bytes).ok())
     }
-    pub fn get_mut(&mut self, file_id: FileId) -> Option<&mut Vec<u8>> {
-        self.data.get_mut(&file_id)
-    }
     pub fn set_file_contents<P: AsRef<Path>>(&mut self, path: P, contents: &[u8]) {
         let file_id = self.alloc_file_id(path);
         self.data.insert(file_id, contents.to_owned());

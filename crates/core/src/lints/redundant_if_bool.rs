@@ -72,7 +72,7 @@ impl Rule for RedundantIfBool {
             }
             (false, true) => {
                 // `if x then false else true` → `!x`
-                let negated = utils::unary_not(cond_node);
+                let negated = utils::unary_not(cond_node)?;
                 (
                     "Use `!cond` instead of `if cond then false else true`",
                     negated,

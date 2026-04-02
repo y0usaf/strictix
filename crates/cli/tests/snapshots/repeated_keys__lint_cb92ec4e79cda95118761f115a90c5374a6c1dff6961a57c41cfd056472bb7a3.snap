@@ -2,4 +2,15 @@
 source: crates/cli/tests/repeated_keys.rs
 expression: "\"{\\n  \\\"foo\\\".a = 1;\\n  \\\"foo\\\".b = 2;\\n}\\n\""
 ---
-
+[20] Warning: Avoid repeated keys in attribute sets
+   ╭─[<temp_file_path>:2:3]
+   │
+ 2 │ ╭─▶   "foo".a = 1;
+   │ │     ───┬──┬─────  
+   │ │        ╰────────── The key "foo" is first assigned here ...
+   │ │           │       
+   │ │           ╰─────── ... and repeated here. Try "foo" = { a=...; b=...; } instead.
+ 3 │ ├─▶   "foo".b = 2;
+   │ │                    
+   │ ╰──────────────────── ... and repeated here. Try "foo" = { a=...; b=...; } instead.
+───╯

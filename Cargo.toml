@@ -25,6 +25,7 @@ lib = { package = "strictix-core", path = "./crates/core" }
 macros = { package = "strictix-macros", path = "./crates/strictix-macros" }
 paste = "1.0.15"
 proc-macro2 = "1.0.27"
+proptest = "1.9.0"
 quote = "1.0"
 rayon = "1.5.1"
 rnix = "0.12.0"

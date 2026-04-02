@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use crate::LintMap;
 
 use lib::{LINTS, Lint};
-use rnix::{Parse, Root, SyntaxElement, SyntaxKind, WalkEvent};
+use rnix::{Parse, Root, SyntaxElement, WalkEvent};
 
-pub fn lint_map_of(lints: &[&'static dyn Lint]) -> HashMap<SyntaxKind, Vec<&'static dyn Lint>> {
-    let mut map = HashMap::new();
+pub fn lint_map_of(lints: &[&'static dyn Lint]) -> LintMap {
+    let mut map = LintMap::new();
     for lint in lints {
         for &m in lint.match_kind() {
             map.entry(m)
@@ -15,20 +15,19 @@ pub fn lint_map_of(lints: &[&'static dyn Lint]) -> HashMap<SyntaxKind, Vec<&'sta
     map
 }
 
-pub fn lint_map() -> HashMap<SyntaxKind, Vec<&'static dyn Lint>> {
+#[must_use]
+pub fn lint_map() -> LintMap {
     lint_map_of(&LINTS)
 }
 
-pub fn collect_reports(
-    root: &Parse<Root>,
-    lints: &HashMap<SyntaxKind, Vec<&'static dyn Lint>>,
-) -> Vec<lib::Report> {
+#[must_use]
+pub fn collect_reports(root: &Parse<Root>, lints: &LintMap) -> Vec<lib::Report> {
     reports(root, lints, |_| true).collect()
 }
 
 pub fn collect_filtered_reports(
     root: &Parse<Root>,
-    lints: &HashMap<SyntaxKind, Vec<&'static dyn Lint>>,
+    lints: &LintMap,
     predicate: impl Fn(&lib::Report) -> bool,
 ) -> Vec<lib::Report> {
     reports(root, lints, predicate).collect()
@@ -36,7 +35,7 @@ pub fn collect_filtered_reports(
 
 pub fn find_report(
     root: &Parse<Root>,
-    lints: &HashMap<SyntaxKind, Vec<&'static dyn Lint>>,
+    lints: &LintMap,
     predicate: impl Fn(&lib::Report) -> bool,
 ) -> Option<lib::Report> {
     reports(root, lints, predicate).next()
@@ -44,7 +43,7 @@ pub fn find_report(
 
 fn reports<'a, P>(
     root: &'a Parse<Root>,
-    lints: &'a HashMap<SyntaxKind, Vec<&'static dyn Lint>>,
+    lints: &'a LintMap,
     predicate: P,
 ) -> impl Iterator<Item = lib::Report> + 'a
 where
@@ -60,10 +59,10 @@ where
         .filter(predicate)
 }
 
-fn reports_for_element<'a>(
+fn reports_for_element(
     child: SyntaxElement,
-    lints: &'a HashMap<SyntaxKind, Vec<&'static dyn Lint>>,
-) -> impl Iterator<Item = lib::Report> + 'a {
+    lints: &LintMap,
+) -> impl Iterator<Item = lib::Report> + '_ {
     lints.get(&child.kind()).into_iter().flat_map(move |rules| {
         let child = child.clone();
         rules.iter().filter_map(move |rule| rule.validate(&child))

@@ -67,6 +67,12 @@ strictix check /path/to/dir -i .direnv
 
 # strictix respects .gitignore; use -u to disable
 strictix check /path/to/dir -u
+
+# enable all lints including opt-in ones
+strictix check /path/to/dir --strict
+
+# enable specific opt-in lints
+strictix check /path/to/dir -e with_expression -e single_use_let
 ```
 
 Apply suggestions:
@@ -76,6 +82,9 @@ strictix fix /path/to/file
 
 # show diff, do not write to file
 strictix fix --dry-run /path/to/file
+
+# fix with opt-in lints enabled
+strictix fix --strict /path/to/file
 ```
 
 Output formats:
@@ -87,14 +96,24 @@ strictix check /path/to/dir -o errfmt  # single-line, integrates with vim
 
 ### Configuration
 
-Create a `strictix.toml` at your project root to disable specific lints:
+Create a `strictix.toml` at your project root to configure lints:
 
 ```toml
 # strictix.toml
+
+# Disable specific lints
 disabled = [
-  "with_expression",
   "empty_pattern",
 ]
+
+# Enable opt-in lints (see table below)
+enabled = [
+  "with_expression",
+  "single_use_let",
+]
+
+# Or enable all opt-in lints at once
+strict = true
 ```
 
 `strictix` discovers config by traversing parent directories. Pass an explicit path with `--config`.
@@ -126,19 +145,20 @@ Inherited from `statix`:
 
 Added by `strictix`:
 
-| Code | Name                       | Auto-fix | Description                                                |
-| ---- | -------------------------- | -------- | ---------------------------------------------------------- |
-| W24  | `with_expression`          | ✓\*      | Warn on `with`; breaks tooling and causes shadowing        |
-| W25  | `collapsible_inherit_from` | ✓        | `inherit (x) a; inherit (x) b;` → `inherit (x) a b;`       |
-| W26  | `empty_attrset_merge`      | ✓        | `{} // x` → `x`                                            |
-| W27  | `redundant_if_bool`        | ✓        | `if x then true else false` → `x`                          |
-| W28  | `if_else_empty_attrset`    | ✓        | Suggest `lib.optionalAttrs` over `if c then {...} else {}` |
-| W29  | `unnecessary_rec`          | ✓        | Remove `rec` when no binding references a sibling          |
-| W30  | `single_use_let`           | ✓\*      | Inline or remove `let` bindings used at most once          |
-| W31  | `unused_lambda_param`      | ✓        | `x: expr` where `x` is unused → `_: expr`                  |
-| W32  | `unused_pattern_bind`      | ✓        | `args @ { x }: x` where `args` is unused → `{ x }: x`      |
-| W33  | `if_else_empty_list`       | ✓        | `if c then [...] else []` → `lib.optionals c [...]`        |
+| Code | Name                       | Auto-fix | Opt-in | Description                                                 |
+| ---- | -------------------------- | -------- | ------ | ----------------------------------------------------------- |
+| W24  | `with_expression`          | ✓\*      | ✓      | Warn on `with`; breaks tooling and causes shadowing         |
+| W25  | `collapsible_inherit_from` | ✓        |        | `inherit (x) a; inherit (x) b;` → `inherit (x) a b;`        |
+| W26  | `empty_attrset_merge`      | ✓        |        | `{} // x` → `x`                                             |
+| W27  | `redundant_if_bool`        | ✓        |        | `if x then true else false` → `x`                           |
+| W28  | `if_else_empty_attrset`    | ✓        |        | Suggest `lib.optionalAttrs` over `if c then {...} else {}`  |
+| W29  | `unnecessary_rec`          | ✓        |        | Remove `rec` when no binding references a sibling           |
+| W30  | `single_use_let`           | ✓\*      | ✓      | Inline or remove `let` bindings used at most once           |
+| W31  | `unused_lambda_param`      | ✓        |        | `x: expr` where `x` is unused → `_: expr`                   |
+| W32  | `unused_pattern_bind`      | ✓        |        | `args @ { x }: x` where `args` is unused → `{ x }: x`       |
+| W33  | `if_else_empty_list`       | ✓        |        | `if c then [...] else []` → `lib.optionals c [...]`         |
+| W34  | `repeated_expression`      |          |        | Expression repeated; consider extracting into a let binding |
 
 `*` Conditional autofix: some flagged cases are intentionally left as diagnostics when a rewrite would be unsafe or would discard comments.
 
-Run `strictix list` for the full up-to-date list.
+**Opt-in lints** are disabled by default and must be explicitly enabled via `--strict`, `-e <lint>`, or config file. Use `strictix list` to see which lints are opt-in.

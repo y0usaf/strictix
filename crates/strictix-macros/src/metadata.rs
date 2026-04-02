@@ -16,6 +16,8 @@ pub struct RawLintMeta {
     note: Lit,
     code: Lit,
     match_with: MatchWith,
+    /// Whether this lint is enabled by default. Defaults to true if not specified.
+    default_enabled: Option<Lit>,
 }
 
 impl Parse for RawLintMeta {
@@ -24,6 +26,7 @@ impl Parse for RawLintMeta {
         let mut note = None;
         let mut code = None;
         let mut match_with = None;
+        let mut default_enabled = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -33,6 +36,7 @@ impl Parse for RawLintMeta {
                 "note" => note = Some(parse_lit(input)?),
                 "code" => code = Some(parse_lit(input)?),
                 "match_with" => match_with = Some(parse_match_with(input)?),
+                "default_enabled" => default_enabled = Some(parse_lit(input)?),
                 _ => return Err(syn::Error::new(key.span(), "unknown lint metadata field")),
             }
 
@@ -47,6 +51,7 @@ impl Parse for RawLintMeta {
             note: note.ok_or_else(|| input.error("`note` not present"))?,
             code: code.ok_or_else(|| input.error("`code` not present"))?,
             match_with: match_with.ok_or_else(|| input.error("`match_with` not present"))?,
+            default_enabled,
         })
     }
 }
@@ -125,6 +130,15 @@ impl RawLintMeta {
             }
         }
     }
+
+    fn generate_default_enabled_fn(&self) -> Option<TokenStream2> {
+        let default_enabled = self.default_enabled.as_ref()?;
+        Some(quote! {
+            fn default_enabled(&self) -> bool {
+                #default_enabled
+            }
+        })
+    }
 }
 
 pub fn generate_meta_impl(struct_name: &Ident, meta: &RawLintMeta) -> TokenStream2 {
@@ -133,6 +147,7 @@ pub fn generate_meta_impl(struct_name: &Ident, meta: &RawLintMeta) -> TokenStrea
     let code_fn = meta.generate_code_fn();
     let match_kind = meta.generate_match_kind_fn();
     let report_fn = RawLintMeta::generate_report_fn();
+    let default_enabled_fn = meta.generate_default_enabled_fn();
 
     quote! {
         impl crate::Metadata for #struct_name {
@@ -141,6 +156,7 @@ pub fn generate_meta_impl(struct_name: &Ident, meta: &RawLintMeta) -> TokenStrea
             #code_fn
             #match_kind
             #report_fn
+            #default_enabled_fn
         }
     }
 }

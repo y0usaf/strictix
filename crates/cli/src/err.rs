@@ -14,8 +14,6 @@ pub enum ConfigErr {
     InvalidWarningCode(String),
     #[error("unable to parse config file: {0}")]
     ConfFileParse(toml::de::Error),
-    #[error("unable to parse nix version: `{0}`")]
-    ConfFileVersionParse(String),
 }
 
 #[derive(Error, Debug)]

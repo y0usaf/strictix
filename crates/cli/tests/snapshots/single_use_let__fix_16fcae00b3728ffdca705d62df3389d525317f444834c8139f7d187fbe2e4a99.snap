@@ -4,9 +4,9 @@ expression: "\"let\\n  loop = loop;\\nin\\n  1\\n\""
 ---
 --- <temp_file_path>
 +++ <temp_file_path> [fixed]
-@@ -1,5 +1,2 @@
--let
+@@ -1,5 +1,5 @@
+ let
 -  loop = loop;
--in
--  1
-+1
++  inherit loop;
+ in
+   1

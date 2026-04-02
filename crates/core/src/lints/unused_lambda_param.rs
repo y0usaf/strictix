@@ -60,7 +60,7 @@ impl Rule for UnusedLambdaParam {
         Some(self.report().suggest(
             at,
             format!("`{ident}` is never used; replace it with `_`"),
-            Suggestion::with_replacement(at, make::ident("_").syntax().clone()),
+            Suggestion::with_replacement(at, make::ident("_")?.syntax().clone()),
         ))
     }
 }

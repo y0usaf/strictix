@@ -33,7 +33,8 @@ use rowan::ast::AstNode as _;
     name = "with_expression",
     note = "Avoid `with` expressions",
     code = 24,
-    match_with = SyntaxKind::NODE_WITH
+    match_with = SyntaxKind::NODE_WITH,
+    default_enabled = false
 )]
 struct WithExpression;
 
@@ -67,7 +68,7 @@ fn literal_with_replacement(namespace: &Expr, body: &Expr) -> Option<String> {
         return None;
     };
 
-    let namespace_keys = literal_attrset_keys(&attrset);
+    let namespace_keys = literal_attrset_keys(attrset);
     let used = body_identifiers(body.syntax());
 
     if used.iter().any(|name| !namespace_keys.contains(name)) {

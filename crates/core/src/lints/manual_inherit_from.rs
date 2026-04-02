@@ -106,7 +106,7 @@ impl Rule for ManualInheritFrom {
         };
 
         let at = node.text_range();
-        let replacement = make::inherit_from_stmt_text(&set_text, &[key])
+        let replacement = make::inherit_from_stmt_text(&set_text, &[key])?
             .syntax()
             .clone();
 

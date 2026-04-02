@@ -36,7 +36,7 @@ vfs.workspace = true
 indoc.workspace = true
 insta.workspace = true
 paste.workspace = true
-proptest = "1.9.0"
+proptest.workspace = true
 strip-ansi-escapes.workspace = true
 
 [features]

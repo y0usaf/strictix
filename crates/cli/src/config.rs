@@ -62,6 +62,14 @@ pub struct Check {
     /// Enable "streaming" mode, accept file on stdin, output diagnostics on stdout
     #[arg(short, long = "stdin")]
     pub streaming: bool,
+
+    /// Enable all lints, including opt-in ones (with_expression, single_use_let, etc.)
+    #[arg(long)]
+    pub strict: bool,
+
+    /// Enable specific opt-in lints by name (can be repeated)
+    #[arg(short = 'e', long = "enable")]
+    pub enable: Vec<String>,
 }
 
 impl Check {
@@ -101,6 +109,14 @@ pub struct Fix {
     /// Enable "streaming" mode, accept file on stdin, output diagnostics on stdout
     #[arg(short, long = "stdin")]
     pub streaming: bool,
+
+    /// Enable all lints, including opt-in ones (with_expression, single_use_let, etc.)
+    #[arg(long)]
+    pub strict: bool,
+
+    /// Enable specific opt-in lints by name (can be repeated)
+    #[arg(short = 'e', long = "enable")]
+    pub enable: Vec<String>,
 }
 
 pub enum FixOut {
@@ -220,9 +236,24 @@ impl FromStr for OutFormat {
             "json" => Err("strictix was not compiled with the `json` feature flag"),
             "errfmt" => Ok(Self::Errfmt),
             "stderr" => Ok(Self::StdErr),
-            _ => Err("unknown output format, try: json, errfmt"),
+            #[cfg(feature = "json")]
+            _ => Err("unknown output format, try: stderr, errfmt, json"),
+            #[cfg(not(feature = "json"))]
+            _ => Err("unknown output format, try: stderr, errfmt"),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct RepeatedKeysConf {
+    /// Minimum number of repeated key occurrences before W20 fires (default: 3, minimum: 2).
+    pub min_occurrences: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct LintConf {
+    #[serde(default)]
+    pub repeated_keys: RepeatedKeysConf,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -235,6 +266,13 @@ pub struct ConfFile {
 
     #[serde(default = "Vec::new")]
     pub ignore: Vec<String>,
+
+    /// Enable all lints, including those that are opt-in by default.
+    #[serde(default)]
+    strict: bool,
+
+    #[serde(default)]
+    pub lints: LintConf,
 }
 
 impl ConfFile {
@@ -264,25 +302,44 @@ impl ConfFile {
     }
     #[must_use]
     pub fn dump(&self) -> String {
-        let ideal_config = {
-            let enabled = vec![];
-            let disabled = vec![];
-            let ignore = vec![".direnv".into()];
-            Self {
-                enabled,
-                disabled,
-                ignore,
-            }
+        let ideal_config = Self {
+            enabled: vec![],
+            disabled: vec![],
+            ignore: vec![".direnv".into()],
+            strict: false,
+            lints: LintConf {
+                repeated_keys: RepeatedKeysConf {
+                    min_occurrences: Some(2),
+                },
+            },
         };
-        toml::ser::to_string_pretty(&ideal_config).unwrap()
+        toml::ser::to_string_pretty(&ideal_config)
+            .expect("default config serialization should not fail")
     }
+    /// Apply per-lint options from config to the global lint settings.
+    /// Must be called before linting runs.
+    pub fn apply_lint_options(&self) {
+        if let Some(n) = self.lints.repeated_keys.min_occurrences {
+            lib::set_repeated_keys_min_occurrences(n);
+        }
+    }
+
     #[must_use]
     pub fn lints(&self) -> LintMap {
         utils::lint_map_of(
             (*LINTS)
                 .iter()
                 .filter(|l| {
-                    self.enabled.is_empty() || self.enabled.iter().any(|name| name == l.name())
+                    // Explicitly enabled lints are always included
+                    if self.enabled.iter().any(|name| name == l.name()) {
+                        return true;
+                    }
+                    // If enabled list is non-empty, only those lints run (allowlist mode)
+                    if !self.enabled.is_empty() {
+                        return false;
+                    }
+                    // Include if default_enabled or strict mode is on
+                    l.default_enabled() || self.strict
                 })
                 .filter(|l| !self.disabled.iter().any(|check| check == l.name()))
                 .copied()
@@ -291,12 +348,30 @@ impl ConfFile {
         )
     }
 
+    /// Enable strict mode (all lints, including opt-in ones).
+    pub fn set_strict(&mut self, strict: bool) {
+        self.strict = strict;
+    }
+
+    /// Explicitly enable specific lints by name.
+    pub fn enable_lints(&mut self, names: &[String]) {
+        self.enabled.extend(names.iter().cloned());
+    }
+
     fn merge(&mut self, other: Self) {
         if !other.enabled.is_empty() {
             self.enabled = other.enabled;
         }
         self.disabled.extend(other.disabled);
         self.ignore.extend(other.ignore);
+        // Project config overrides global strict setting.
+        if other.strict {
+            self.strict = true;
+        }
+        // Project config overrides global lint options when present.
+        if let Some(n) = other.lints.repeated_keys.min_occurrences {
+            self.lints.repeated_keys.min_occurrences = Some(n);
+        }
     }
 
     fn from_global_path() -> Result<Self, ConfigErr> {
@@ -332,22 +407,31 @@ impl ConfFile {
 mod tests {
     use super::ConfFile;
 
-    use std::{env, fs};
+    use std::{
+        env, fs,
+        sync::{Mutex, MutexGuard},
+    };
 
     use tempfile::tempdir;
 
+    // Serialise all tests that touch process-global environment variables.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_env() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn set_env_var(key: &str, value: &std::path::Path) {
-        // Tests mutate process-global environment and are kept local to this module.
         unsafe { env::set_var(key, value) };
     }
 
     fn remove_env_var(key: &str) {
-        // Tests mutate process-global environment and are kept local to this module.
         unsafe { env::remove_var(key) };
     }
 
     #[test]
     fn discovers_global_config_from_xdg_path() {
+        let _guard = lock_env();
         let temp = tempdir().unwrap();
         let config_dir = temp.path().join("xdg").join("strictix");
         fs::create_dir_all(&config_dir).unwrap();
@@ -380,6 +464,7 @@ mod tests {
 
     #[test]
     fn project_config_overrides_global_allowlist() {
+        let _guard = lock_env();
         let temp = tempdir().unwrap();
         let xdg_home = temp.path().join("xdg");
         let config_dir = xdg_home.join("strictix");
@@ -449,10 +534,9 @@ fn vfs(files: &[PathBuf]) -> vfs::ReadOnlyVfs {
     let mut vfs = ReadOnlyVfs::default();
     for file in files {
         if let Ok(data) = fs::read_to_string(file) {
-            let _id = vfs.alloc_file_id(file);
             vfs.set_file_contents(file, data.as_bytes());
         } else {
-            println!("`{}` contains non-utf8 content", file.display());
+            eprintln!("`{}` contains non-utf8 content", file.display());
         }
     }
     vfs

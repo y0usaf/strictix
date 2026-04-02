@@ -2,13 +2,6 @@
 source: crates/cli/tests/with_expression.rs
 expression: "\"with { hello = pkgs.hello; }; 1\""
 ---
-[24] Warning: Avoid `with` expressions
-   ╭─[<temp_file_path>:1:1]
-   │
- 1 │ with { hello = pkgs.hello; }; 1
-   │ ───────────────┬───────────────  
-   │                ╰───────────────── with { hello = pkgs.hello; }; introduces implicit scope; use explicit attribute access or inherit instead
-───╯
 [04] Warning: Assignment instead of inherit from
    ╭─[<temp_file_path>:1:8]
    │

@@ -2,14 +2,4 @@
 source: crates/cli/tests/single_use_let.rs
 expression: "\"let\\n  attrs = { a = 1; };\\nin\\n  { inherit (attrs) a; }\\n\""
 ---
-[30] Warning: Let binding used only once; consider inlining
-   ╭─[<temp_file_path>:2:3]
-   │
- 2 │   attrs = { a = 1; };
-   │   ─────────┬─────────  
-   │            ╰─────────── attrs is only used once; consider inlining
-   │ 
- 4 │   { inherit (attrs) a; }
-   │              ──┬──  
-   │                ╰──── attrs is only used once; consider inlining
-───╯
+

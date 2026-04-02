@@ -2,16 +2,4 @@
 source: crates/cli/tests/single_use_let.rs
 expression: "\"let\\n  gpuArgs =\\n    optionals (disableFeatures != []) [\\n      \\\"--disable-features=${concatStringsSep \\\",\\\" disableFeatures}\\\"\\n    ]\\n    ++ optionals (!smoothScroll) [\\n      \\\"--disable-smooth-scrolling\\\"\\n    ];\\nin\\n  concatStringsSep \\\" \\\" (gpuArgs ++ extraArgs)\\n\""
 ---
-[30] Warning: Let binding used only once; consider inlining
-    ╭─[<temp_file_path>:2:3]
-    │
-  2 │ ╭─▶   gpuArgs =
-    ┆ ┆   
-  8 │ ├─▶     ];
-    │ │            
-    │ ╰──────────── gpuArgs is only used once; consider inlining
-    │ 
- 10 │       concatStringsSep " " (gpuArgs ++ extraArgs)
-    │                             ───┬───  
-    │                                ╰───── gpuArgs is only used once; consider inlining
-────╯
+

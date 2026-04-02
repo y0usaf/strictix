@@ -63,7 +63,7 @@ impl Rule for IfElseEmptyAttrset {
         let at = node.text_range();
         Some(self.report().suggest(
             at,
-            format!("Replace `if ... then {{ ... }} else {{}}` with `lib.optionalAttrs`"),
+            "Replace `if ... then { ... } else {}` with `lib.optionalAttrs`",
             Suggestion::with_text(
                 at,
                 optional_attrs_replacement(cond.syntax(), then_set.syntax()),

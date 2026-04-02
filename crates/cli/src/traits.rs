@@ -1,7 +1,4 @@
-use std::{
-    io::{self, Write},
-    str,
-};
+use std::io::{self, Write};
 
 use crate::{config::OutFormat, lint::LintResult};
 
@@ -47,7 +44,7 @@ fn write_stderr<T: Write>(
     vfs: &ReadOnlyVfs,
 ) -> io::Result<()> {
     let file_id = lint_result.file_id;
-    let src = str::from_utf8(vfs.get(file_id).expect("invalid file id")).unwrap();
+    let src = vfs.get_str(file_id).expect("invalid file id");
     let path = vfs.file_path(file_id).expect("invalid file id");
     let range = |at: TextRange| at.start().into()..at.end().into();
     let src_id = path.to_str().unwrap_or("<unknown>");
@@ -97,7 +94,7 @@ fn write_errfmt<T: Write>(
     vfs: &ReadOnlyVfs,
 ) -> io::Result<()> {
     let file_id = lint_result.file_id;
-    let src = str::from_utf8(vfs.get(file_id).expect("invalid file id")).unwrap();
+    let src = vfs.get_str(file_id).expect("invalid file id");
     let line_index = LineIndex::new(src);
     let path = vfs.file_path(file_id).expect("invalid file id");
     for report in &lint_result.reports {
@@ -230,7 +227,8 @@ mod json {
         writeln!(
             writer,
             "{}",
-            serde_json::to_string_pretty(&Out { path, report }).unwrap()
+            serde_json::to_string_pretty(&Out { path, report })
+                .expect("report serialization should not fail")
         )?;
         Ok(())
     }

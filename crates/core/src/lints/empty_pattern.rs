@@ -71,7 +71,7 @@ impl Rule for EmptyPattern {
             "This pattern is empty, use `_` instead",
             Suggestion::with_replacement(
                 pattern.syntax().text_range(),
-                make::ident("_").syntax().clone(),
+                make::ident("_")?.syntax().clone(),
             ),
         ))
     }

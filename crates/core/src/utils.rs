@@ -6,7 +6,7 @@ use rnix::{
 use rowan::ast::AstNode as _;
 use std::collections::{HashMap, HashSet};
 
-pub fn with_preceeding_whitespace(node: &SyntaxNode) -> TextRange {
+pub fn with_preceding_whitespace(node: &SyntaxNode) -> TextRange {
     let start = node.prev_sibling_or_token().map_or_else(
         || node.text_range().start(),
         |t| {
@@ -63,13 +63,15 @@ pub fn fmt_as_fn_arg(node: &SyntaxNode) -> String {
     }
 }
 
-pub fn unary_not(node: &SyntaxNode) -> SyntaxNode {
+pub fn unary_not(node: &SyntaxNode) -> Option<SyntaxNode> {
     if unary_not_needs_parens(node) {
-        make::unary_not(make::parenthesize(node).syntax())
-            .syntax()
-            .clone()
+        Some(
+            make::unary_not(make::parenthesize(node)?.syntax())?
+                .syntax()
+                .clone(),
+        )
     } else {
-        make::unary_not(node).syntax().clone()
+        Some(make::unary_not(node)?.syntax().clone())
     }
 }
 

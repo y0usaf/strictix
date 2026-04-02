@@ -66,7 +66,7 @@ impl Rule for BoolSimplification {
         let at = node.text_range();
         let lhs = bin_expr.lhs()?;
         let rhs = bin_expr.rhs()?;
-        let replacement = make::binary(lhs.syntax(), flipped_op, rhs.syntax())
+        let replacement = make::binary(lhs.syntax(), flipped_op, rhs.syntax())?
             .syntax()
             .clone();
         Some(

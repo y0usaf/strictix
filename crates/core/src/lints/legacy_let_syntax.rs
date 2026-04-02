@@ -73,9 +73,9 @@ impl Rule for LegacyLetSyntax {
 
         let inherits = legacy_let.inherits();
         let entries = legacy_let.entries();
-        let attrset = make::attrset(inherits, entries, true);
-        let parenthesized = make::parenthesize(attrset.syntax());
-        let selected = make::select(parenthesized.syntax(), make::ident("body").syntax());
+        let attrset = make::attrset(inherits, entries, true)?;
+        let parenthesized = make::parenthesize(attrset.syntax())?;
+        let selected = make::select(parenthesized.syntax(), make::ident("body")?.syntax())?;
 
         let at = node.text_range();
         let message = "Prefer `rec` over undocumented `let` syntax";
