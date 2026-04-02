@@ -1,10 +1,10 @@
 use std::{fs, io::Write, path::Path, process::Command};
 
 use anyhow::anyhow;
-use lib::{LINTS, Lint, Report};
+use lib::{LINTS, Report};
 use proptest::{collection::vec, prelude::*};
-use rnix::{Parse, Root, SyntaxElement, WalkEvent};
-use strictix::LintMap;
+use rnix::Root;
+use strictix::{LintMap, utils as cli_utils};
 use tempfile::NamedTempFile;
 
 pub struct CliOutput {
@@ -141,7 +141,7 @@ fn apply_rule_fixes(lint_name: &str, source: &str) -> anyhow::Result<String> {
     loop {
         let parsed = Root::parse(&rewritten);
         let _ = parsed.clone().ok().map_err(|err| anyhow!("{err}"))?;
-        let reports = collect_filtered_reports(&parsed, &lints, |report| {
+        let reports = cli_utils::collect_filtered_reports(&parsed, &lints, |report| {
             report.total_suggestion_range().is_some()
         });
 
@@ -187,45 +187,7 @@ fn lint_map_for(lint_name: &str) -> anyhow::Result<LintMap> {
         return Err(anyhow!("unknown lint `{lint_name}`"));
     }
 
-    Ok(lint_map_of(&selected))
-}
-
-fn lint_map_of(lints: &[&'static dyn Lint]) -> LintMap {
-    let mut map = LintMap::new();
-    for lint in lints {
-        for &kind in lint.match_kind() {
-            map.entry(kind)
-                .and_modify(|rules: &mut Vec<_>| rules.push(*lint))
-                .or_insert_with(|| vec![*lint]);
-        }
-    }
-    map
-}
-
-fn collect_filtered_reports(
-    root: &Parse<Root>,
-    lints: &LintMap,
-    predicate: impl Fn(&Report) -> bool,
-) -> Vec<Report> {
-    root.syntax()
-        .preorder_with_tokens()
-        .filter_map(|event| match event {
-            WalkEvent::Enter(child) => Some(child),
-            WalkEvent::Leave(_) => None,
-        })
-        .flat_map(|child| reports_for_element(child, lints))
-        .filter(predicate)
-        .collect()
-}
-
-fn reports_for_element<'a>(
-    child: SyntaxElement,
-    lints: &'a LintMap,
-) -> impl Iterator<Item = Report> + 'a {
-    lints.get(&child.kind()).into_iter().flat_map(move |rules| {
-        let child = child.clone();
-        rules.iter().filter_map(move |rule| rule.validate(&child))
-    })
+    Ok(cli_utils::lint_map_of(&selected))
 }
 
 fn reorder(mut reports: Vec<Report>) -> Vec<Report> {

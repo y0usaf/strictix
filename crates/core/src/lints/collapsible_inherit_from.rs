@@ -92,7 +92,7 @@ impl Rule for CollapsibleInheritFrom {
         Some(self.report().suggest(
             at,
             format!("Merge `inherit ({namespace_text}) ...;` statements into one"),
-            Suggestion::with_replacement(at, merged.syntax().clone()),
+            Suggestion::with_replacement(at, merged?.syntax().clone()),
         ))
     }
 }

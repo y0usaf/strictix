@@ -3,10 +3,9 @@ mod lints;
 mod make;
 mod utils;
 
-pub use lints::LINTS;
+pub use lints::{LINTS, set_repeated_keys_min_occurrences};
 
 use rnix::{SyntaxElement, SyntaxKind, TextRange, parser::ParseError};
-use std::{convert::Into, default::Default};
 
 #[cfg(feature = "json-out")]
 use serde::{
@@ -90,23 +89,34 @@ impl Report {
     pub fn range(&self) -> Option<TextRange> {
         self.total_suggestion_range()
     }
-    /// Apply all diagnostics. Assumption: diagnostics do not overlap
+    /// Apply all diagnostics. Panics if any two suggestions overlap.
     pub fn apply(&self, src: &mut String) {
         let mut diagnostics = self
             .diagnostics
             .iter()
-            .filter(|diagnostic| diagnostic.suggestion.is_some())
+            .filter_map(|d| d.suggestion.as_ref().map(|s| (d, s.at)))
             .collect::<Vec<_>>();
 
-        diagnostics.sort_by(|a, b| {
-            let a = a.suggestion.as_ref().unwrap().at;
-            let b = b.suggestion.as_ref().unwrap().at;
+        diagnostics.sort_by(|(_, a), (_, b)| {
             b.start()
                 .cmp(&a.start())
                 .then_with(|| b.end().cmp(&a.end()))
         });
 
-        for diagnostic in diagnostics {
+        // Verify no two suggestions overlap after sorting (adjacent pairs suffice).
+        for window in diagnostics.windows(2) {
+            let (_, later) = &window[0];
+            let (_, earlier) = &window[1];
+            assert!(
+                earlier.end() <= later.start(),
+                "overlapping suggestions in report `{}`: {:?} overlaps {:?}",
+                self.note,
+                earlier,
+                later,
+            );
+        }
+
+        for (diagnostic, _) in diagnostics {
             diagnostic.apply(src);
         }
     }
@@ -273,14 +283,16 @@ pub trait Metadata {
     fn code(&self) -> u32;
     fn report(&self) -> Report;
     fn match_kind(&self) -> &'static [SyntaxKind];
+    /// Whether this lint is enabled by default. Lints marked as `default_enabled = false`
+    /// in their definition require explicit opt-in via config or CLI flags.
+    fn default_enabled(&self) -> bool {
+        true
+    }
 }
 
-/// Contains offline explanation for each lint
+/// Contains offline explanation for each lint.
 /// The `lint` macro scans nearby doc comments for
 /// explanations and derives this trait.
-///
-/// FIXME: the lint macro does way too much, maybe
-/// split it into smaller macros.
 pub trait Explain {
     fn explanation(&self) -> &'static str {
         "no explanation found"

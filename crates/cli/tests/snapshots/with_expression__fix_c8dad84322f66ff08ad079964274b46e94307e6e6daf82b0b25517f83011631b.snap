@@ -6,4 +6,4 @@ expression: "\"with { git = pkgs.git; curl = pkgs.curl; }; [ git curl ]\""
 +++ <temp_file_path> [fixed]
 @@ -1 +1 @@
 -with { git = pkgs.git; curl = pkgs.curl; }; [ git curl ]
-+let inherit ({ inherit (pkgs) git curl; }) git curl; in [ git curl ]
++with { inherit (pkgs) git curl; }; [ git curl ]

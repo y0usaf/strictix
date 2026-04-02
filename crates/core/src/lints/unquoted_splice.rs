@@ -49,7 +49,7 @@ impl Rule for UnquotedSplice {
         Some(self.report().suggest(
             at,
             message,
-            Suggestion::with_replacement(at, replacement.syntax().clone()),
+            Suggestion::with_replacement(at, replacement?.syntax().clone()),
         ))
     }
 }

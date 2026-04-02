@@ -60,7 +60,7 @@ impl Rule for BoolComparison {
             (NixBoolean::True, EqualityBinOpKind::NotEqual)
             | (NixBoolean::False, EqualityBinOpKind::Equal) => {
                 // `a != true`, `a == false` replace with `!a`
-                utils::unary_not(non_bool_side)
+                utils::unary_not(non_bool_side)?
             }
         };
         let at = node.text_range();

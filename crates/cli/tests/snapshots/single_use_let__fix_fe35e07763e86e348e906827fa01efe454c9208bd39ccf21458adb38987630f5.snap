@@ -2,11 +2,4 @@
 source: crates/cli/tests/single_use_let.rs
 expression: "\"let\\n  dev = \\\"/dev/sda\\\";\\nin\\n  ''mount ${dev} /mnt''\\n\""
 ---
---- <temp_file_path>
-+++ <temp_file_path> [fixed]
-@@ -1,5 +1,2 @@
--let
--  dev = "/dev/sda";
--in
--  ''mount ${dev} /mnt''
-+''mount /dev/sda /mnt''
+

@@ -1,4 +1,8 @@
-use crate::{err::ExplainErr, utils};
+use crate::{
+    config::Explain as ExplainConfig,
+    err::{ExplainErr, StatixErr},
+    utils,
+};
 
 pub fn explain(code: u32) -> Result<&'static str, ExplainErr> {
     let lints = utils::lint_map();
@@ -13,13 +17,8 @@ pub fn explain(code: u32) -> Result<&'static str, ExplainErr> {
     }
 }
 
-pub mod main {
-
-    use crate::{config::Explain as ExplainConfig, err::StatixErr};
-
-    pub fn main(explain_config: &ExplainConfig) -> Result<(), StatixErr> {
-        let explanation = super::explain(explain_config.target)?;
-        println!("{explanation}");
-        Ok(())
-    }
+pub fn run(explain_config: &ExplainConfig) -> Result<(), StatixErr> {
+    let explanation = explain(explain_config.target)?;
+    println!("{explanation}");
+    Ok(())
 }

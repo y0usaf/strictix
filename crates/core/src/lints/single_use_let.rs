@@ -35,7 +35,8 @@ use std::collections::HashMap;
     name = "single_use_let",
     note = "Let binding used only once; consider inlining",
     code = 30,
-    match_with = SyntaxKind::NODE_LET_IN
+    match_with = SyntaxKind::NODE_LET_IN,
+    default_enabled = false
 )]
 struct SingleUseLet;
 
@@ -83,12 +84,12 @@ impl Rule for SingleUseLet {
             // If the binding's value is (or starts with) a repeated select
             // expression, W34 already covers this — suppress the W30 diagnostic
             // so the user isn't pushed to inline something worth extracting.
-            if !repeated_prefixes.is_empty() {
-                if let Some(value) = kv.value() {
-                    let value_text = utils::normalize_select(&value.syntax().to_string());
-                    if utils::value_is_repeated_select(&value_text, &repeated_prefixes) {
-                        continue;
-                    }
+            if !repeated_prefixes.is_empty()
+                && let Some(value) = kv.value()
+            {
+                let value_text = utils::normalize_select(&value.syntax().to_string());
+                if utils::value_is_repeated_select(&value_text, &repeated_prefixes) {
+                    continue;
                 }
             }
 
@@ -120,7 +121,7 @@ impl Rule for SingleUseLet {
                         needs_parens,
                     }) => {
                         let replacement = if needs_parens {
-                            make::parenthesize(&value_node).syntax().clone()
+                            make::parenthesize(&value_node)?.syntax().clone()
                         } else {
                             value_node.clone()
                         };

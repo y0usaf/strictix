@@ -24,14 +24,3 @@ expression: "\"{\\n  foo.a = 1;\\n  bar = 2;\\n  foo.b =\\n    let\\n      x = 1
    │   │                  
    │   ╰────────────────── ... and here. Try foo = { a=...; b=...; c=...; } instead.
 ───╯
-[30] Warning: Let binding used only once; consider inlining
-   ╭─[<temp_file_path>:6:7]
-   │
- 6 │       x = 1;
-   │       ───┬──  
-   │          ╰──── x is only used once; consider inlining
-   │ 
- 8 │       x;
-   │       ┬  
-   │       ╰── x is only used once; consider inlining
-───╯

@@ -4,13 +4,16 @@ expression: "\"{\\n  foo.a = 1;\\n  bar = 2;\\n  foo.b =\\n    let\\n      x = 1
 ---
 --- <temp_file_path>
 +++ <temp_file_path> [fixed]
-@@ -1,11 +1,10 @@
+@@ -1,11 +1,13 @@
  {
 -  foo.a = 1;
 +  foo = {
 +    a = 1;
 +    b =
-+        1;
++        let
++          x = 1;
++        in
++          x;
 +    c = 3;
 +  };
    bar = 2;

@@ -58,7 +58,7 @@ impl Rule for UnquotedUri {
         Some(self.report().suggest(
             at,
             message,
-            Suggestion::with_replacement(at, replacement.syntax().clone()),
+            Suggestion::with_replacement(at, replacement?.syntax().clone()),
         ))
     }
 }

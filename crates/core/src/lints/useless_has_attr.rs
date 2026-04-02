@@ -56,7 +56,7 @@ impl Rule for UselessHasAttr {
             return None;
         };
 
-        let expected_body = make::select(set.syntax(), attr_path.syntax());
+        let expected_body = make::select(set.syntax(), attr_path.syntax())?;
 
         // text comparison will do for now
         if body_select_expr.syntax().text() != expected_body.syntax().text() {
@@ -73,14 +73,14 @@ impl Rule for UselessHasAttr {
             | Expr::AttrSet(_)
             | Expr::Ident(_)
             | Expr::Select(_) => default_expr,
-            _ => Expr::Paren(make::parenthesize(default_expr.syntax())),
+            _ => Expr::Paren(make::parenthesize(default_expr.syntax())?),
         };
 
         let replacement = make::or_default(
             set.syntax(),
             attr_path.syntax(),
             default_with_parens.syntax(),
-        )
+        )?
         .syntax()
         .clone();
         let message = format!("Consider using `{replacement}` instead of this `if` expression");

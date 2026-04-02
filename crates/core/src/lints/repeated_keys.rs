@@ -1,4 +1,7 @@
-use std::fmt::Write as _;
+use std::{
+    fmt::Write as _,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use crate::{Metadata, Report, Rule, Suggestion};
 
@@ -9,12 +12,20 @@ use rnix::{
 };
 use rowan::ast::AstNode as _;
 
+/// Minimum number of occurrences of a repeated key prefix before W20 fires.
+/// Defaults to 3. Can be overridden via `[lints.repeated_keys] min_occurrences` in config.
+static MIN_OCCURRENCES: AtomicUsize = AtomicUsize::new(3);
+
+pub fn set_min_occurrences(n: usize) {
+    MIN_OCCURRENCES.store(n.max(2), Ordering::Relaxed);
+}
+
 /// ## What it does
 /// Checks for keys in attribute sets with repetitive keys, and suggests using
 /// an attribute set instead.
 ///
 /// ## Why is this bad?
-/// Avoiding repetetion helps improve readibility.
+/// Avoiding repetition helps improve readability.
 ///
 /// ## Example
 /// ```nix
@@ -58,7 +69,7 @@ impl Rule for RepeatedKeys {
         let first_component_text = match &first_component {
             Attr::Ident(ident) => ident.to_string(),
             Attr::Str(s) => s.to_string(),
-            _ => return None,
+            Attr::Dynamic(_) => return None,
         };
 
         // ensure that there are >1 components
@@ -80,7 +91,7 @@ impl Rule for RepeatedKeys {
             return None;
         }
 
-        if occurrences.len() < 3 {
+        if occurrences.len() < MIN_OCCURRENCES.load(Ordering::Relaxed) {
             return None;
         }
 
@@ -90,50 +101,70 @@ impl Rule for RepeatedKeys {
         let first_message = format!("The key `{first_component_text}` is first assigned here ...");
 
         let (second_annotation, second_subkey, _) = iter.next().unwrap();
-        let second_message = "... repeated here ...";
 
-        let (third_annotation, third_subkey, _) = iter.next().unwrap();
-        let third_message = {
+        // With only 2 occurrences the final message is on the second occurrence.
+        let third = iter.next();
+        let (last_annotation, _last_subkey) = third
+            .map(|(ann, key, _)| (ann, key))
+            .unwrap_or((second_annotation, second_subkey));
+
+        let last_message = {
             let remaining_occurrences = iter.count();
-            let mut message = match remaining_occurrences {
-                0 => "... and here.".to_string(),
-                1 => "... and here (`1` occurrence omitted).".to_string(),
-                n => format!("... and here (`{n}` occurrences omitted)."),
+            let mut message = if third.is_none() {
+                "... and repeated here.".to_string()
+            } else {
+                match remaining_occurrences {
+                    0 => "... and here.".to_string(),
+                    1 => "... and here (`1` occurrence omitted).".to_string(),
+                    n => format!("... and here (`{n}` occurrences omitted)."),
+                }
             };
-            write!(
-                message,
-                " Try `{first_component_text} = {{ {}=...; {}=...; {}=...; }}` instead.",
-                first_subkey.join("."),
-                second_subkey.join("."),
-                third_subkey.join("."),
-            )
-            .unwrap();
+            if let Some((_, third_subkey, _)) = third {
+                write!(
+                    message,
+                    " Try `{first_component_text} = {{ {}=...; {}=...; {}=...; }}` instead.",
+                    first_subkey.join("."),
+                    second_subkey.join("."),
+                    third_subkey.join("."),
+                )
+                .unwrap();
+            } else {
+                write!(
+                    message,
+                    " Try `{first_component_text} = {{ {}=...; {}=...; }}` instead.",
+                    first_subkey.join("."),
+                    second_subkey.join("."),
+                )
+                .unwrap();
+            }
             message
         };
 
-        let mut report = self
-            .report()
-            .diagnostic(*first_annotation, first_message)
-            .diagnostic(*second_annotation, second_message);
+        let mut report = self.report().diagnostic(*first_annotation, first_message);
+
+        // Only add the "repeated here" middle diagnostic when there are 3+ occurrences.
+        if third.is_some() {
+            report = report.diagnostic(*second_annotation, "... repeated here ...");
+        }
 
         if let Some(rewrite) =
             grouped_rewrite(&parent_attr_set, &first_component_text, &occurrences)
         {
             report = report.suggest(
                 rewrite.first_range,
-                third_message.clone(),
+                last_message.clone(),
                 Suggestion::with_text(rewrite.first_range, rewrite.first_replacement),
             );
 
             for removal in rewrite.removals {
                 report = report.suggest(
                     removal,
-                    third_message.clone(),
+                    last_message.clone(),
                     Suggestion::with_empty(removal),
                 );
             }
         } else {
-            report = report.diagnostic(*third_annotation, third_message);
+            report = report.diagnostic(*last_annotation, last_message);
         }
 
         Some(report)
@@ -158,7 +189,7 @@ fn repeated_key_occurrence(entry: &Entry, first_component: &str) -> Option<Occur
     let first_text = match first {
         Attr::Ident(ident) => ident.to_string(),
         Attr::Str(s) => s.to_string(),
-        _ => return None,
+        Attr::Dynamic(_) => return None,
     };
 
     if first_text != first_component {
@@ -266,7 +297,7 @@ fn direct_assignment(entry: &Entry, first_component: &str, suffix: &[String]) ->
     let first_text = match first {
         Attr::Ident(ident) => ident.to_string(),
         Attr::Str(s) => s.to_string(),
-        _ => return false,
+        Attr::Dynamic(_) => return false,
     };
 
     if first_text != first_component {

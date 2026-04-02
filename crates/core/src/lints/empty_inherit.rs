@@ -42,7 +42,7 @@ impl Rule for EmptyInherit {
         }
 
         let at = node.text_range();
-        let replacement_at = utils::with_preceeding_whitespace(node);
+        let replacement_at = utils::with_preceding_whitespace(node);
         let message = "Remove this empty `inherit` statement";
         Some(
             self.report()

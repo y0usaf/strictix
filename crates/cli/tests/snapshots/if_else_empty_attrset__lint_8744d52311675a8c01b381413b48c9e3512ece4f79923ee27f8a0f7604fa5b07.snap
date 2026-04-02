@@ -11,14 +11,3 @@ expression: "\"if cond then {\\n  foo = 1;\\n  bar =\\n    let\\n      baz = 2;\
    │ │               
    │ ╰─────────────── Replace if ... then { ... } else {} with lib.optionalAttrs
 ───╯
-[30] Warning: Let binding used only once; consider inlining
-   ╭─[<temp_file_path>:5:7]
-   │
- 5 │       baz = 2;
-   │       ────┬───  
-   │           ╰───── baz is only used once; consider inlining
-   │ 
- 7 │       baz;
-   │       ─┬─  
-   │        ╰─── baz is only used once; consider inlining
-───╯

@@ -2,8 +2,4 @@
 source: crates/cli/tests/unused_lambda_param.rs
 expression: "\"x: let y = 1; in x + y\""
 ---
---- <temp_file_path>
-+++ <temp_file_path> [fixed]
-@@ -1 +1 @@
--x: let y = 1; in x + y
-+x: x + (1)
+

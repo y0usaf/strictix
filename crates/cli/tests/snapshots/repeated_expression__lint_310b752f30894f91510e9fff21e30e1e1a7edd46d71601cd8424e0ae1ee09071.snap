@@ -1,15 +1,7 @@
 ---
 source: crates/cli/tests/repeated_expression.rs
-assertion_line: 7
 expression: "\"let\\n  x = 1;\\nin\\n  pkgs.stdenv.mkDerivation { } // pkgs.stdenv.mkDerivation { }\\n\""
 ---
-[30] Warning: Let binding used only once; consider inlining
-   ╭─[<temp_file_path>:2:3]
-   │
- 2 │   x = 1;
-   │   ───┬──  
-   │      ╰──── x is never used
-───╯
 [34] Warning: Expression repeated; consider extracting into a let binding
    ╭─[<temp_file_path>:4:3]
    │

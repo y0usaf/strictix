@@ -1,5 +1,7 @@
 use crate::lints;
 
+pub use repeated_keys::set_min_occurrences as set_repeated_keys_min_occurrences;
+
 lints! {
     bool_comparison,
     empty_let_in,

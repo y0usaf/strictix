@@ -6,4 +6,4 @@ expression: "\"let h = ({ inherit (builtins) map; }); in null\""
 +++ <temp_file_path> [fixed]
 @@ -1 +1 @@
 -let h = ({ inherit (builtins) map; }); in null
-+null
++let h = { inherit (builtins) map; }; in null

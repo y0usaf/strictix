@@ -1,4 +1,4 @@
-use crate::{Diagnostic, Metadata, Report, Rule, Suggestion};
+use crate::{Metadata, Report, Rule, Suggestion};
 
 use macros::lint;
 use rnix::{
@@ -50,32 +50,28 @@ impl Rule for UselessParens {
             return None;
         };
 
-        let diagnostic = match (AttrpathValue::cast(node.clone()), Expr::cast(node.clone())) {
+        match (AttrpathValue::cast(node.clone()), Expr::cast(node.clone())) {
             (Some(attrpath_value), _) => {
                 let value_node = attrpath_value.value()?;
                 let value_range = value_node.syntax().text_range();
                 let paren = Paren::cast(value_node.syntax().clone())?;
-                let suggestion =
-                    Suggestion::with_replacement(value_range, paren.expr()?.syntax().clone());
 
-                Diagnostic::suggest(
+                Some(self.report().suggest(
                     value_range,
                     "Useless parentheses around value in binding",
-                    suggestion,
-                )
+                    Suggestion::with_replacement(value_range, paren.expr()?.syntax().clone()),
+                ))
             }
             (_, Some(Expr::LetIn(let_in))) => {
                 let body_node = let_in.body()?;
                 let body_range = body_node.syntax().text_range();
                 let paren = Paren::cast(body_node.syntax().clone())?;
-                let suggestion =
-                    Suggestion::with_replacement(body_range, paren.expr()?.syntax().clone());
 
-                Diagnostic::suggest(
+                Some(self.report().suggest(
                     body_range,
                     "Useless parentheses around body of `let` expression",
-                    suggestion,
-                )
+                    Suggestion::with_replacement(body_range, paren.expr()?.syntax().clone()),
+                ))
             }
             (_, Some(Expr::Paren(paren_expr))) => {
                 let paren_expr_range = paren_expr.syntax().text_range();
@@ -105,17 +101,13 @@ impl Rule for UselessParens {
                     _ => return None,
                 }
 
-                Diagnostic::suggest(
+                Some(self.report().suggest(
                     paren_expr_range,
                     "Useless parentheses around primitive expression",
                     Suggestion::with_replacement(paren_expr_range, parsed_inner.syntax().clone()),
-                )
+                ))
             }
-            _ => return None,
-        };
-
-        let mut report = self.report();
-        report.diagnostics.push(diagnostic);
-        Some(report)
+            _ => None,
+        }
     }
 }

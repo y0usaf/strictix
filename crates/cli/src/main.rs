@@ -10,12 +10,12 @@ use strictix::{
 fn main_() -> Result<(), StatixErr> {
     let opts = Opts::parse();
     match opts.cmd {
-        SubCommand::Check(config) => lint::main::main(&config),
-        SubCommand::Fix(config) => fix::main::all(&config),
-        SubCommand::Single(config) => fix::main::single(&config),
-        SubCommand::Explain(config) => explain::main::main(&config),
-        SubCommand::Dump(_) => dump::main::main(),
-        SubCommand::List(_) => list::main::main(),
+        SubCommand::Check(config) => lint::run(&config),
+        SubCommand::Fix(config) => fix::run_all(&config),
+        SubCommand::Single(config) => fix::run_single(&config),
+        SubCommand::Explain(config) => explain::run(&config),
+        SubCommand::Dump(_) => dump::run(),
+        SubCommand::List(_) => list::run(),
     }
 }
 

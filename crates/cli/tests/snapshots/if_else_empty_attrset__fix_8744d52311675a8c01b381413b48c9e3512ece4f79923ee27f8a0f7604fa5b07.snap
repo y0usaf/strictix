@@ -4,15 +4,14 @@ expression: "\"if cond then {\\n  foo = 1;\\n  bar =\\n    let\\n      baz = 2;\
 ---
 --- <temp_file_path>
 +++ <temp_file_path> [fixed]
-@@ -1,9 +1,6 @@
+@@ -1,9 +1,9 @@
 -if cond then {
 +lib.optionalAttrs cond {
    foo = 1;
    bar =
--    let
--      baz = 2;
--    in
--      baz;
+     let
+       baz = 2;
+     in
+       baz;
 -} else {}
-+    2;
 +}

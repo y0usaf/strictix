@@ -2,13 +2,6 @@
 source: crates/cli/tests/useless_parens.rs
 expression: "\"let a = (1 + 2); in null\""
 ---
-[30] Warning: Let binding used only once; consider inlining
-   ╭─[<temp_file_path>:1:5]
-   │
- 1 │ let a = (1 + 2); in null
-   │     ──────┬─────  
-   │           ╰─────── a is never used
-───╯
 [08] Warning: These parentheses can be omitted
    ╭─[<temp_file_path>:1:9]
    │
