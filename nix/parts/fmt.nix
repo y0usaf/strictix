@@ -21,12 +21,14 @@
             };
           };
         };
-        settings.global.excludes = [
-          "LICENSE-AGPL"
-          "LICENSE-MIT"
-          "NOTICE"
-        ];
-        settings.on-unmatched = "fatal";
+        settings = {
+          global.excludes = [
+            "LICENSE-AGPL"
+            "LICENSE-MIT"
+            "NOTICE"
+          ];
+          on-unmatched = "fatal";
+        };
       };
     };
   };
