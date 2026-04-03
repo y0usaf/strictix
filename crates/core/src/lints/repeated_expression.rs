@@ -8,7 +8,12 @@ use std::collections::HashMap;
 /// ## What it does
 /// Checks for attribute-access expressions with a common prefix of at least
 /// 3 components (e.g. `pkgs.hello.meta`) that appear more than once within
-/// the same `let-in` expression.
+/// the same `let-in` expression, **excluding** occurrences inside string
+/// interpolations.
+///
+/// Selects that only occur inside `${…}` are intentionally ignored: swapping
+/// `${config.user.name}` for `${name}` saves almost nothing and the suggestion
+/// would fire constantly in legitimate config code.
 ///
 /// ## Why is this bad?
 /// Repeating the same sub-expression adds noise and makes future changes
@@ -56,7 +61,8 @@ impl Rule for RepeatedExpression {
         // Confirm this is a let-in node.
         rnix::ast::LetIn::cast(node.clone())?;
 
-        // Collect all attribute-access (select) expressions in the subtree.
+        // Collect all attribute-access (select) expressions in the subtree,
+        // excluding those inside string interpolations.
         let mut selects: Vec<(String, TextRange)> = Vec::new();
         collect_selects(node, &mut selects);
 
@@ -140,6 +146,12 @@ impl Rule for RepeatedExpression {
 }
 
 fn collect_selects(node: &SyntaxNode, result: &mut Vec<(String, TextRange)>) {
+    // Do not descend into strings. A select like `config.user.name` that only
+    // appears inside `${config.user.name}` would require `${name}` after
+    // extraction – almost no improvement.
+    if node.kind() == SyntaxKind::NODE_STRING {
+        return;
+    }
     if node.kind() == SyntaxKind::NODE_SELECT {
         // When a select is the function of an application (e.g. `builtins.match
         // "pat" val`), comparing bare function references produces false positives:

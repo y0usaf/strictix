@@ -33,3 +33,23 @@ generate_tests! {
         "},
     ],
 }
+
+#[test]
+fn repeated_expression_ignores_selects_inside_string_interpolation() {
+    let stdout = _utils::test_cli(
+        indoc! {r#"
+            let
+              a = "${config.user.homeDirectory}/Tokens/id_rsa_${config.user.name}";
+              b = "${config.user.homeDirectory}/Tokens/id_ed25519_${config.user.name}";
+            in
+              [ a a b b ]
+        "#},
+        &["check"],
+    )
+    .unwrap();
+
+    assert!(
+        stdout.trim().is_empty(),
+        "expected no diagnostics for repeated selects inside string interpolation, got:\n{stdout}"
+    );
+}
