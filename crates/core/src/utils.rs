@@ -1,7 +1,7 @@
 use crate::make;
 use rnix::{
     SyntaxKind, SyntaxNode, TextRange,
-    ast::{Expr, Ident},
+    ast::{Expr, HasEntry as _, Ident},
 };
 use rowan::ast::AstNode as _;
 use std::collections::{HashMap, HashSet};
@@ -41,6 +41,28 @@ pub fn mentions_ident(ident: &str, node: &SyntaxNode) -> bool {
         return node_ident.to_string() == ident;
     }
     node.children().any(|child| mentions_ident(ident, &child))
+}
+
+pub fn mentions_any_ident(names: &HashSet<String>, node: &SyntaxNode) -> bool {
+    if let Some(ident) = Ident::cast(node.clone()) {
+        return names.contains(&ident.to_string());
+    }
+    node.children()
+        .any(|child| mentions_any_ident(names, &child))
+}
+
+pub fn is_empty_list(expr: &Expr) -> bool {
+    let Expr::List(list) = expr else {
+        return false;
+    };
+    list.items().count() == 0
+}
+
+pub fn is_empty_attrset(expr: &Expr) -> bool {
+    let Expr::AttrSet(set) = expr else {
+        return false;
+    };
+    set.rec_token().is_none() && set.entries().count() == 0
 }
 
 /// Format a syntax node as a function argument, adding parentheses if needed
