@@ -105,8 +105,9 @@ impl Rule for RepeatedKeys {
         // With only 2 occurrences the final message is on the second occurrence.
         let third = iter.next();
         let (last_annotation, _last_subkey) = third
-            .map(|(ann, key, _)| (ann, key))
-            .unwrap_or((second_annotation, second_subkey));
+            .map_or((second_annotation, second_subkey), |(ann, key, _)| {
+                (ann, key)
+            });
 
         let last_message = {
             let remaining_occurrences = iter.count();

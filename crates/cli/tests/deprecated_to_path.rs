@@ -1,3 +1,4 @@
+#![allow(clippy::needless_raw_string_hashes)]
 mod _utils;
 
 use macros::generate_tests;

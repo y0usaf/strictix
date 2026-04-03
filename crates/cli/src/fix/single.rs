@@ -5,8 +5,8 @@ use rnix::{Root, TextSize};
 
 use crate::{err::SingleFixErr, fix::Source, utils};
 
-pub struct SingleFixResult<'δ> {
-    pub src: Source<'δ>,
+pub struct SingleFixResult<'a> {
+    pub src: Source<'a>,
 }
 
 fn pos_to_byte(line: usize, col: usize, src: &str) -> Result<TextSize, SingleFixErr> {
