@@ -1,16 +1,15 @@
 use crate::{
     config::Explain as ExplainConfig,
     err::{ExplainErr, StatixErr},
-    utils,
 };
 
+use lib::LINTS;
+
 pub fn explain(code: u32) -> Result<&'static str, ExplainErr> {
-    let lints = utils::lint_map();
     match code {
         0 => Ok("syntax error"),
-        _ => lints
-            .values()
-            .flatten()
+        _ => LINTS
+            .iter()
             .find(|l| l.code() == code)
             .map(|l| l.explanation())
             .ok_or(ExplainErr::LintNotFound(code)),

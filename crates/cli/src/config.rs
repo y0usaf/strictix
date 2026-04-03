@@ -63,7 +63,7 @@ pub struct Check {
     #[arg(short, long = "stdin")]
     pub streaming: bool,
 
-    /// Enable all lints, including opt-in ones (with_expression, single_use_let, etc.)
+    /// Enable all lints, including opt-in ones (`with_expression`, `single_use_let`, etc.)
     #[arg(long)]
     pub strict: bool,
 
@@ -85,6 +85,7 @@ impl Check {
 }
 
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Fix {
     /// File or directory to run fix on
     #[arg(default_value = ".")]
@@ -110,7 +111,7 @@ pub struct Fix {
     #[arg(short, long = "stdin")]
     pub streaming: bool,
 
-    /// Enable all lints, including opt-in ones (with_expression, single_use_let, etc.)
+    /// Enable all lints, including opt-in ones (`with_expression`, `single_use_let`, etc.)
     #[arg(long)]
     pub strict: bool,
 
@@ -403,107 +404,6 @@ impl ConfFile {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::ConfFile;
-
-    use std::{
-        env, fs,
-        sync::{Mutex, MutexGuard},
-    };
-
-    use tempfile::tempdir;
-
-    // Serialise all tests that touch process-global environment variables.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn lock_env() -> MutexGuard<'static, ()> {
-        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    fn set_env_var(key: &str, value: &std::path::Path) {
-        unsafe { env::set_var(key, value) };
-    }
-
-    fn remove_env_var(key: &str) {
-        unsafe { env::remove_var(key) };
-    }
-
-    #[test]
-    fn discovers_global_config_from_xdg_path() {
-        let _guard = lock_env();
-        let temp = tempdir().unwrap();
-        let config_dir = temp.path().join("xdg").join("strictix");
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::write(
-            config_dir.join("config.toml"),
-            "enabled = [\"with_expression\"]\ndisabled = [\"empty_pattern\"]\n",
-        )
-        .unwrap();
-
-        set_env_var("XDG_CONFIG_HOME", &temp.path().join("xdg"));
-        remove_env_var("HOME");
-
-        let config = ConfFile::discover(temp.path()).unwrap();
-        let lints = config.lints();
-
-        assert!(
-            lints
-                .values()
-                .flatten()
-                .any(|lint| lint.name() == "with_expression")
-        );
-        assert!(
-            !lints
-                .values()
-                .flatten()
-                .any(|lint| lint.name() == "empty_pattern")
-        );
-        assert_eq!(lints.values().flatten().count(), 1);
-    }
-
-    #[test]
-    fn project_config_overrides_global_allowlist() {
-        let _guard = lock_env();
-        let temp = tempdir().unwrap();
-        let xdg_home = temp.path().join("xdg");
-        let config_dir = xdg_home.join("strictix");
-        let project_dir = temp.path().join("project");
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::create_dir_all(&project_dir).unwrap();
-        fs::write(
-            config_dir.join("config.toml"),
-            "enabled = [\"with_expression\"]\n",
-        )
-        .unwrap();
-        fs::write(
-            project_dir.join("strictix.toml"),
-            "enabled = [\"empty_pattern\"]\n",
-        )
-        .unwrap();
-
-        set_env_var("XDG_CONFIG_HOME", &xdg_home);
-        remove_env_var("HOME");
-
-        let config = ConfFile::discover(&project_dir).unwrap();
-        let lints = config.lints();
-
-        assert!(
-            lints
-                .values()
-                .flatten()
-                .any(|lint| lint.name() == "empty_pattern")
-        );
-        assert!(
-            !lints
-                .values()
-                .flatten()
-                .any(|lint| lint.name() == "with_expression")
-        );
-        assert_eq!(lints.values().flatten().count(), 1);
-    }
-}
-
 fn parse_line_col(src: &str) -> Result<(usize, usize), ConfigErr> {
     let Some((line, col)) = src.split_once(',') else {
         return Err(ConfigErr::InvalidPosition(src.to_owned()));
@@ -596,6 +496,110 @@ fn filesystem_vfs(
 ) -> Result<ReadOnlyVfs, ConfigErr> {
     let all_ignores = [ignore, extra_ignores].concat();
     let ignore = dirs::build_ignore_set(&all_ignores, target, unrestricted)?;
-    let files = dirs::walk_nix_files(ignore, target)?;
-    Ok(vfs(&files.collect::<Vec<_>>()))
+    let mut files: Vec<_> = dirs::walk_nix_files(ignore, target)?.collect();
+    files.sort();
+    Ok(vfs(&files))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ConfFile;
+
+    use std::{
+        env, fs,
+        sync::{Mutex, MutexGuard},
+    };
+
+    use tempfile::tempdir;
+
+    // Serialise all tests that touch process-global environment variables.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_env() -> MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn set_env_var(key: &str, value: &std::path::Path) {
+        unsafe { env::set_var(key, value) };
+    }
+
+    fn remove_env_var(key: &str) {
+        unsafe { env::remove_var(key) };
+    }
+
+    #[test]
+    fn discovers_global_config_from_xdg_path() {
+        let _guard = lock_env();
+        let temp = tempdir().unwrap();
+        let config_dir = temp.path().join("xdg").join("strictix");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("config.toml"),
+            "enabled = [\"with_expression\"]\ndisabled = [\"empty_pattern\"]\n",
+        )
+        .unwrap();
+
+        set_env_var("XDG_CONFIG_HOME", &temp.path().join("xdg"));
+        remove_env_var("HOME");
+
+        let config = ConfFile::discover(temp.path()).unwrap();
+        let lints = config.lints();
+
+        assert!(
+            lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "with_expression")
+        );
+        assert!(
+            !lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "empty_pattern")
+        );
+        assert_eq!(lints.values().flatten().count(), 1);
+    }
+
+    #[test]
+    fn project_config_overrides_global_allowlist() {
+        let _guard = lock_env();
+        let temp = tempdir().unwrap();
+        let xdg_home = temp.path().join("xdg");
+        let config_dir = xdg_home.join("strictix");
+        let project_dir = temp.path().join("project");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(
+            config_dir.join("config.toml"),
+            "enabled = [\"with_expression\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            project_dir.join("strictix.toml"),
+            "enabled = [\"empty_pattern\"]\n",
+        )
+        .unwrap();
+
+        set_env_var("XDG_CONFIG_HOME", &xdg_home);
+        remove_env_var("HOME");
+
+        let config = ConfFile::discover(&project_dir).unwrap();
+        let lints = config.lints();
+
+        assert!(
+            lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "empty_pattern")
+        );
+        assert!(
+            !lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "with_expression")
+        );
+        assert_eq!(lints.values().flatten().count(), 1);
+    }
 }
