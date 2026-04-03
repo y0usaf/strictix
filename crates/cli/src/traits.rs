@@ -131,24 +131,24 @@ mod json {
     use vfs::ReadOnlyVfs;
 
     #[derive(Serialize)]
-    struct Out<'μ> {
+    struct Out<'a> {
         #[serde(rename = "file")]
-        path: &'μ std::path::Path,
-        report: Vec<JsonReport<'μ>>,
+        path: &'a std::path::Path,
+        report: Vec<JsonReport<'a>>,
     }
 
     #[derive(Serialize)]
-    struct JsonReport<'μ> {
+    struct JsonReport<'a> {
         note: &'static str,
         code: u32,
-        severity: &'μ Severity,
-        diagnostics: Vec<JsonDiagnostic<'μ>>,
+        severity: &'a Severity,
+        diagnostics: Vec<JsonDiagnostic<'a>>,
     }
 
     #[derive(Serialize)]
-    struct JsonDiagnostic<'μ> {
+    struct JsonDiagnostic<'a> {
         at: JsonSpan,
-        message: &'μ String,
+        message: &'a String,
         suggestion: Option<JsonSuggestion>,
     }
 

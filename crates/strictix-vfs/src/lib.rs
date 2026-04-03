@@ -88,10 +88,10 @@ impl ReadOnlyVfs {
     }
 }
 
-pub struct VfsEntry<'ρ> {
+pub struct VfsEntry<'a> {
     pub file_id: FileId,
-    pub file_path: &'ρ Path,
-    pub contents: &'ρ str,
+    pub file_path: &'a Path,
+    pub contents: &'a str,
 }
 
 #[cfg(test)]
