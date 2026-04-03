@@ -3,7 +3,7 @@ use crate::{Metadata, Report, Rule, Suggestion, utils};
 use macros::lint;
 use rnix::{
     NodeOrToken, SyntaxElement, SyntaxKind,
-    ast::{Expr, HasEntry, IfElse},
+    ast::{Expr, HasEntry as _, IfElse},
 };
 use rowan::ast::AstNode as _;
 
@@ -45,10 +45,7 @@ impl Rule for IfElseEmptyAttrset {
         let else_body = if_else.else_body()?;
 
         // `else` must be an empty non-rec attrset
-        let Expr::AttrSet(else_set) = else_body else {
-            return None;
-        };
-        if else_set.rec_token().is_some() || else_set.entries().count() != 0 {
+        if !utils::is_empty_attrset(&else_body) {
             return None;
         }
 

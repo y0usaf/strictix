@@ -1,11 +1,12 @@
-use crate::{Metadata, Report, Rule, Suggestion};
+use crate::{Metadata, Report, Rule, Suggestion, utils};
 
 use macros::lint;
 use rnix::{
     NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode,
-    ast::{Attr, AttrSet, Entry, HasEntry, Ident},
+    ast::{Attr, AttrSet, Entry, HasEntry},
 };
 use rowan::ast::AstNode as _;
+use std::collections::HashSet;
 
 /// ## What it does
 /// Checks for `rec { }` attribute sets where no binding references
@@ -65,7 +66,7 @@ impl Rule for UnnecessaryRec {
         }
 
         // Collect all simple (ident) top-level binding names
-        let mut binding_names: Vec<String> = attrset
+        let mut binding_names: HashSet<String> = attrset
             .entries()
             .filter_map(|entry| {
                 let Entry::AttrpathValue(kv) = entry else {
@@ -84,7 +85,7 @@ impl Rule for UnnecessaryRec {
             if let Entry::Inherit(inherit) = entry {
                 for attr in inherit.attrs() {
                     if let Attr::Ident(ident) = attr {
-                        binding_names.push(ident.to_string());
+                        binding_names.insert(ident.to_string());
                     }
                 }
             }
@@ -137,10 +138,6 @@ impl Rule for UnnecessaryRec {
     }
 }
 
-fn mentions_any_name(node: &SyntaxNode, names: &[String]) -> bool {
-    if let Some(ident) = Ident::cast(node.clone()) {
-        return names.contains(&ident.to_string());
-    }
-    node.children()
-        .any(|child| mentions_any_name(&child, names))
+fn mentions_any_name(node: &SyntaxNode, names: &HashSet<String>) -> bool {
+    utils::mentions_any_ident(names, node)
 }

@@ -1,9 +1,9 @@
-use crate::{Metadata, Report, Rule, Suggestion};
+use crate::{Metadata, Report, Rule, Suggestion, utils};
 
 use macros::lint;
 use rnix::{
     NodeOrToken, SyntaxElement, SyntaxKind,
-    ast::{BinOp, BinOpKind, Expr, HasEntry},
+    ast::{BinOp, BinOpKind},
 };
 use rowan::ast::AstNode as _;
 
@@ -47,9 +47,9 @@ impl Rule for EmptyAttrsetMerge {
         let at = node.text_range();
         let message = "Merging with an empty attrset `{}` is a no-op";
 
-        let non_empty = if is_empty_attrset(&lhs) {
+        let non_empty = if utils::is_empty_attrset(&lhs) {
             rhs
-        } else if is_empty_attrset(&rhs) {
+        } else if utils::is_empty_attrset(&rhs) {
             lhs
         } else {
             return None;
@@ -61,12 +61,4 @@ impl Rule for EmptyAttrsetMerge {
             Suggestion::with_replacement(at, non_empty.syntax().clone()),
         ))
     }
-}
-
-fn is_empty_attrset(expr: &Expr) -> bool {
-    let Expr::AttrSet(set) = expr else {
-        return false;
-    };
-    // Must not be recursive and must have no entries
-    set.rec_token().is_none() && set.entries().count() == 0
 }

@@ -45,10 +45,7 @@ impl Rule for IfElseEmptyList {
         let else_body = if_else.else_body()?;
 
         // `else` must be an empty list
-        let Expr::List(else_list) = else_body else {
-            return None;
-        };
-        if else_list.items().count() != 0 {
+        if !utils::is_empty_list(&else_body) {
             return None;
         }
 
