@@ -105,7 +105,7 @@ fn make_test(rule: &Ident, kind: TestKind, nix_expression: &Expr) -> proc_macro2
                 #[test]
                 fn #test_ident() {
                     let expression = #nix_expression;
-                    let stdout = _utils::test_cli(expression, #args).unwrap();
+                    let stdout = _utils::test_cli(expression, #args).expect("CLI execution failed");
                     insta::assert_snapshot!(#snap_name, stdout, &format!("{expression:?}"));
                 }
             }
@@ -115,7 +115,7 @@ fn make_test(rule: &Ident, kind: TestKind, nix_expression: &Expr) -> proc_macro2
                 #[test]
                 fn #test_ident() {
                     let expression = #nix_expression;
-                    _utils::assert_fix_roundtrip(expression).unwrap();
+                    _utils::assert_fix_roundtrip(expression).expect("fix roundtrip failed");
                 }
             }
         }
@@ -146,7 +146,7 @@ fn make_property_test(
                 prefix in _utils::trivia_strategy(),
                 suffix in _utils::trivia_strategy(),
             ) {
-                _utils::assert_rewrite_invariants(#rule_name, expression, &prefix, &suffix).unwrap();
+                _utils::assert_rewrite_invariants(#rule_name, expression, &prefix, &suffix).expect("rewrite invariant violated");
             }
         }
     }

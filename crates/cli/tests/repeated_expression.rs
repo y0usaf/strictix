@@ -46,7 +46,7 @@ fn repeated_expression_ignores_selects_inside_string_interpolation() {
         "#},
         &["check"],
     )
-    .unwrap();
+    .expect("CLI 'check' should succeed for selects inside string interpolation");
 
     assert!(
         stdout.trim().is_empty(),

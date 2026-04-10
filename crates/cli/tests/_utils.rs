@@ -23,7 +23,7 @@ fn create_fixture(expression: &str) -> anyhow::Result<NamedTempFile> {
 fn sanitize_output(output: Vec<u8>, path: &Path) -> anyhow::Result<String> {
     let output = strip_ansi_escapes::strip(output)?;
     let output = String::from_utf8(output)?;
-    Ok(output.replace(path.to_str().unwrap(), "<temp_file_path>"))
+    Ok(output.replace(path.to_str().expect("temp path is valid UTF-8"), "<temp_file_path>"))
 }
 
 pub fn run_cli(path: &Path, args: &[&str]) -> anyhow::Result<CliOutput> {
