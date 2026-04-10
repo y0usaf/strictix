@@ -1,0 +1,10 @@
+---
+source: crates/cli/tests/unsorted_pattern_params.rs
+assertion_line: 5
+expression: "\"({ config, pkgs ? null, lib, ... }: config)\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-({ config, pkgs ? null, lib, ... }: config)
++({ config, lib, pkgs ? null, ... }: config)

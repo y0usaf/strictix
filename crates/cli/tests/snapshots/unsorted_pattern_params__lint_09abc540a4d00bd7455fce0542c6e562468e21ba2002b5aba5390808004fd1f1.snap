@@ -1,0 +1,19 @@
+---
+source: crates/cli/tests/unsorted_pattern_params.rs
+assertion_line: 5
+expression: "\"({ pkgs, config, lib, ... } @ args: config)\""
+---
+[32] Warning: This pattern binding is never used
+   ╭─[<temp_file_path>:1:2]
+   │
+ 1 │ ({ pkgs, config, lib, ... } @ args: config)
+   │  ────────────────┬────────────────  
+   │                  ╰────────────────── args is never used; remove the redundant pattern binding
+───╯
+[35] Warning: Function pattern parameters are not in canonical order
+   ╭─[<temp_file_path>:1:2]
+   │
+ 1 │ ({ pkgs, config, lib, ... } @ args: config)
+   │  ────────────────┬────────────────  
+   │                  ╰────────────────── Reorder parameters to canonical order: config, lib, pkgs, then alphabetical
+───╯

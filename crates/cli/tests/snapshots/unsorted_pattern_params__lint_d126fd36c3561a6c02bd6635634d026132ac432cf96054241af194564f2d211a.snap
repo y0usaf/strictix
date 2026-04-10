@@ -1,0 +1,12 @@
+---
+source: crates/cli/tests/unsorted_pattern_params.rs
+assertion_line: 5
+expression: "\"({ ... }: 42)\""
+---
+[10] Warning: Found empty pattern in function argument
+   ╭─[<temp_file_path>:1:2]
+   │
+ 1 │ ({ ... }: 42)
+   │  ───┬───  
+   │     ╰───── This pattern is empty, use _ instead
+───╯

@@ -1,0 +1,6 @@
+---
+source: crates/cli/tests/unsorted_pattern_params.rs
+assertion_line: 5
+expression: "\"({ config, lib, pkgs, alpha, beta, ... }: config)\""
+---
+
