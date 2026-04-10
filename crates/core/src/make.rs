@@ -51,14 +51,14 @@ pub fn attrset(
 ) -> Option<ast::AttrSet> {
     let mut buffer = String::new();
 
-    writeln!(buffer, "{}{{", if recursive { "rec " } else { "" }).unwrap();
+    writeln!(buffer, "{}{{", if recursive { "rec " } else { "" }).expect("write to String buffer");
     for inherit in inherits {
-        writeln!(buffer, "  {inherit}").unwrap();
+        writeln!(buffer, "  {inherit}").expect("write to String buffer");
     }
     for entry in entries {
-        writeln!(buffer, "  {entry}").unwrap();
+        writeln!(buffer, "  {entry}").expect("write to String buffer");
     }
-    write!(buffer, "}}").unwrap();
+    write!(buffer, "}}").expect("write to String buffer");
 
     ast_from_text(&buffer)
 }

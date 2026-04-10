@@ -97,10 +97,10 @@ impl Rule for RepeatedKeys {
 
         let mut iter = occurrences.iter();
 
-        let (first_annotation, first_subkey, _) = iter.next().unwrap();
+        let (first_annotation, first_subkey, _) = iter.next().expect("occurrences has >= MIN_OCCURRENCES (>= 2) elements, so first element exists");
         let first_message = format!("The key `{first_component_text}` is first assigned here ...");
 
-        let (second_annotation, second_subkey, _) = iter.next().unwrap();
+        let (second_annotation, second_subkey, _) = iter.next().expect("occurrences has >= MIN_OCCURRENCES (>= 2) elements, so second element exists");
 
         // With only 2 occurrences the final message is on the second occurrence.
         let third = iter.next();
@@ -128,7 +128,7 @@ impl Rule for RepeatedKeys {
                     second_subkey.join("."),
                     third_subkey.join("."),
                 )
-                .unwrap();
+                .expect("write! to a String is infallible");
             } else {
                 write!(
                     message,
@@ -136,7 +136,7 @@ impl Rule for RepeatedKeys {
                     first_subkey.join("."),
                     second_subkey.join("."),
                 )
-                .unwrap();
+                .expect("write! to a String is infallible");
             }
             message
         };
