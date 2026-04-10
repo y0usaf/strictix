@@ -32,4 +32,5 @@ lints! {
     unused_pattern_bind,
     if_else_empty_list,
     repeated_expression,
+    unsorted_pattern_params,
 }
