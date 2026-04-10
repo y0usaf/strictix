@@ -532,19 +532,19 @@ mod tests {
     #[test]
     fn discovers_global_config_from_xdg_path() {
         let _guard = lock_env();
-        let temp = tempdir().unwrap();
+        let temp = tempdir().expect("failed to create temporary directory");
         let config_dir = temp.path().join("xdg").join("strictix");
-        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&config_dir).expect("failed to create XDG config directory tree");
         fs::write(
             config_dir.join("config.toml"),
             "enabled = [\"with_expression\"]\ndisabled = [\"empty_pattern\"]\n",
         )
-        .unwrap();
+        .expect("failed to write global config.toml");
 
         set_env_var("XDG_CONFIG_HOME", &temp.path().join("xdg"));
         remove_env_var("HOME");
 
-        let config = ConfFile::discover(temp.path()).unwrap();
+        let config = ConfFile::discover(temp.path()).expect("failed to discover global config from XDG path");
         let lints = config.lints();
 
         assert!(
@@ -565,27 +565,27 @@ mod tests {
     #[test]
     fn project_config_overrides_global_allowlist() {
         let _guard = lock_env();
-        let temp = tempdir().unwrap();
+        let temp = tempdir().expect("failed to create temporary directory");
         let xdg_home = temp.path().join("xdg");
         let config_dir = xdg_home.join("strictix");
         let project_dir = temp.path().join("project");
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::create_dir_all(&project_dir).unwrap();
+        fs::create_dir_all(&config_dir).expect("failed to create XDG config directory tree");
+        fs::create_dir_all(&project_dir).expect("failed to create project directory");
         fs::write(
             config_dir.join("config.toml"),
             "enabled = [\"with_expression\"]\n",
         )
-        .unwrap();
+        .expect("failed to write global config.toml");
         fs::write(
             project_dir.join("strictix.toml"),
             "enabled = [\"empty_pattern\"]\n",
         )
-        .unwrap();
+        .expect("failed to write project strictix.toml");
 
         set_env_var("XDG_CONFIG_HOME", &xdg_home);
         remove_env_var("HOME");
 
-        let config = ConfFile::discover(&project_dir).unwrap();
+        let config = ConfFile::discover(&project_dir).expect("failed to discover config with project override");
         let lints = config.lints();
 
         assert!(
