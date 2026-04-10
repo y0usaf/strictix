@@ -3,7 +3,7 @@ use crate::{Metadata, Report, Rule, utils};
 use macros::lint;
 use rnix::{NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode, TextRange};
 use rowan::ast::AstNode as _;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// ## What it does
 /// Checks for attribute-access expressions with a common prefix of at least
@@ -63,7 +63,9 @@ impl Rule for RepeatedExpression {
 
         // Collect all attribute-access (select) expressions in the subtree,
         // excluding those inside string interpolations.
-        let mut selects: Vec<(String, TextRange)> = Vec::new();
+        // The boolean tracks whether the entry was promoted to its enclosing
+        // application expression (true) or is a plain select (false).
+        let mut selects: Vec<(String, TextRange, bool)> = Vec::new();
         collect_selects(node, &mut selects);
 
         if selects.is_empty() {
@@ -78,9 +80,21 @@ impl Rule for RepeatedExpression {
         // attrpath=`b.c.d`), so `a.b.c` does not appear as a sub-node.
         // We detect common prefixes by splitting the text on `.`.
         let mut prefix_ranges: HashMap<String, Vec<TextRange>> = HashMap::new();
+        // Track keys that originate from application expressions so we can
+        // relax the component-count filter for them.
+        let mut app_keys: HashSet<String> = HashSet::new();
 
-        for (raw_text, range) in &selects {
+        for (raw_text, range, is_app) in &selects {
             let text = utils::normalize_select(raw_text);
+            if *is_app {
+                // Application expressions are registered as exact-match keys
+                // only.  Splitting by `.` would produce meaningless
+                // sub-prefixes because the text includes function arguments
+                // (e.g. `lib.mkOption { type = ... }`).
+                app_keys.insert(text.clone());
+                prefix_ranges.entry(text).or_default().push(*range);
+                continue;
+            }
             let parts: Vec<&str> = text.split('.').collect();
             if parts.len() < 2 {
                 continue;
@@ -105,11 +119,18 @@ impl Rule for RepeatedExpression {
         // components. Requiring 3 components avoids false positives for shallow
         // prefixes like `config.user` where the suffixes diverge significantly
         // (e.g. `.name` vs `.appearance.wallust`).
-        let repeated: std::collections::HashSet<String> = prefix_ranges
+        // Application-derived keys bypass the component-count requirement
+        // because they are already full expressions, not dot-split prefixes.
+        let repeated: HashSet<String> = prefix_ranges
             .iter()
             .filter(|(prefix, ranges)| {
-                let parts = prefix.split('.').count();
-                ranges.len() >= 2 && parts >= 3
+                if ranges.len() < 2 {
+                    return false;
+                }
+                if app_keys.contains(prefix.as_str()) {
+                    return true;
+                }
+                prefix.split('.').count() >= 3
             })
             .map(|(p, _)| p.clone())
             .collect();
@@ -119,11 +140,11 @@ impl Rule for RepeatedExpression {
         }
 
         let mut report = self.report();
-        let mut found = false;
 
         // Only report the longest (most specific) repeated prefix to avoid
         // redundant diagnostics. E.g. if `pkgs.hello.meta` is repeated, skip
         // reporting `pkgs.hello` separately.
+        let mut to_report: Vec<(&String, &Vec<TextRange>)> = Vec::new();
         for prefix in &repeated {
             let is_subsumed = repeated.iter().any(|other| {
                 other != prefix
@@ -133,19 +154,39 @@ impl Rule for RepeatedExpression {
             if is_subsumed {
                 continue;
             }
-
-            let message = format!("`{prefix}` is repeated; consider extracting into a let binding");
-            for &range in &prefix_ranges[prefix] {
-                report = report.diagnostic(range, &message);
-            }
-            found = true;
+            to_report.push((prefix, &prefix_ranges[prefix]));
         }
 
-        found.then_some(report)
+        // Drop prefixes whose diagnostic ranges are ALL strictly contained
+        // within another reported prefix's ranges.  This prevents overlapping
+        // ariadne labels when, e.g., every occurrence of `lib.types.str` sits
+        // inside a repeated `lib.mkOption { type = lib.types.str; … }` call.
+        let to_report: Vec<_> = to_report
+            .iter()
+            .filter(|(_, ranges)| {
+                !to_report.iter().any(|(_, other_ranges)| {
+                    !std::ptr::eq(*ranges, *other_ranges)
+                        && ranges.iter().all(|r| {
+                            other_ranges
+                                .iter()
+                                .any(|or| *or != *r && or.contains_range(*r))
+                        })
+                })
+            })
+            .collect();
+
+        for (prefix, ranges) in &to_report {
+            let message = format!("`{prefix}` is repeated; consider extracting into a let binding");
+            for &range in *ranges {
+                report = report.diagnostic(range, &message);
+            }
+        }
+
+        (!report.diagnostics.is_empty()).then_some(report)
     }
 }
 
-fn collect_selects(node: &SyntaxNode, result: &mut Vec<(String, TextRange)>) {
+fn collect_selects(node: &SyntaxNode, result: &mut Vec<(String, TextRange, bool)>) {
     // Do not descend into strings. A select like `config.user.name` that only
     // appears inside `${config.user.name}` would require `${name}` after
     // extraction – almost no improvement.
@@ -180,9 +221,9 @@ fn collect_selects(node: &SyntaxNode, result: &mut Vec<(String, TextRange)>) {
                     break;
                 }
             }
-            result.push((current.to_string(), current.text_range()));
+            result.push((current.to_string(), current.text_range(), true));
         } else {
-            result.push((node.to_string(), node.text_range()));
+            result.push((node.to_string(), node.text_range(), false));
         }
     }
     for child in node.children() {
