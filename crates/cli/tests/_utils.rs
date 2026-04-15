@@ -44,6 +44,21 @@ pub fn test_cli(expression: &str, args: &[&str]) -> anyhow::Result<String> {
     Ok(run_cli(fixture.path(), args)?.stdout)
 }
 
+pub fn assert_check_clean(expression: &str) -> anyhow::Result<()> {
+    let fixture = create_fixture(expression)?;
+    let output = run_cli(fixture.path(), &["check"])?;
+
+    if !output.success {
+        return Err(anyhow!(
+            "strictix check failed\nstdout:\n{}\nstderr:\n{}",
+            output.stdout,
+            output.stderr,
+        ));
+    }
+
+    Ok(())
+}
+
 pub fn assert_fix_roundtrip(expression: &str) -> anyhow::Result<()> {
     let fixture = create_fixture(expression)?;
     let original = fs::read_to_string(fixture.path())?;

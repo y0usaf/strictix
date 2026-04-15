@@ -36,20 +36,30 @@ generate_tests! {
 
 #[test]
 fn repeated_expression_ignores_selects_inside_string_interpolation() {
-    let stdout = _utils::test_cli(
-        indoc! {r#"
-            let
-              a = "${config.user.homeDirectory}/Tokens/id_rsa_${config.user.name}";
-              b = "${config.user.homeDirectory}/Tokens/id_ed25519_${config.user.name}";
-            in
-              [ a a b b ]
-        "#},
-        &["check"],
-    )
+    _utils::assert_check_clean(indoc! {r#"
+        let
+          a = "${config.user.homeDirectory}/Tokens/id_rsa_${config.user.name}";
+          b = "${config.user.homeDirectory}/Tokens/id_ed25519_${config.user.name}";
+        in
+          [ a a b b ]
+    "#})
     .expect("CLI 'check' should succeed for selects inside string interpolation");
+}
 
-    assert!(
-        stdout.trim().is_empty(),
-        "expected no diagnostics for repeated selects inside string interpolation, got:\n{stdout}"
-    );
+#[test]
+fn repeated_expression_ignores_dots_inside_application_arguments() {
+    _utils::assert_check_clean(indoc! {r#"
+        let
+          a = builtins.fetchTarball {
+            url = "https://api.github.com/repos/foo/bar/tarball/v1";
+            sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+          };
+          b = builtins.fetchTarball {
+            url = "https://api.github.com/repos/baz/qux/tarball/v2";
+            sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+          };
+        in
+          [ a b ]
+    "#})
+    .expect("CLI 'check' should succeed when dots only repeat inside application arguments");
 }

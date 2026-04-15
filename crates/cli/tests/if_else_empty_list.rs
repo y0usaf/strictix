@@ -24,40 +24,24 @@ generate_tests! {
 
 #[test]
 fn no_lint_non_empty_else() -> anyhow::Result<()> {
-    let stdout = _utils::test_cli("if cond then [ foo ] else [ bar ]", &["check"])?;
-    assert!(
-        stdout.trim().is_empty(),
-        "should not lint non-empty else: {stdout}"
-    );
+    _utils::assert_check_clean("if cond then [ foo ] else [ bar ]")?;
     Ok(())
 }
 
 #[test]
 fn no_lint_then_not_a_list() -> anyhow::Result<()> {
-    let stdout = _utils::test_cli("if cond then foo else []", &["check"])?;
-    assert!(
-        stdout.trim().is_empty(),
-        "should not lint when then-body is not a list: {stdout}"
-    );
+    _utils::assert_check_clean("if cond then foo else []")?;
     Ok(())
 }
 
 #[test]
 fn no_lint_then_empty() -> anyhow::Result<()> {
-    let stdout = _utils::test_cli("if cond then [] else [ foo ]", &["check"])?;
-    assert!(
-        stdout.trim().is_empty(),
-        "should not lint when then-body is empty: {stdout}"
-    );
+    _utils::assert_check_clean("if cond then [] else [ foo ]")?;
     Ok(())
 }
 
 #[test]
 fn no_lint_both_empty() -> anyhow::Result<()> {
-    let stdout = _utils::test_cli("if cond then [] else []", &["check"])?;
-    assert!(
-        stdout.trim().is_empty(),
-        "should not lint when both branches are empty: {stdout}"
-    );
+    _utils::assert_check_clean("if cond then [] else []")?;
     Ok(())
 }
