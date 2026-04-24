@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/list_concat_merge.rs
+expression: "\"[ veryLongPackageName1 veryLongPackageName2 ] ++ lib.optionals cfg.enable [ pkg ] ++ [ veryLongPackageName3 veryLongPackageName4 ]\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-[ veryLongPackageName1 veryLongPackageName2 ] ++ lib.optionals cfg.enable [ pkg ] ++ [ veryLongPackageName3 veryLongPackageName4 ]
++[ veryLongPackageName1 veryLongPackageName2 veryLongPackageName3 veryLongPackageName4 ] ++ lib.optionals cfg.enable [ pkg ]

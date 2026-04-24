@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/list_concat_merge.rs
+expression: "\"[ veryLongPackageName1 veryLongPackageName2 ] ++ lib.optionals cfg.enable [ pkg ] ++ [ veryLongPackageName3 veryLongPackageName4 ]\""
+---
+[35] Warning: Multiple list concatenations that can be merged
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ [ veryLongPackageName1 veryLongPackageName2 ] ++ lib.optionals cfg.enable [ pkg ] ++ [ veryLongPackageName3 veryLongPackageName4 ]
+   │ ─────────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────  
+   │                                                                  ╰────────────────────────────────────────────────────────────────── Multiple list concatenations that can be merged
+───╯

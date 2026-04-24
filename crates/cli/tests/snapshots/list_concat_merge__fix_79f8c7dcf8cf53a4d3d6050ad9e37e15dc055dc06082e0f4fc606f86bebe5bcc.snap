@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/list_concat_merge.rs
+expression: "\"[ a b c ] ++ lib.optionals cfg.someCond [ d ] ++ [ e f g ]\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-[ a b c ] ++ lib.optionals cfg.someCond [ d ] ++ [ e f g ]
++[ a b c e f g ] ++ lib.optionals cfg.someCond [ d ]

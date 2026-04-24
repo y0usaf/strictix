@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/list_concat_merge.rs
+expression: "\"[ a b ] ++ lib.optionals cfg.enable [ c ]\""
+---
+

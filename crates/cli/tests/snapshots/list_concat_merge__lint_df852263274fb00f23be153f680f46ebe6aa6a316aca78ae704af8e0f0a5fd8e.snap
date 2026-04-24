@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/list_concat_merge.rs
+expression: "\"[ a b ] ++ lib.optionals cfg.enable [ x ] ++ [ d e ]\""
+---
+[35] Warning: Multiple list concatenations that can be merged
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ [ a b ] ++ lib.optionals cfg.enable [ x ] ++ [ d e ]
+   │ ──────────────────────────┬─────────────────────────  
+   │                           ╰─────────────────────────── Multiple list concatenations that can be merged
+───╯
