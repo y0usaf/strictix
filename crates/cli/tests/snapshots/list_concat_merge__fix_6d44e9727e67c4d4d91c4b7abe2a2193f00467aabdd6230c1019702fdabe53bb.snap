@@ -1,0 +1,5 @@
+---
+source: crates/cli/tests/list_concat_merge.rs
+expression: "\"[1 2] ++ [3 4]\""
+---
+

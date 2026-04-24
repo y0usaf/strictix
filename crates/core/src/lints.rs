@@ -33,4 +33,5 @@ lints! {
     if_else_empty_list,
     repeated_expression,
     unsorted_pattern_params,
+    list_concat_merge,
 }

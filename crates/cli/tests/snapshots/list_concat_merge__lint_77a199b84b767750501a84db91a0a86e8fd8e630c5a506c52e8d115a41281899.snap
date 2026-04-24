@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/list_concat_merge.rs
+expression: "\"[ base ] ++ lib.optionals (config.features.enable && config.features.advanced) [ optional1 ] ++ [ extra1 extra2 ]\""
+---
+[35] Warning: Multiple list concatenations that can be merged
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ [ base ] ++ lib.optionals (config.features.enable && config.features.advanced) [ optional1 ] ++ [ extra1 extra2 ]
+   │ ────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────  
+   │                                                         ╰────────────────────────────────────────────────────────── Multiple list concatenations that can be merged
+───╯
