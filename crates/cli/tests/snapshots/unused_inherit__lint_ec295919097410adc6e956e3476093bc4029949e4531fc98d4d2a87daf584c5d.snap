@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/unused_inherit.rs
+expression: "\"let inherit (lib) mkIf mkOption types; in mkIf true {}\""
+---
+[37] Warning: Inherited name is never used
+   ╭─[<temp_file_path>:1:5]
+   │
+ 1 │ let inherit (lib) mkIf mkOption types; in mkIf true {}
+   │     ─────────────────┬────────────────  
+   │                      ╰────────────────── mkOption, types are inherited but never used
+───╯

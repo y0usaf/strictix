@@ -3,7 +3,9 @@ mod lints;
 mod make;
 mod utils;
 
-pub use lints::{LINTS, set_repeated_keys_min_occurrences};
+pub use lints::{
+    LINTS, set_repeated_keys_min_occurrences, set_unused_pattern_param_remove_ellipsis,
+};
 
 use rnix::{SyntaxElement, SyntaxKind, TextRange, parser::ParseError};
 

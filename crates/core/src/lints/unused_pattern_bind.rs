@@ -44,8 +44,9 @@ impl Rule for UnusedPatternBind {
         let pat_bind = pattern.pat_bind()?;
         let ident = pat_bind.ident()?;
 
-        // Keep the existing empty-pattern rules responsible for `{ ... } @ args`.
-        if pattern.pat_entries().count() == 0 {
+        // Keep the existing redundant/empty-pattern rules responsible for `{ ... } @ args`.
+        // A closed empty pattern (`{ } @ args`) can still drop an unused bind safely.
+        if pattern.pat_entries().count() == 0 && pattern.ellipsis_token().is_some() {
             return None;
         }
 

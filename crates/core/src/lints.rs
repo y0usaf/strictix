@@ -1,6 +1,7 @@
 use crate::lints;
 
 pub use repeated_keys::set_min_occurrences as set_repeated_keys_min_occurrences;
+pub use unused_pattern_param::set_remove_ellipsis as set_unused_pattern_param_remove_ellipsis;
 
 lints! {
     bool_comparison,
@@ -34,4 +35,6 @@ lints! {
     repeated_expression,
     unsorted_pattern_params,
     list_concat_merge,
+    unused_inherit,
+    unused_pattern_param,
 }
