@@ -120,6 +120,10 @@ ignore = [".direnv", "result"]
 
 # Or enable all opt-in lints at once
 strict = true
+
+# Optional per-lint settings
+[lints.unused_pattern_param]
+remove_ellipsis = false # true: { config, lib, ... }: config → { config }: config
 ```
 
 By default, `strictix` discovers configuration relative to the target you pass to `check`, `fix`, or `single`: it looks for `strictix.toml` starting from that file or directory and then walks upward through parent directories.
@@ -172,6 +176,8 @@ Added by `strictix`:
 | W34  | `repeated_expression`      |          |        | Expression repeated; consider extracting into a let binding |
 | W35  | `unsorted_pattern_params`  | ✓        |        | Sort pattern params: `config`, `lib`, `pkgs`, then alphabetical |
 | W36  | `list_concat_merge`        | ✓        |        | Merge adjacent unconditional list literals in concatenations     |
+| W37  | `unused_inherit`           | ✓        |        | Remove unused names from `let`-level `inherit` statements        |
+| W38  | `unused_pattern_param`     | ✓\*      | ✓      | Remove unused named params from variadic function patterns       |
 
 `*` Conditional autofix: some flagged cases are intentionally left as diagnostics when a rewrite would be unsafe or would discard comments.
 

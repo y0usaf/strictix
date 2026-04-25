@@ -1,7 +1,7 @@
 use crate::make;
 use rnix::{
     SyntaxKind, SyntaxNode, TextRange,
-    ast::{Expr, HasEntry as _, Ident},
+    ast::{Attr, Expr, HasEntry as _, Ident, Inherit},
 };
 use rowan::ast::AstNode as _;
 use std::collections::{HashMap, HashSet};
@@ -49,6 +49,61 @@ pub fn mentions_any_ident(names: &HashSet<String>, node: &SyntaxNode) -> bool {
     }
     node.children()
         .any(|child| mentions_any_ident(names, &child))
+}
+
+pub fn ident_ref_counts(node: &SyntaxNode) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    collect_ident_refs(node, &mut counts);
+    counts
+}
+
+fn collect_ident_refs(node: &SyntaxNode, counts: &mut HashMap<String, usize>) {
+    if let Some(inherit) = Inherit::cast(node.clone()) {
+        if let Some(from) = inherit.from() {
+            collect_ident_refs(from.syntax(), counts);
+        } else {
+            for attr in inherit.attrs() {
+                collect_inherited_attr_ref(&attr, counts);
+            }
+        }
+        return;
+    }
+
+    if let Some(ident) = Ident::cast(node.clone()) {
+        let parent_kind = node.parent().map(|parent| parent.kind());
+        let is_attrpath = parent_kind == Some(SyntaxKind::NODE_ATTRPATH);
+        let is_binding = matches!(
+            parent_kind,
+            Some(
+                SyntaxKind::NODE_IDENT_PARAM
+                    | SyntaxKind::NODE_PAT_BIND
+                    | SyntaxKind::NODE_PAT_ENTRY
+            )
+        );
+
+        if !is_attrpath && !is_binding {
+            *counts.entry(ident.to_string()).or_insert(0) += 1;
+        }
+        return;
+    }
+
+    for child in node.children() {
+        collect_ident_refs(&child, counts);
+    }
+}
+
+fn collect_inherited_attr_ref(attr: &Attr, counts: &mut HashMap<String, usize>) {
+    match attr {
+        Attr::Ident(ident) => {
+            *counts.entry(ident.to_string()).or_insert(0) += 1;
+        }
+        Attr::Dynamic(dynamic) => {
+            if let Some(expr) = dynamic.expr() {
+                collect_ident_refs(expr.syntax(), counts);
+            }
+        }
+        Attr::Str(_) => {}
+    }
 }
 
 pub fn is_empty_list(expr: &Expr) -> bool {

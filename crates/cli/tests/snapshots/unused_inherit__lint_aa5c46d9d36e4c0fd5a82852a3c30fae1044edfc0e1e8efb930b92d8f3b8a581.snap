@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/unused_inherit.rs
+expression: "\"let inherit foo bar; in foo\""
+---
+[37] Warning: Inherited name is never used
+   ╭─[<temp_file_path>:1:5]
+   │
+ 1 │ let inherit foo bar; in foo
+   │     ────────┬───────  
+   │             ╰───────── bar is inherited but never used
+───╯

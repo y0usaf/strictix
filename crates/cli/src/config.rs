@@ -253,9 +253,18 @@ pub struct RepeatedKeysConf {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
+pub struct UnusedPatternParamConf {
+    /// Remove `...` from variadic patterns when rewriting W38 (default: false).
+    pub remove_ellipsis: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct LintConf {
     #[serde(default)]
     pub repeated_keys: RepeatedKeysConf,
+
+    #[serde(default)]
+    pub unused_pattern_param: UnusedPatternParamConf,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -317,6 +326,9 @@ impl ConfFile {
                 repeated_keys: RepeatedKeysConf {
                     min_occurrences: Some(2),
                 },
+                unused_pattern_param: UnusedPatternParamConf {
+                    remove_ellipsis: Some(false),
+                },
             },
         };
         toml::ser::to_string_pretty(&ideal_config)
@@ -329,6 +341,12 @@ impl ConfFile {
     pub fn apply_lint_options(&self) {
         lib::set_repeated_keys_min_occurrences(
             self.lints.repeated_keys.min_occurrences.unwrap_or(3),
+        );
+        lib::set_unused_pattern_param_remove_ellipsis(
+            self.lints
+                .unused_pattern_param
+                .remove_ellipsis
+                .unwrap_or(false),
         );
     }
 
@@ -372,6 +390,9 @@ impl ConfFile {
         // Project config overrides global lint options when present.
         if let Some(n) = other.lints.repeated_keys.min_occurrences {
             self.lints.repeated_keys.min_occurrences = Some(n);
+        }
+        if let Some(remove_ellipsis) = other.lints.unused_pattern_param.remove_ellipsis {
+            self.lints.unused_pattern_param.remove_ellipsis = Some(remove_ellipsis);
         }
     }
 
@@ -516,7 +537,7 @@ fn filesystem_vfs(
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfFile, LintConf, RepeatedKeysConf};
+    use super::{ConfFile, LintConf, RepeatedKeysConf, UnusedPatternParamConf};
 
     use std::{
         env, fs,
@@ -720,17 +741,38 @@ mod tests {
 
     #[test]
     fn repeated_keys_min_occurrences_resets_to_default_when_omitted() {
+        let _guard = lock_env();
         let source = "{ foo.a = 1; foo.b = 2; }";
         let configured = ConfFile {
             lints: LintConf {
                 repeated_keys: RepeatedKeysConf {
                     min_occurrences: Some(2),
                 },
+                ..LintConf::default()
             },
             ..ConfFile::default()
         };
 
         assert!(report_codes(&configured, source).contains(&20));
         assert!(!report_codes(&ConfFile::default(), source).contains(&20));
+    }
+
+    #[test]
+    fn unused_pattern_param_remove_ellipsis_resets_to_default_when_omitted() {
+        let _guard = lock_env();
+        let source = "{ config, lib, ... }: config";
+        let configured = ConfFile {
+            enabled: vec!["unused_pattern_param".into()],
+            lints: LintConf {
+                unused_pattern_param: UnusedPatternParamConf {
+                    remove_ellipsis: Some(true),
+                },
+                ..LintConf::default()
+            },
+            ..ConfFile::default()
+        };
+
+        assert!(report_codes(&configured, source).contains(&38));
+        assert!(!report_codes(&ConfFile::default(), source).contains(&38));
     }
 }

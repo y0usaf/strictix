@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/unused_inherit.rs
+expression: "\"let inherit (lib) mkIf; keep = 1; in lib.mkIf (keep == keep) {}\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-let inherit (lib) mkIf; keep = 1; in lib.mkIf (keep == keep) {}
++let keep = 1; in lib.mkIf (keep == keep) {}
