@@ -1,9 +1,0 @@
----
-source: crates/cli/tests/list_concat_merge.rs
-expression: "\"[ base ] ++ lib.optionals (config.features.enable && config.features.advanced) [ optional1 ] ++ [ extra1 extra2 ]\""
----
---- <temp_file_path>
-+++ <temp_file_path> [fixed]
-@@ -1 +1 @@
--[ base ] ++ lib.optionals (config.features.enable && config.features.advanced) [ optional1 ] ++ [ extra1 extra2 ]
-+[ base extra1 extra2 ] ++ lib.optionals (config.features.enable && config.features.advanced) [ optional1 ]

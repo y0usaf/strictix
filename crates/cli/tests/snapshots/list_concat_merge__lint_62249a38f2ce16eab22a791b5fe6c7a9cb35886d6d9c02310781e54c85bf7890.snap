@@ -1,12 +1,12 @@
 ---
-source: crates/cli/tests/empty_list_concat.rs
+source: crates/cli/tests/list_concat_merge.rs
 assertion_line: 5
-expression: "\"[1 2] ++ [3 4]\""
+expression: "\"[ a ] ++ [ b c ] ++ tail\""
 ---
 [36] Warning: Multiple list concatenations that can be merged
    ╭─[<temp_file_path>:1:7]
    │
- 1 │ [1 2] ++ [3 4]
+ 1 │ [ a ] ++ [ b c ] ++ tail
    │       ─┬  
    │        ╰── Multiple list concatenations that can be merged
 ───╯

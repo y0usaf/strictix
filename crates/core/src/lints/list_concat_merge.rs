@@ -3,32 +3,31 @@ use crate::{Metadata, Report, Rule, Suggestion};
 use macros::lint;
 use rnix::{
     NodeOrToken, SyntaxElement, SyntaxKind,
-    ast::{BinOp, BinOpKind, Expr},
+    ast::{BinOp, BinOpKind, Expr, List},
 };
 use rowan::ast::AstNode as _;
 
 /// ## What it does
-/// Checks for multiple consecutive list concatenations that can be merged.
+/// Checks for adjacent list literals in list concatenations that can be merged.
 ///
 /// ## Why is this bad?
-/// Multiple `++` operations with simple lists make the code harder to read.
-/// Adjacent unconditional lists should be merged together, not mixed into
-/// conditional lists.
+/// Multiple `++` operations between unconditional lists make code harder to read.
+/// Adjacent unconditional lists can be merged without changing element order.
 ///
 /// ## Example
 /// ```nix
-/// [ a b ] ++ lib.optional cfg.enable [ c ] ++ [ d e ]
+/// base ++ [ a b ] ++ [ c d ] ++ tail
 /// ```
 ///
-/// Merge the unconditional lists:
+/// Merge adjacent lists:
 ///
 /// ```nix
-/// [ a b d e ] ++ lib.optional cfg.enable [ c ]
+/// base ++ [ a b c d ] ++ tail
 /// ```
 #[lint(
     name = "list_concat_merge",
     note = "Multiple list concatenations that can be merged",
-    code = 35,
+    code = 36,
     match_with = SyntaxKind::NODE_BIN_OP
 )]
 struct ListConcatMerge;
@@ -40,70 +39,82 @@ impl Rule for ListConcatMerge {
         };
 
         let bin_expr = BinOp::cast(node.clone())?;
-        let Some(BinOpKind::Concat) = bin_expr.operator() else {
+        if bin_expr.operator() != Some(BinOpKind::Concat) {
             return None;
-        };
+        }
 
-        // Look for patterns like: [ ... ] ++ LIB_OPTIONALS ++ [ ... ]
-        let replacement = find_mergeable_concat(bin_expr.clone())?;
+        let replacement = find_mergeable_concat(&bin_expr)?;
 
         Some(self.report().suggest(
-            node.text_range(),
+            concat_operator_range(&bin_expr).unwrap_or_else(|| node.text_range()),
             "Multiple list concatenations that can be merged",
             Suggestion::with_replacement(node.text_range(), replacement),
         ))
     }
 }
 
-/// Find mergeable concatenation patterns and return the replacement text
-fn find_mergeable_concat(bin_expr: BinOp) -> Option<rnix::SyntaxNode> {
+/// Find adjacent unconditional list literals in a concatenation tree.
+///
+/// This intentionally does not move list literals across dynamic expressions such as
+/// `lib.optional ...`, because list element order is semantically meaningful.
+fn find_mergeable_concat(bin_expr: &BinOp) -> Option<rnix::SyntaxNode> {
     let lhs = bin_expr.lhs()?;
     let rhs = bin_expr.rhs()?;
-    
-    // Check if RHS is a concatenation like: lib.optionals ... ++ [ ... ]
-    if let Expr::BinOp(rhs_bin) = &rhs {
-        if rhs_bin.operator() == Some(BinOpKind::Concat) {
-            let rhs_lhs = rhs_bin.lhs()?;
-            let rhs_rhs = rhs_bin.rhs()?;
-            
-            // Check if rhs_lhs contains "optionals" or "optional" (lib.optionals, lib.optional, etc.)
-            let rhs_lhs_text = rhs_lhs.to_string();
-            if rhs_lhs_text.contains("optionals") || rhs_lhs_text.contains("optional") {
-                // Pattern: [ ... ] ++ lib.optionals cond [...] ++ [ unconditional_items ]
-                // Should merge the unconditional lists, NOT merge into the conditional list
-                
-                // Check if both lhs is a list and rhs_rhs is a list (both unconditional)
-                if let (Expr::List(lhs_list), Expr::List(rhs_list)) = (&lhs, &rhs_rhs) {
-                    // Get items from both unconditional lists
-                    let lhs_items: Vec<String> = lhs_list
-                        .items()
-                        .map(|item| item.to_string())
-                        .collect();
-                    let rhs_items: Vec<String> = rhs_list
-                        .items()
-                        .map(|item| item.to_string())
-                        .collect();
-                    
-                    if lhs_items.is_empty() || rhs_items.is_empty() {
-                        return None; // Empty list, no merging needed
-                    }
-                    
-                    // Merge the two unconditional lists
-                    let merged_unconditional_text = format!(
-                        "[ {all_unconditional_items} ] ++ {optionals}",
-                        all_unconditional_items = [lhs_items, rhs_items].concat().join(" "),
-                        optionals = rhs_lhs_text
-                    );
-                    
-                    // Parse the merged text to create replacement
-                    let parse = rnix::Root::parse(&merged_unconditional_text).ok().ok()?;
-                    let replacement = Expr::cast(parse.syntax().clone())?;
-                    
-                    return Some(replacement.syntax().clone());
-                }
-            }
-        }
+
+    if let (Expr::List(lhs_list), Expr::List(rhs_list)) = (&lhs, &rhs) {
+        return parse_replacement(&merged_list_text(lhs_list, rhs_list)?);
     }
-    
+
+    if let (Expr::BinOp(lhs_bin), Expr::List(rhs_list)) = (&lhs, &rhs)
+        && lhs_bin.operator() == Some(BinOpKind::Concat)
+        && let Expr::List(lhs_rhs_list) = lhs_bin.rhs()?
+    {
+        let replacement = format!(
+            "{} ++ {}",
+            lhs_bin.lhs()?,
+            merged_list_text(&lhs_rhs_list, rhs_list)?
+        );
+        return parse_replacement(&replacement);
+    }
+
+    if let (Expr::List(lhs_list), Expr::BinOp(rhs_bin)) = (&lhs, &rhs)
+        && rhs_bin.operator() == Some(BinOpKind::Concat)
+        && let Expr::List(rhs_lhs_list) = rhs_bin.lhs()?
+    {
+        let replacement = format!(
+            "{} ++ {}",
+            merged_list_text(lhs_list, &rhs_lhs_list)?,
+            rhs_bin.rhs()?
+        );
+        return parse_replacement(&replacement);
+    }
+
     None
+}
+
+fn concat_operator_range(bin_expr: &BinOp) -> Option<rnix::TextRange> {
+    bin_expr
+        .syntax()
+        .children_with_tokens()
+        .find(|elem| elem.kind() == SyntaxKind::TOKEN_CONCAT)
+        .map(|elem| elem.text_range())
+}
+
+fn merged_list_text(lhs: &List, rhs: &List) -> Option<String> {
+    let lhs_items = lhs.items().map(|item| item.to_string()).collect::<Vec<_>>();
+    let rhs_items = rhs.items().map(|item| item.to_string()).collect::<Vec<_>>();
+
+    if lhs_items.is_empty() || rhs_items.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "[ {} ]",
+        [lhs_items, rhs_items].concat().join(" ")
+    ))
+}
+
+fn parse_replacement(text: &str) -> Option<rnix::SyntaxNode> {
+    let parse = rnix::Root::parse(text).ok().ok()?;
+    Some(Expr::cast(parse.syntax().clone())?.syntax().clone())
 }
