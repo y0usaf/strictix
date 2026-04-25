@@ -3,7 +3,7 @@ use std::{borrow::Cow, convert::TryFrom};
 use lib::Report;
 use rnix::{Root, TextSize};
 
-use crate::{err::SingleFixErr, fix::Source, utils};
+use crate::{LintMap, err::SingleFixErr, fix::Source, utils};
 
 pub struct SingleFixResult<'a> {
     pub src: Source<'a>,
@@ -27,12 +27,11 @@ fn pos_to_byte(line: usize, col: usize, src: &str) -> Result<TextSize, SingleFix
     }
 }
 
-fn find(offset: TextSize, src: &str) -> Result<Report, SingleFixErr> {
+fn find(offset: TextSize, src: &str, lints: &LintMap) -> Result<Report, SingleFixErr> {
     // we don't really need the source to form a completely parsed tree
     let parsed = Root::parse(src);
-    let lints = utils::lint_map();
 
-    utils::find_report(&parsed, &lints, |report| {
+    utils::find_report(&parsed, lints, |report| {
         report.total_suggestion_range().is_some()
             && report
                 .total_diagnostic_range()
@@ -41,10 +40,15 @@ fn find(offset: TextSize, src: &str) -> Result<Report, SingleFixErr> {
     .ok_or(SingleFixErr::NoOp)
 }
 
-pub fn single(line: usize, col: usize, src: &str) -> Result<SingleFixResult<'_>, SingleFixErr> {
+pub fn single<'a>(
+    line: usize,
+    col: usize,
+    src: &'a str,
+    lints: &LintMap,
+) -> Result<SingleFixResult<'a>, SingleFixErr> {
     let mut src = Cow::from(src);
     let offset = pos_to_byte(line, col, &src)?;
-    let report = find(offset, &src)?;
+    let report = find(offset, &src, lints)?;
 
     report.apply(src.to_mut());
 

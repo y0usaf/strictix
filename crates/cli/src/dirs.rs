@@ -4,8 +4,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::dirs;
-
 use ignore::{
     Error as IgnoreError, Match,
     gitignore::{Gitignore, GitignoreBuilder},
@@ -15,11 +13,16 @@ use ignore::{
 pub struct Walker {
     dirs: Vec<PathBuf>,
     files: Vec<PathBuf>,
-    ignore: Gitignore,
+    unrestricted: bool,
+    extra_ignores: Vec<String>,
 }
 
 impl Walker {
-    pub fn new<P: AsRef<Path>>(target: P, ignore: Gitignore) -> io::Result<Self> {
+    pub fn new<P: AsRef<Path>>(
+        target: P,
+        unrestricted: bool,
+        extra_ignores: Vec<String>,
+    ) -> io::Result<Self> {
         let target = target.as_ref().to_path_buf();
         if !target.exists() {
             Err(Error::new(
@@ -30,13 +33,15 @@ impl Walker {
             Ok(Self {
                 dirs: vec![target],
                 files: vec![],
-                ignore,
+                unrestricted,
+                extra_ignores,
             })
         } else {
             Ok(Self {
                 dirs: vec![],
                 files: vec![target],
-                ignore,
+                unrestricted,
+                extra_ignores,
             })
         }
     }
@@ -47,8 +52,14 @@ impl Iterator for Walker {
     fn next(&mut self) -> Option<Self::Item> {
         self.files.pop().or_else(|| {
             while let Some(dir) = self.dirs.pop() {
+                // Rebuild ignores per directory so nested `.gitignore` files participate in
+                // traversal decisions.
+                let Ok(ignore) = build_ignore_set(&self.extra_ignores, &dir, self.unrestricted)
+                else {
+                    continue;
+                };
                 if dir.is_dir()
-                    && let Match::None | Match::Whitelist(_) = self.ignore.matched(&dir, true)
+                    && let Match::None | Match::Whitelist(_) = ignore.matched(&dir, true)
                 {
                     let mut found = false;
                     let Ok(read_dir) = fs::read_dir(&dir) else {
@@ -62,8 +73,7 @@ impl Iterator for Walker {
                         if path.is_dir() {
                             self.dirs.push(path);
                         } else if path.is_file()
-                            && let Match::None | Match::Whitelist(_) =
-                                self.ignore.matched(&path, false)
+                            && let Match::None | Match::Whitelist(_) = ignore.matched(&path, false)
                         {
                             found = true;
                             self.files.push(path);
@@ -84,13 +94,20 @@ pub fn build_ignore_set<P: AsRef<Path>>(
     target: P,
     unrestricted: bool,
 ) -> Result<Gitignore, IgnoreError> {
-    let gitignore_path = target.as_ref().join(".gitignore");
+    // Extra ignore patterns are applied with gitignore semantics from the currently visited
+    // directory, alongside any `.gitignore` found there.
+    let target = target.as_ref();
+    let gitignore_dir = if target.is_dir() {
+        target.to_path_buf()
+    } else {
+        target
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    };
+    let gitignore_path = gitignore_dir.join(".gitignore");
 
-    // Looks like GitignoreBuilder::new does not source globs
-    // within gitignore_path by default, we have to enforce that
-    // using GitignoreBuilder::add. Probably a bug in the ignore
-    // crate?
-    let mut gitignore = GitignoreBuilder::new(&gitignore_path);
+    let mut gitignore = GitignoreBuilder::new(&gitignore_dir);
 
     // if we are to "restrict" aka "respect" .gitignore, then
     // add globs from gitignore path as well
@@ -112,9 +129,10 @@ pub fn build_ignore_set<P: AsRef<Path>>(
 }
 
 pub fn walk_nix_files<P: AsRef<Path>>(
-    ignore: Gitignore,
     target: P,
+    ignore: &[String],
+    unrestricted: bool,
 ) -> Result<impl Iterator<Item = PathBuf>, io::Error> {
-    let walker = dirs::Walker::new(target, ignore)?;
+    let walker = Walker::new(target, unrestricted, ignore.to_vec())?;
     Ok(walker.filter(|path: &PathBuf| matches!(path.extension(), Some(e) if e == "nix")))
 }

@@ -11,6 +11,8 @@ members = [
 [workspace.package]
 edition = "2024"
 license = "AGPL-3.0-or-later"
+repository = "https://github.com/y0usaf/strictix"
+rust-version = "1.85"
 
 [workspace.dependencies]
 anyhow = "1.0.100"
