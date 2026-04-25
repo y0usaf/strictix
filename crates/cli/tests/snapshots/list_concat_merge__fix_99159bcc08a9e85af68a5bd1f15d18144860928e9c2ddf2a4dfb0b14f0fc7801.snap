@@ -1,0 +1,10 @@
+---
+source: crates/cli/tests/list_concat_merge.rs
+assertion_line: 5
+expression: "\"base ++ [ a b ] ++ [ c d ] ++ tail\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-base ++ [ a b ] ++ [ c d ] ++ tail
++base ++ [ a b c d ] ++ tail

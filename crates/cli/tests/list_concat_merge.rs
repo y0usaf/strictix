@@ -5,25 +5,35 @@ use macros::generate_tests;
 generate_tests! {
     rule: list_concat_merge,
     expressions: [
-        // match - list ++ lib.optionals ++ list (should merge unconditional lists)
-        "[ a b ] ++ lib.optionals cfg.enable [ x ] ++ [ d e ]",
-        
-        // match - list ++ lib.optional ++ list  
-        "[ x y ] ++ lib.optional cond [ z ] ++ [ n m ]",
-        
-        // match - multiple items in each list
-        "[ piAgentsPkg piCodexFastPkg ] ++ lib.optionals cfg.rtk.enable [ piRtkPkg ] ++ [ piCompactToolsPkg piToolManagementPkg ]",
-        
-        // match - single items
-        "[ a ] ++ lib.optionals cfg.enable [ b ] ++ [ c ]",
-        
-        // match - multiline format preserved in single-line form
-        "[ a b c ] ++ lib.optionals cfg.someCond [ d ] ++ [ e f g ]",
-        
-        // match - lib.optionals with complex condition
-        "[ base ] ++ lib.optionals (config.features.enable && config.features.advanced) [ optional1 ] ++ [ extra1 extra2 ]",
-        
-        // match - with long package names
-        "[ veryLongPackageName1 veryLongPackageName2 ] ++ lib.optionals cfg.enable [ pkg ] ++ [ veryLongPackageName3 veryLongPackageName4 ]",
+        // adjacent list literals
+        "[ a b ] ++ [ c d ]",
+
+        // adjacent trailing lists after a dynamic prefix
+        "base ++ [ a ] ++ [ b c ]",
+
+        // adjacent leading lists before a dynamic suffix
+        "[ a ] ++ [ b c ] ++ tail",
+
+        // adjacent middle lists keep surrounding expressions in place
+        "base ++ [ a b ] ++ [ c d ] ++ tail",
+
+        // multiline source is still rewritten safely
+        r"
+        base
+        ++ [ a b ]
+        ++ [ c d ]
+        ++ tail
+        ",
     ],
+}
+
+#[test]
+fn separated_unconditional_lists_are_not_reordered_across_optional() -> anyhow::Result<()> {
+    _utils::assert_check_clean(
+        r#"
+        [ "source aliases" ]
+        ++ lib.optional cfg.enable "source optional"
+        ++ [ pluginSettings historySettings ]
+        "#,
+    )
 }

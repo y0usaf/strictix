@@ -171,6 +171,7 @@ Added by `strictix`:
 | W33  | `if_else_empty_list`       | ✓        |        | `if c then [...] else []` → `lib.optionals c [...]`         |
 | W34  | `repeated_expression`      |          |        | Expression repeated; consider extracting into a let binding |
 | W35  | `unsorted_pattern_params`  | ✓        |        | Sort pattern params: `config`, `lib`, `pkgs`, then alphabetical |
+| W36  | `list_concat_merge`        | ✓        |        | Merge adjacent unconditional list literals in concatenations     |
 
 `*` Conditional autofix: some flagged cases are intentionally left as diagnostics when a rewrite would be unsafe or would discard comments.
 

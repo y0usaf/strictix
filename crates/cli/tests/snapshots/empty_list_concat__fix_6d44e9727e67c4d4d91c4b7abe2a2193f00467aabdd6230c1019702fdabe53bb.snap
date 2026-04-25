@@ -1,5 +1,10 @@
 ---
 source: crates/cli/tests/empty_list_concat.rs
+assertion_line: 5
 expression: "\"[1 2] ++ [3 4]\""
 ---
-
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-[1 2] ++ [3 4]
++[ 1 2 3 4 ]

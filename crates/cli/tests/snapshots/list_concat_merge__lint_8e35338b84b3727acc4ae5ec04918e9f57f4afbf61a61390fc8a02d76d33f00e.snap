@@ -1,0 +1,12 @@
+---
+source: crates/cli/tests/list_concat_merge.rs
+assertion_line: 5
+expression: "\"[ a b ] ++ [ c d ]\""
+---
+[36] Warning: Multiple list concatenations that can be merged
+   ╭─[<temp_file_path>:1:9]
+   │
+ 1 │ [ a b ] ++ [ c d ]
+   │         ─┬  
+   │          ╰── Multiple list concatenations that can be merged
+───╯
