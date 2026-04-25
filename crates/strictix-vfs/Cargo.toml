@@ -1,7 +1,10 @@
 [package]
+description = "In-memory filesystem support for strictix"
 edition.workspace = true
 license.workspace = true
 name = "strictix-vfs"
+repository.workspace = true
+rust-version.workspace = true
 version = "0.0.0"
 
 [dependencies]

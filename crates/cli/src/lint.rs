@@ -39,7 +39,10 @@ pub fn lint_with(vfs_entry: &VfsEntry, lints: &LintMap) -> LintResult {
 }
 
 pub fn run(check_config: &CheckConfig) -> Result<(), StatixErr> {
-    let mut conf_file = ConfFile::discover(&check_config.conf_path)?;
+    let mut conf_file = ConfFile::discover_from_target_or_override(
+        &check_config.target,
+        check_config.conf_path.as_ref(),
+    )?;
     conf_file.apply_lint_options();
     // Apply CLI overrides
     if check_config.strict {
@@ -55,11 +58,12 @@ pub fn run(check_config: &CheckConfig) -> Result<(), StatixErr> {
 
     let mut stdout = io::stdout();
     let lint = |vfs_entry| lint_with(&vfs_entry, &lints);
-    let results = vfs
+    let mut results = vfs
         .par_iter()
         .map(lint)
         .filter(|lr| !lr.reports.is_empty())
         .collect::<Vec<_>>();
+    results.sort_by_key(|result| result.file_id);
 
     if results.is_empty() {
         let files = format!(

@@ -105,6 +105,10 @@ mod test {
         let id1 = vfs.alloc_file_id(f1);
         let data = "hello".as_bytes().to_vec();
         vfs.set_file_contents(f1, &data);
-        assert_eq!(vfs.get(id1).expect("previously inserted data should be retrievable"), &data);
+        assert_eq!(
+            vfs.get(id1)
+                .expect("previously inserted data should be retrievable"),
+            &data
+        );
     }
 }

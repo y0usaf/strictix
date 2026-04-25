@@ -1,7 +1,10 @@
 [package]
+description = "Proc macros used by strictix lint and test definitions"
 edition.workspace = true
 license.workspace = true
 name = "strictix-macros"
+repository.workspace = true
+rust-version.workspace = true
 version = "0.0.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

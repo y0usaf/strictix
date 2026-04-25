@@ -4,6 +4,8 @@ description = "Lints and suggestions for the Nix programming language"
 edition.workspace = true
 license.workspace = true
 name = "strictix"
+repository.workspace = true
+rust-version.workspace = true
 version = "0.5.8"
 
 [lib]

@@ -39,9 +39,9 @@ pub enum SubCommand {
 pub struct Check {
     /// File or directory to run check on
     #[arg(default_value = ".")]
-    target: PathBuf,
+    pub target: PathBuf,
 
-    /// Globs of file patterns to skip
+    /// Additional gitignore-style patterns to skip during traversal
     #[arg(short, long)]
     ignore: Vec<String>,
 
@@ -55,9 +55,9 @@ pub struct Check {
     #[arg(short = 'o', long, default_value_t)]
     pub format: OutFormat,
 
-    /// Path to strictix.toml or its parent directory
-    #[arg(short = 'c', long = "config", default_value = ".")]
-    pub conf_path: PathBuf,
+    /// Path to strictix.toml, or to a directory to search upward from
+    #[arg(short = 'c', long = "config")]
+    pub conf_path: Option<PathBuf>,
 
     /// Enable "streaming" mode, accept file on stdin, output diagnostics on stdout
     #[arg(short, long = "stdin")]
@@ -89,9 +89,9 @@ impl Check {
 pub struct Fix {
     /// File or directory to run fix on
     #[arg(default_value = ".")]
-    target: PathBuf,
+    pub target: PathBuf,
 
-    /// Globs of file patterns to skip
+    /// Additional gitignore-style patterns to skip during traversal
     #[arg(short, long)]
     ignore: Vec<String>,
 
@@ -100,12 +100,12 @@ pub struct Fix {
     unrestricted: bool,
 
     /// Do not fix files in place, display a diff instead
-    #[arg(short, long = "dry-run")]
+    #[arg(short, long = "dry-run", conflicts_with = "streaming")]
     pub diff_only: bool,
 
-    /// Path to strictix.toml or its parent directory
-    #[arg(short = 'c', long = "config", default_value = ".")]
-    pub conf_path: PathBuf,
+    /// Path to strictix.toml, or to a directory to search upward from
+    #[arg(short = 'c', long = "config")]
+    pub conf_path: Option<PathBuf>,
 
     /// Enable "streaming" mode, accept file on stdin, output diagnostics on stdout
     #[arg(short, long = "stdin")]
@@ -160,6 +160,7 @@ impl Fix {
 #[derive(Parser, Debug)]
 pub struct Single {
     /// File to run single-fix on
+    #[arg(required_unless_present = "streaming", conflicts_with = "streaming")]
     pub target: Option<PathBuf>,
 
     /// Position to attempt a fix at
@@ -167,16 +168,16 @@ pub struct Single {
     pub position: (usize, usize),
 
     /// Do not fix files in place, display a diff instead
-    #[arg(short, long = "dry-run")]
+    #[arg(short, long = "dry-run", conflicts_with = "streaming")]
     pub diff_only: bool,
 
     /// Enable "streaming" mode, accept file on stdin, output diagnostics on stdout
     #[arg(short, long = "stdin")]
     pub streaming: bool,
 
-    /// Path to strictix.toml or its parent directory
-    #[arg(short = 'c', long = "config", default_value = ".")]
-    pub conf_path: PathBuf,
+    /// Path to strictix.toml, or to a directory to search upward from
+    #[arg(short = 'c', long = "config")]
+    pub conf_path: Option<PathBuf>,
 }
 
 impl Single {
@@ -259,13 +260,13 @@ pub struct LintConf {
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct ConfFile {
-    #[serde(default = "Vec::new")]
+    #[serde(default)]
     enabled: Vec<String>,
 
-    #[serde(default = "Vec::new")]
+    #[serde(default)]
     disabled: Vec<String>,
 
-    #[serde(default = "Vec::new")]
+    #[serde(default)]
     pub ignore: Vec<String>,
 
     /// Enable all lints, including those that are opt-in by default.
@@ -282,17 +283,21 @@ impl ConfFile {
         let config_file = fs::read_to_string(path).map_err(ConfigErr::InvalidPath)?;
         toml::de::from_str(&config_file).map_err(ConfigErr::ConfFileParse)
     }
-    /// Discover config by walking ancestors of `path` (defaults to CWD via `--config`),
-    /// not the lint target. This is intentional: config applies per-project, not per-file.
+    /// Discover config by walking ancestors of `path`.
     pub fn discover<P: AsRef<Path>>(path: P) -> Result<Self, ConfigErr> {
         let canonical_path = fs::canonicalize(path.as_ref()).map_err(ConfigErr::InvalidPath)?;
         let mut config = Self::from_global_path()?;
 
+        let explicit_file = canonical_path.is_file()
+            && canonical_path
+                .file_name()
+                .is_some_and(|file_name| file_name == "strictix.toml");
+
         for p in canonical_path.ancestors() {
-            let strictix_toml_path = if p.is_dir() {
-                p.join("strictix.toml")
-            } else {
+            let strictix_toml_path = if explicit_file && p == canonical_path {
                 p.to_path_buf()
+            } else {
+                p.join("strictix.toml")
             };
             if strictix_toml_path.exists() {
                 config.merge(Self::from_path(strictix_toml_path)?);
@@ -317,12 +322,18 @@ impl ConfFile {
         toml::ser::to_string_pretty(&ideal_config)
             .expect("default config serialization should not fail")
     }
-    /// Apply per-lint options from config to the global lint settings.
-    /// Must be called before linting runs.
+    /// Apply per-lint options before linting runs.
+    ///
+    /// Some lint options are currently wired through process-global settings, so this method also
+    /// resets them back to their documented defaults when the config omits an override.
     pub fn apply_lint_options(&self) {
-        if let Some(n) = self.lints.repeated_keys.min_occurrences {
-            lib::set_repeated_keys_min_occurrences(n);
-        }
+        lib::set_repeated_keys_min_occurrences(
+            self.lints.repeated_keys.min_occurrences.unwrap_or(3),
+        );
+    }
+
+    fn lint_is_enabled(&self, lint: &&dyn lib::Lint) -> bool {
+        self.enabled.iter().any(|name| name == lint.name()) || lint.default_enabled() || self.strict
     }
 
     #[must_use]
@@ -330,19 +341,9 @@ impl ConfFile {
         utils::lint_map_of(
             (*LINTS)
                 .iter()
-                .filter(|l| {
-                    // Explicitly enabled lints are always included
-                    if self.enabled.iter().any(|name| name == l.name()) {
-                        return true;
-                    }
-                    // If enabled list is non-empty, only those lints run (allowlist mode)
-                    if !self.enabled.is_empty() {
-                        return false;
-                    }
-                    // Include if default_enabled or strict mode is on
-                    l.default_enabled() || self.strict
-                })
-                .filter(|l| !self.disabled.iter().any(|check| check == l.name()))
+                .filter(|lint| self.lint_is_enabled(lint))
+                // `disabled` is applied last and always wins over defaults, `enabled`, and `strict`.
+                .filter(|lint| !self.disabled.iter().any(|name| name == lint.name()))
                 .copied()
                 .collect::<Vec<_>>()
                 .as_slice(),
@@ -360,12 +361,11 @@ impl ConfFile {
     }
 
     fn merge(&mut self, other: Self) {
-        if !other.enabled.is_empty() {
-            self.enabled = other.enabled;
-        }
+        self.enabled.extend(other.enabled);
         self.disabled.extend(other.disabled);
         self.ignore.extend(other.ignore);
-        // Project config overrides global strict setting.
+        // Strict is additive across config layers: if any layer enables it, the merged config is
+        // strict.
         if other.strict {
             self.strict = true;
         }
@@ -383,6 +383,20 @@ impl ConfFile {
             Self::from_path(path)
         } else {
             Ok(Self::default())
+        }
+    }
+
+    pub fn discover_from_target_or_override<T, C>(
+        target: T,
+        conf_path: Option<C>,
+    ) -> Result<Self, ConfigErr>
+    where
+        T: AsRef<Path>,
+        C: AsRef<Path>,
+    {
+        match conf_path {
+            Some(conf_path) => Self::discover(conf_path),
+            None => Self::discover(target),
         }
     }
 
@@ -443,14 +457,14 @@ fn vfs(files: &[PathBuf]) -> vfs::ReadOnlyVfs {
 }
 
 fn read_stdin() -> Result<String, ConfigErr> {
-    use std::io::{self, BufRead};
+    use std::io::Read as _;
 
+    let mut src = String::new();
     io::stdin()
         .lock()
-        .lines()
-        .collect::<Result<Vec<_>, _>>()
-        .map(|lines| lines.join("\n"))
-        .map_err(ConfigErr::InvalidPath)
+        .read_to_string(&mut src)
+        .map_err(ConfigErr::InvalidPath)?;
+    Ok(src)
 }
 
 fn stdin_vfs() -> Result<ReadOnlyVfs, ConfigErr> {
@@ -495,21 +509,21 @@ fn filesystem_vfs(
     unrestricted: bool,
 ) -> Result<ReadOnlyVfs, ConfigErr> {
     let all_ignores = [ignore, extra_ignores].concat();
-    let ignore = dirs::build_ignore_set(&all_ignores, target, unrestricted)?;
-    let mut files: Vec<_> = dirs::walk_nix_files(ignore, target)?.collect();
+    let mut files: Vec<_> = dirs::walk_nix_files(target, &all_ignores, unrestricted)?.collect();
     files.sort();
     Ok(vfs(&files))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ConfFile;
+    use super::{ConfFile, LintConf, RepeatedKeysConf};
 
     use std::{
         env, fs,
         sync::{Mutex, MutexGuard},
     };
 
+    use rnix::Root;
     use tempfile::tempdir;
 
     // Serialise all tests that touch process-global environment variables.
@@ -529,6 +543,15 @@ mod tests {
         unsafe { env::remove_var(key) };
     }
 
+    fn report_codes(config: &ConfFile, source: &str) -> Vec<u32> {
+        config.apply_lint_options();
+        let parsed = Root::parse(source);
+        crate::utils::collect_reports(&parsed, &config.lints())
+            .into_iter()
+            .map(|report| report.code)
+            .collect()
+    }
+
     #[test]
     fn discovers_global_config_from_xdg_path() {
         let _guard = lock_env();
@@ -544,7 +567,8 @@ mod tests {
         set_env_var("XDG_CONFIG_HOME", &temp.path().join("xdg"));
         remove_env_var("HOME");
 
-        let config = ConfFile::discover(temp.path()).expect("failed to discover global config from XDG path");
+        let config = ConfFile::discover(temp.path())
+            .expect("failed to discover global config from XDG path");
         let lints = config.lints();
 
         assert!(
@@ -559,11 +583,11 @@ mod tests {
                 .flatten()
                 .any(|lint| lint.name() == "empty_pattern")
         );
-        assert_eq!(lints.values().flatten().count(), 1);
+        assert!(lints.values().flatten().count() > 1);
     }
 
     #[test]
-    fn project_config_overrides_global_allowlist() {
+    fn project_config_adds_to_global_enabled_lints() {
         let _guard = lock_env();
         let temp = tempdir().expect("failed to create temporary directory");
         let xdg_home = temp.path().join("xdg");
@@ -585,7 +609,81 @@ mod tests {
         set_env_var("XDG_CONFIG_HOME", &xdg_home);
         remove_env_var("HOME");
 
-        let config = ConfFile::discover(&project_dir).expect("failed to discover config with project override");
+        let config = ConfFile::discover(&project_dir)
+            .expect("failed to discover config with project override");
+        let lints = config.lints();
+
+        assert!(
+            lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "empty_pattern")
+        );
+        assert!(
+            lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "with_expression")
+        );
+        assert!(lints.values().flatten().count() > 2);
+    }
+
+    #[test]
+    fn discovers_project_config_from_target_by_default() {
+        let _guard = lock_env();
+        let temp = tempdir().expect("failed to create temporary directory");
+        let project_dir = temp.path().join("project");
+        let nested_dir = project_dir.join("nested");
+        fs::create_dir_all(&nested_dir).expect("failed to create project directory tree");
+        fs::write(
+            project_dir.join("strictix.toml"),
+            "enabled = [\"with_expression\"]\n",
+        )
+        .expect("failed to write project strictix.toml");
+
+        remove_env_var("XDG_CONFIG_HOME");
+        remove_env_var("HOME");
+
+        let config = ConfFile::discover_from_target_or_override(
+            &nested_dir,
+            Option::<&std::path::Path>::None,
+        )
+        .expect("failed to discover config from target path");
+        let lints = config.lints();
+
+        assert!(
+            lints
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "with_expression")
+        );
+    }
+
+    #[test]
+    fn explicit_config_override_wins_over_target_discovery() {
+        let _guard = lock_env();
+        let temp = tempdir().expect("failed to create temporary directory");
+        let project_dir = temp.path().join("project");
+        let nested_dir = project_dir.join("nested");
+        let override_dir = temp.path().join("override");
+        fs::create_dir_all(&nested_dir).expect("failed to create project directory tree");
+        fs::create_dir_all(&override_dir).expect("failed to create override directory");
+        fs::write(
+            project_dir.join("strictix.toml"),
+            "enabled = [\"with_expression\"]\n",
+        )
+        .expect("failed to write project strictix.toml");
+        fs::write(
+            override_dir.join("strictix.toml"),
+            "enabled = [\"empty_pattern\"]\n",
+        )
+        .expect("failed to write override strictix.toml");
+
+        remove_env_var("XDG_CONFIG_HOME");
+        remove_env_var("HOME");
+
+        let config = ConfFile::discover_from_target_or_override(&nested_dir, Some(&override_dir))
+            .expect("failed to discover config from explicit override");
         let lints = config.lints();
 
         assert!(
@@ -600,6 +698,39 @@ mod tests {
                 .flatten()
                 .any(|lint| lint.name() == "with_expression")
         );
-        assert_eq!(lints.values().flatten().count(), 1);
+    }
+
+    #[test]
+    fn disabled_takes_precedence_over_enabled_and_strict() {
+        let config = ConfFile {
+            enabled: vec!["with_expression".into()],
+            disabled: vec!["with_expression".into()],
+            strict: true,
+            ..ConfFile::default()
+        };
+
+        assert!(
+            !config
+                .lints()
+                .values()
+                .flatten()
+                .any(|lint| lint.name() == "with_expression")
+        );
+    }
+
+    #[test]
+    fn repeated_keys_min_occurrences_resets_to_default_when_omitted() {
+        let source = "{ foo.a = 1; foo.b = 2; }";
+        let configured = ConfFile {
+            lints: LintConf {
+                repeated_keys: RepeatedKeysConf {
+                    min_occurrences: Some(2),
+                },
+            },
+            ..ConfFile::default()
+        };
+
+        assert!(report_codes(&configured, source).contains(&20));
+        assert!(!report_codes(&ConfFile::default(), source).contains(&20));
     }
 }

@@ -65,13 +65,16 @@ strictix check /path/to/dir -i a.nix b.nix c.nix
 # ignore an entire directory
 strictix check /path/to/dir -i .direnv
 
-# strictix respects .gitignore; use -u to disable
+# strictix respects .gitignore by default
+strictix check /path/to/dir
+
+# ignore .gitignore handling completely
 strictix check /path/to/dir -u
 
 # enable all lints including opt-in ones
 strictix check /path/to/dir --strict
 
-# enable specific opt-in lints
+# enable specific opt-in lints in addition to the default set
 strictix check /path/to/dir -e with_expression -e single_use_let
 ```
 
@@ -96,7 +99,7 @@ strictix check /path/to/dir -o errfmt  # single-line, integrates with vim
 
 ### Configuration
 
-Create a `strictix.toml` at your project root to configure lints:
+Create a `strictix.toml` to configure lints:
 
 ```toml
 # strictix.toml
@@ -112,11 +115,20 @@ enabled = [
   "single_use_let",
 ]
 
+# Add extra gitignore-style ignore patterns during traversal
+ignore = [".direnv", "result"]
+
 # Or enable all opt-in lints at once
 strict = true
 ```
 
-`strictix` discovers config by traversing parent directories. Pass an explicit path with `--config`.
+By default, `strictix` discovers configuration relative to the target you pass to `check`, `fix`, or `single`: it looks for `strictix.toml` starting from that file or directory and then walks upward through parent directories.
+
+Use `--config <path>` to override discovery explicitly. The path may point either to `strictix.toml` itself or to a directory containing it.
+
+Config-driven lint enables are additive: the default lint set stays enabled, `enabled = [...]` adds opt-in lints on top, and `--enable` adds more for a particular invocation. `strict = true` or `--strict` enables all opt-in lints. `disabled = [...]` is applied last and takes precedence over both `enabled` and `strict`.
+
+`strictix` also respects `.gitignore` files by default when walking directories. Pass `-u`/`--unrestricted` to ignore `.gitignore` handling, and use `ignore = [...]` or `-i/--ignore` for extra project-specific gitignore-style exclusions.
 
 ### Lints
 

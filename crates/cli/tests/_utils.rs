@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{fs, io::Write, path::Path, process::Command};
 
 use anyhow::anyhow;
@@ -23,20 +25,33 @@ fn create_fixture(expression: &str) -> anyhow::Result<NamedTempFile> {
 fn sanitize_output(output: Vec<u8>, path: &Path) -> anyhow::Result<String> {
     let output = strip_ansi_escapes::strip(output)?;
     let output = String::from_utf8(output)?;
-    Ok(output.replace(path.to_str().expect("temp path is valid UTF-8"), "<temp_file_path>"))
+    Ok(output.replace(
+        path.to_str().expect("temp path is valid UTF-8"),
+        "<temp_file_path>",
+    ))
 }
 
-pub fn run_cli(path: &Path, args: &[&str]) -> anyhow::Result<CliOutput> {
-    let output = Command::new(env!("CARGO_BIN_EXE_strictix"))
-        .args(args)
-        .arg(path)
-        .output()?;
+fn run_cli_inner(cwd: Option<&Path>, path: &Path, args: &[&str]) -> anyhow::Result<CliOutput> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_strictix"));
+    command.args(args).arg(path);
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+    let output = command.output()?;
 
     Ok(CliOutput {
         success: output.status.success(),
         stdout: sanitize_output(output.stdout, path)?,
         stderr: sanitize_output(output.stderr, path)?,
     })
+}
+
+pub fn run_cli(path: &Path, args: &[&str]) -> anyhow::Result<CliOutput> {
+    run_cli_inner(None, path, args)
+}
+
+pub fn run_cli_in_dir(cwd: &Path, path: &Path, args: &[&str]) -> anyhow::Result<CliOutput> {
+    run_cli_inner(Some(cwd), path, args)
 }
 
 pub fn test_cli(expression: &str, args: &[&str]) -> anyhow::Result<String> {

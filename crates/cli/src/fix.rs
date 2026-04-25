@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, path::Path};
 
 use crate::{
     LintMap,
@@ -42,7 +42,10 @@ impl<'a> FixResult<'a> {
 }
 
 pub fn run_all(fix_config: &FixConfig) -> Result<(), StatixErr> {
-    let mut conf_file = ConfFile::discover(&fix_config.conf_path)?;
+    let mut conf_file = ConfFile::discover_from_target_or_override(
+        &fix_config.target,
+        fix_config.conf_path.as_ref(),
+    )?;
     conf_file.apply_lint_options();
     // Apply CLI overrides
     if fix_config.strict {
@@ -89,8 +92,15 @@ pub fn run_all(fix_config: &FixConfig) -> Result<(), StatixErr> {
 }
 
 pub fn run_single(single_config: &SingleConfig) -> Result<(), StatixErr> {
-    let conf_file = ConfFile::discover(&single_config.conf_path)?;
+    let conf_file = ConfFile::discover_from_target_or_override(
+        single_config
+            .target
+            .as_deref()
+            .unwrap_or_else(|| Path::new(".")),
+        single_config.conf_path.as_ref(),
+    )?;
     conf_file.apply_lint_options();
+    let lints = conf_file.lints();
     let vfs = single_config.vfs()?;
     let entry = vfs
         .iter()
@@ -103,7 +113,7 @@ pub fn run_single(single_config: &SingleConfig) -> Result<(), StatixErr> {
     let original_src = entry.contents;
     let (line, col) = single_config.position;
 
-    match (single_config.out(), single(line, col, original_src)) {
+    match (single_config.out(), single(line, col, original_src, &lints)) {
         (FixOut::Diff, single_result) => {
             let fixed_src = single_result
                 .map(|r| r.src)
