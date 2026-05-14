@@ -350,8 +350,19 @@ impl ConfFile {
         );
     }
 
+    fn canonical_lint_name(name: &str) -> &str {
+        match name {
+            "deprecated_to_path" => "deprecated",
+            _ => name,
+        }
+    }
+
     fn lint_is_enabled(&self, lint: &&dyn lib::Lint) -> bool {
-        self.enabled.iter().any(|name| name == lint.name()) || lint.default_enabled() || self.strict
+        self.enabled
+            .iter()
+            .any(|name| Self::canonical_lint_name(name) == lint.name())
+            || lint.default_enabled()
+            || self.strict
     }
 
     #[must_use]
@@ -361,7 +372,12 @@ impl ConfFile {
                 .iter()
                 .filter(|lint| self.lint_is_enabled(lint))
                 // `disabled` is applied last and always wins over defaults, `enabled`, and `strict`.
-                .filter(|lint| !self.disabled.iter().any(|name| name == lint.name()))
+                .filter(|lint| {
+                    !self
+                        .disabled
+                        .iter()
+                        .any(|name| Self::canonical_lint_name(name) == lint.name())
+                })
                 .copied()
                 .collect::<Vec<_>>()
                 .as_slice(),

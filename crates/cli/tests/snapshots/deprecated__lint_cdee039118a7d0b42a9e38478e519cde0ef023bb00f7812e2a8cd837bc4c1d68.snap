@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/deprecated.rs
+expression: "\"lib.isInOldestRelease 2411\""
+---
+[17] Warning: Found usage of deprecated Nix feature
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ lib.isInOldestRelease 2411
+   │ ──────────┬──────────  
+   │           ╰──────────── lib.isInOldestRelease is deprecated, use lib.oldestSupportedReleaseIsAtLeast instead
+───╯

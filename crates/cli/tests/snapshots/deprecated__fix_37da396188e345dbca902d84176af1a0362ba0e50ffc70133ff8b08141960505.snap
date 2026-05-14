@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/deprecated.rs
+expression: "\"mkAliasOptionModuleMD old new\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-mkAliasOptionModuleMD old new
++mkAliasOptionModule old new

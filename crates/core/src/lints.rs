@@ -17,7 +17,7 @@ lints! {
     redundant_pattern_bind,
     unquoted_uri,
     empty_inherit,
-    deprecated_to_path,
+    deprecated,
     bool_simplification,
     useless_has_attr,
     repeated_keys,

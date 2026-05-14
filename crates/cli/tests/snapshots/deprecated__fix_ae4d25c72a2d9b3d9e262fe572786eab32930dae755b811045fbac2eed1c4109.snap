@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/deprecated.rs
+expression: "\"lib.cli.toGNUCommandLineShell opts attrs\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-lib.cli.toGNUCommandLineShell opts attrs
++lib.cli.toCommandLineShell opts attrs
