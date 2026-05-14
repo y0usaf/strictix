@@ -153,7 +153,7 @@ Inherited from `statix`:
 | W11  | `redundant_pattern_bind` | ✓        | `{...} @ args: expr` → `args: expr`                 |
 | W12  | `unquoted_uri`           | ✓        | Quote bare URIs in string contexts                  |
 | W14  | `empty_inherit`          | ✓        | Remove empty `inherit;`                             |
-| W17  | `deprecated_to_path`     | ✓        | Warn on deprecated `toPath`/`builtins.toPath` usage |
+| W17  | `deprecated`             | ✓*       | Consolidated deprecated Nix/nixpkgs APIs and aliases |
 | W18  | `bool_simplification`    | ✓        | `!(x == y)` → `x != y`, `!(x != y)` → `x == y`      |
 | W19  | `useless_has_attr`       | ✓        | `if x ? a then x.a else d` → `x.a or d`             |
 | W20  | `repeated_keys`          | ✓\*      | Suggest grouping repeated attrpath prefixes         |

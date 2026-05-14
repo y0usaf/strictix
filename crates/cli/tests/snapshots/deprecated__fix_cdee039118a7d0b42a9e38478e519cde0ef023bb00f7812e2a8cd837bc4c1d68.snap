@@ -1,0 +1,9 @@
+---
+source: crates/cli/tests/deprecated.rs
+expression: "\"lib.isInOldestRelease 2411\""
+---
+--- <temp_file_path>
++++ <temp_file_path> [fixed]
+@@ -1 +1 @@
+-lib.isInOldestRelease 2411
++lib.oldestSupportedReleaseIsAtLeast 2411

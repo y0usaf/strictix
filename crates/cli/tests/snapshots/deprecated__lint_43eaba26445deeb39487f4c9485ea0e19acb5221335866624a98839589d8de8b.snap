@@ -1,0 +1,11 @@
+---
+source: crates/cli/tests/deprecated.rs
+expression: "\"pkgs.system\""
+---
+[17] Warning: Found usage of deprecated Nix feature
+   ╭─[<temp_file_path>:1:1]
+   │
+ 1 │ pkgs.system
+   │ ─────┬─────  
+   │      ╰─────── pkgs.system is deprecated, use pkgs.stdenv.hostPlatform.system instead
+───╯
