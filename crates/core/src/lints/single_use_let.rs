@@ -71,9 +71,10 @@ impl Rule for SingleUseLet {
                 continue;
             };
 
-            let Some(name) = simple_binding_name(kv) else {
+            let Some(binding) = simple_binding(kv) else {
                 continue;
             };
+            let name = binding.name;
 
             let refs = ref_counts(&name, &body_refs, &total_entry_refs, &entry_refs[i]);
 
@@ -93,7 +94,7 @@ impl Rule for SingleUseLet {
                 }
             }
 
-            let binding_at = kv.syntax().text_range();
+            let binding_at = binding.name_range;
 
             let external_refs = refs.in_siblings + body_refs.get(&name).copied().unwrap_or(0);
 
@@ -260,9 +261,14 @@ fn collect_ident_refs(node: &SyntaxNode, counts: &mut HashMap<String, usize>) {
     }
 }
 
-/// Extract the name from a simple single-component ident binding.
+struct SimpleBinding {
+    name: String,
+    name_range: TextRange,
+}
+
+/// Extract the name/range from a simple single-component ident binding.
 /// Returns `None` for compound paths (`a.b = …`) and dynamic keys (`${…}`).
-fn simple_binding_name(kv: &rnix::ast::AttrpathValue) -> Option<String> {
+fn simple_binding(kv: &rnix::ast::AttrpathValue) -> Option<SimpleBinding> {
     let mut attrs = kv.attrpath()?.attrs();
     let first = attrs.next()?;
     if attrs.next().is_some() {
@@ -271,7 +277,10 @@ fn simple_binding_name(kv: &rnix::ast::AttrpathValue) -> Option<String> {
     let Attr::Ident(ident) = first else {
         return None;
     };
-    Some(ident.to_string())
+    Some(SimpleBinding {
+        name: ident.to_string(),
+        name_range: ident.syntax().text_range(),
+    })
 }
 
 /// Returns the range covering the preceding whitespace (if any) plus the
