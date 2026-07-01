@@ -1,12 +1,13 @@
 ---
 source: crates/cli/tests/single_use_let.rs
+assertion_line: 7
 expression: "\"let\\n  loop = loop;\\nin\\n  1\\n\""
 ---
 --- <temp_file_path>
 +++ <temp_file_path> [fixed]
-@@ -1,5 +1,5 @@
- let
+@@ -1,5 +1,2 @@
+-let
 -  loop = loop;
-+  inherit loop;
- in
-   1
+-in
+-  1
++1

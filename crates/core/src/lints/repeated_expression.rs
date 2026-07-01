@@ -1,7 +1,7 @@
 use crate::{Metadata, Report, Rule, utils};
 
 use macros::lint;
-use rnix::{NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode, TextRange};
+use rnix::{NodeOrToken, SyntaxElement, SyntaxKind, SyntaxNode, TextRange, TextSize};
 use rowan::ast::AstNode as _;
 use std::collections::{HashMap, HashSet};
 
@@ -66,7 +66,7 @@ impl Rule for RepeatedExpression {
         // The boolean tracks whether the entry was promoted to its enclosing
         // application expression (true) or is a plain select (false).
         let mut selects: Vec<(String, TextRange, bool)> = Vec::new();
-        collect_selects(node, &mut selects);
+        collect_selects(node, &mut selects, true);
 
         if selects.is_empty() {
             return None;
@@ -107,10 +107,11 @@ impl Rule for RepeatedExpression {
                 prefix.push_str(part);
                 // Only record prefixes with at least two components.
                 if i >= 1 {
+                    let prefix_range = prefix_text_range(raw_text, *range, &prefix);
                     prefix_ranges
                         .entry(prefix.clone())
                         .or_default()
-                        .push(*range);
+                        .push(prefix_range);
                 }
             }
         }
@@ -186,7 +187,14 @@ impl Rule for RepeatedExpression {
     }
 }
 
-fn collect_selects(node: &SyntaxNode, result: &mut Vec<(String, TextRange, bool)>) {
+fn collect_selects(node: &SyntaxNode, result: &mut Vec<(String, TextRange, bool)>, is_root: bool) {
+    // Each NODE_LET_IN is linted independently.  Do not collect selects from a
+    // nested let while validating the outer let, otherwise the same occurrence
+    // is reported once for every enclosing let.
+    if !is_root && node.kind() == SyntaxKind::NODE_LET_IN {
+        return;
+    }
+
     // Do not descend into strings. A select like `config.user.name` that only
     // appears inside `${config.user.name}` would require `${name}` after
     // extraction – almost no improvement.
@@ -227,6 +235,35 @@ fn collect_selects(node: &SyntaxNode, result: &mut Vec<(String, TextRange, bool)
         }
     }
     for child in node.children() {
-        collect_selects(&child, result);
+        collect_selects(&child, result, false);
     }
 }
+
+fn prefix_text_range(raw_text: &str, full_range: TextRange, prefix: &str) -> TextRange {
+    let mut matched = 0;
+
+    for (idx, ch) in raw_text.char_indices() {
+        if ch.is_whitespace() {
+            continue;
+        }
+
+        let Some(expected) = prefix[matched..].chars().next() else {
+            break;
+        };
+        if ch != expected {
+            return full_range;
+        }
+
+        matched += ch.len_utf8();
+        if matched == prefix.len() {
+            let raw_end = idx + ch.len_utf8();
+            return TextRange::new(
+                full_range.start(),
+                full_range.start() + TextSize::of(&raw_text[..raw_end]),
+            );
+        }
+    }
+
+    full_range
+}
+

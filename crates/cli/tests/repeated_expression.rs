@@ -63,3 +63,23 @@ fn repeated_expression_ignores_dots_inside_application_arguments() {
     "#})
     .expect("CLI 'check' should succeed when dots only repeat inside application arguments");
 }
+
+#[test]
+fn repeated_expression_does_not_duplicate_nested_let_reports() {
+    let output = _utils::test_cli(
+        indoc! {"
+            let
+              outer = 1;
+            in
+              let
+                a = pkgs.hello.meta.description;
+                b = pkgs.hello.meta.license;
+              in
+                null
+        "},
+        &["check"],
+    )
+    .expect("CLI 'check' should run");
+
+    assert_eq!(output.matches("[34] Warning").count(), 1, "{output}");
+}
