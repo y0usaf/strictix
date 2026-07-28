@@ -1,0 +1,8 @@
+[package]
+name = "strictix-syntax"
+description = "Lexer, parser, lossless syntax tree, and typed AST for Nix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
