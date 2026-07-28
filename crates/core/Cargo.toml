@@ -1,0 +1,9 @@
+[package]
+name = "strictix-core"
+description = "Diagnostics, rule traits, and semantic model for strictix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+strictix-syntax = { path = "../syntax" }
