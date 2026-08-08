@@ -1,0 +1,10 @@
+[package]
+name = "strictix-lints"
+description = "Builtin lint rules for strictix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+strictix-core = { path = "../core" }
+strictix-syntax = { path = "../syntax" }

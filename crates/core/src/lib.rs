@@ -5,8 +5,14 @@
 
 #![forbid(unsafe_code)]
 
-/// Placeholder for M5 (rules engine). Reports crate version so the CLI
-/// smoke test can call into this crate.
+pub mod config;
+pub mod diagnostic;
+pub mod fix;
+pub mod json;
+pub mod rules;
+pub mod semantic;
+
+/// Reports crate version so the CLI smoke test can call into this crate.
 #[must_use]
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
