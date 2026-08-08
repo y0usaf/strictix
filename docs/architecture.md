@@ -31,9 +31,10 @@ enough to hold in your head.
   Zero deps. The foundation everything sits on.
 - `strictix-core`: diagnostics, fix machinery, rule traits, and
   `SemanticModel` (scope graph). Depends only on `strictix-syntax`.
-- `strictix-lints` (later): all builtin rules. First customer of
+- `strictix-lints`: all builtin rules. First customer of
   `strictix-core`; uses only its public API. API is **unstable**:
-  bump semver-major freely, no stability promises yet.
+  bump semver-major freely, no stability promises yet. Includes the
+  M8 `unknown-option` schema rule (hand-written JSON parser in core).
 - `strictix-cli`: entrypoint. Human + JSON output (`serde`),
   TOML config (`toml`). Std threads for per-file parallelism.
 

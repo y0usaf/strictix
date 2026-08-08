@@ -622,7 +622,7 @@ impl<'a> Builder<'a> {
                 }
             }
             Expr::Attrset(attrset) => {
-                let _scope = self.new_scope(ScopeKind::Attrset, attrset.range());
+                let scope = self.new_scope(ScopeKind::Attrset, attrset.range());
                 for item in attrset.items() {
                     match item {
                         AttrItem::Binding(binding) => {

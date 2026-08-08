@@ -114,6 +114,7 @@ dependencies = [
  "serde_json",
  "strictix-core",
  "strictix-lints",
+ "strictix-syntax",
  "toml",
 ]
 
