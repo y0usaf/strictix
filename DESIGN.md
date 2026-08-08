@@ -70,7 +70,7 @@ See `docs/architecture.md` for the full description.
 
 ## Roadmap
 
-- [ ] M0 — skeleton: workspace, CLI `--help`, flake builds.
+- [x] M0 — skeleton: workspace, CLI `--help`, flake builds.
   *Accept: `nix build && ./result/bin/strictix --help` prints usage; `nix flake check` green.*
 - [x] M1 — lexer: full Nix token set, interpolation mode-stack,
   indented strings, paths, URIs, comments.
@@ -78,7 +78,7 @@ See `docs/architecture.md` for the full description.
 - [x] M2 — green tree + parser + error recovery.
   *Accept: parses a real config repo with zero panics; broken files produce error nodes + synced recovery, not aborts; lossless round-trip test.*
 - [x] M3 — typed AST layer over the CST.
-- [ ] M4 — SemanticModel: bindings, shadow-aware refs, `with`/`import`
+- [x] M4 — SemanticModel: bindings, shadow-aware refs, `with`/`import`
   sites, built lazily once per file.
   *Accept: scope resolution tests incl. shadowing, `rec`, patterns; model builds on real corpus.*
 - [ ] M5 — rules engine: node rules + file rules, one registry,
