@@ -224,6 +224,11 @@ impl Rule for ShadowedBinding {
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         let bindings = model.bindings();
         for (idx, binding) in bindings.iter().enumerate() {
+            // InheritName binds only as a field of a fresh (non-rec) attrset;
+            // it never hides anything, so it cannot shadow.
+            if binding.kind == BindingKind::InheritName {
+                continue;
+            }
             let name = binding.name.text(model.source());
             let offset = binding.name.range().start();
             let Some(other) = model.resolve_lexical(name, offset) else {

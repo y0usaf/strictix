@@ -81,13 +81,13 @@ See `docs/architecture.md` for the full description.
 - [x] M4 — SemanticModel: bindings, shadow-aware refs, `with`/`import`
   sites, built lazily once per file.
   *Accept: scope resolution tests incl. shadowing, `rec`, patterns; model builds on real corpus.*
-- [ ] M5 — rules engine: node rules + file rules, one registry,
+- [x] M5 — rules engine: node rules + file rules, one registry,
   diagnostics renderer, text-splice fixes.
   *Accept: one trivial rule end-to-end via `strictix check` and `strictix fix` on a fixture.*
-- [ ] M6 — builtin lints, written fresh, with snapshot tests.
+- [x] M6 — builtin lints, written fresh, with snapshot tests.
   *Accept: growing rule set covering unused-*, shadowing, dead bindings, AI-slop patterns; zero false positives on the author's own config.*
-- [ ] M7 — CLI + config polish: directory walking, ignore file,
+- [x] M7 — CLI + config polish: directory walking, ignore file,
   TOML config, JSON output.
   *Accept: runs clean over a full NixOS config repo; config toggles rules.*
-- [ ] M8+ — schema checks against `options.json`; AI-slop rule suite.
+- [x] M8+ — schema checks against `options.json`; AI-slop rule suite.
   *Accept: flags a hallucinated option name in a fixture config.*
