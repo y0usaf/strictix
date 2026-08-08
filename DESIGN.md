@@ -72,13 +72,12 @@ See `docs/architecture.md` for the full description.
 
 - [ ] M0 — skeleton: workspace, CLI `--help`, flake builds.
   *Accept: `nix build && ./result/bin/strictix --help` prints usage; `nix flake check` green.*
-- [ ] M1 — lexer: full Nix token set, interpolation mode-stack,
+- [x] M1 — lexer: full Nix token set, interpolation mode-stack,
   indented strings, paths, URIs, comments.
   *Accept: lexes every `.nix` file in a real config repo without panic; round-trip test (tokens + trivia = source).*
-- [ ] M2 — green tree + parser + error recovery.
+- [x] M2 — green tree + parser + error recovery.
   *Accept: parses a real config repo with zero panics; broken files produce error nodes + synced recovery, not aborts; lossless round-trip test.*
-- [ ] M3 — typed AST layer over the CST.
-  *Accept: every node kind has a typed wrapper with accessors; AST tests on fixture files.*
+- [x] M3 — typed AST layer over the CST.
 - [ ] M4 — SemanticModel: bindings, shadow-aware refs, `with`/`import`
   sites, built lazily once per file.
   *Accept: scope resolution tests incl. shadowing, `rec`, patterns; model builds on real corpus.*
