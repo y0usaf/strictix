@@ -191,7 +191,7 @@ impl Rule for Tautology {
         );
         let same_text = atom_text(lhs, source)
             .zip(atom_text(rhs, source))
-            .map_or(false, |(l, r)| l == r);
+            .is_some_and(|(l, r)| l == r);
         if same_kind && same_text {
             diags.push(Diagnostic::new(
                 "tautology",

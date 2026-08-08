@@ -18,6 +18,7 @@ fn err(input: &str) -> JsonError {
 }
 
 #[test]
+#[allow(clippy::approx_constant)] // 3.14 is the literal under test, not PI
 fn scalar_values() {
     assert_eq!(JsonValue::parse("null"), Ok(JsonValue::Null));
     assert_eq!(JsonValue::parse("true"), Ok(JsonValue::Bool(true)));
