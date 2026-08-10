@@ -178,6 +178,7 @@ fn attrpath_text(path: &Attrpath<'_>, src: &str) -> String {
                     StringPart::Interp(_) => None,
                 })
                 .collect(),
+            AttrName::Interp(_) => String::new(),
         })
         .collect::<Vec<_>>()
         .join(".")
@@ -588,4 +589,23 @@ fn expr_range_and_text() {
     assert_eq!(expr.text(src), src);
     assert_eq!(expr.range().start(), 0);
     assert_eq!(expr.range().end(), src.len() as u32);
+}
+
+#[test]
+fn attrpath_unquoted_interp_segment() {
+    // Nix accepts a.${b}.c — the ${b} is a dynamic segment.
+    let src = r#"let b = "x"; in cfg.folders.${b}.id"#;
+    let tree = parse(src);
+    let root = Root::cast(&tree).expect("root");
+    let Expr::Let(let_expr) = root.expr().expect("let") else {
+        panic!("top level is a let")
+    };
+    let Expr::Select(sel) = let_expr.body().expect("body is a select") else {
+        panic!("dynamic attrpath parses as a select")
+    };
+    let elements: Vec<_> = sel.attrpath().expect("attrpath").elements().collect();
+    assert_eq!(elements.len(), 3);
+    assert!(matches!(elements[0], AttrName::Ident(_)));
+    assert!(matches!(elements[1], AttrName::Interp(_)));
+    assert!(matches!(elements[2], AttrName::Ident(_)));
 }

@@ -272,6 +272,33 @@ impl<'a> SemanticModel<'a> {
             .map(|i| &built.bindings[i])
     }
 
+    /// The nearest outer binding shadowed by `binding`, if any.
+    ///
+    /// Nix `let` is recursive, so at its own name position a binding
+    /// resolves to itself; shadowing must therefore be checked from the
+    /// enclosing scope outward.
+    #[must_use]
+    pub fn outer_shadow(&self, binding: &Binding<'a>) -> Option<&Binding<'a>> {
+        let built = self.ensure_built();
+        let offset = binding.name.range().start();
+        let name = binding.name.text(built.source);
+        let mut scope_id = built.scopes[binding.scope.0 as usize].parent?;
+        loop {
+            let scope = &built.scopes[scope_id.0 as usize];
+            if scope.kind != ScopeKind::Attrset {
+                for (pos, &bi) in scope.bindings.iter().enumerate() {
+                    let candidate = &built.bindings[bi];
+                    if candidate.name.text(built.source) == name
+                        && built.is_visible(scope_id, pos, offset)
+                    {
+                        return Some(candidate);
+                    }
+                }
+            }
+            scope_id = scope.parent?;
+        }
+    }
+
     /// Whether any binding — lexical, or any `with` whose body covers
     /// `offset` — could provide `name` at `offset`. The `with` side is
     /// deliberately conservative: statically we cannot know whether a
@@ -466,7 +493,7 @@ impl<'a> Builder<'a> {
     fn binding_name(binding: &strictix_syntax::Binding<'a>) -> Option<&'a SyntaxToken> {
         match binding.attrpath()?.elements().next()? {
             AttrName::Ident(token) => Some(token),
-            AttrName::Str(_) => None,
+            AttrName::Str(_) | AttrName::Interp(_) => None,
         }
     }
 
@@ -511,25 +538,17 @@ impl<'a> Builder<'a> {
                     for item in bindings.items() {
                         match item {
                             AttrItem::Binding(binding) => {
-                                // Sequential visibility: this binding
-                                // becomes visible only after its own
-                                // value ends, so the value resolves
-                                // against earlier bindings and outer
-                                // scopes only — the `let x = x;` gotcha.
-                                // Declared before walking so bindings
-                                // stay in name-token order; visibility
-                                // is gated by visible_from, not by
-                                // registration order.
+                                // Nix `let` is recursive: bindings are
+                                // visible inside their own value (forward
+                                // references and self-recursion both work;
+                                // evaluation is lazy). Visible from the
+                                // start of the scope.
                                 if let Some(name) = Self::binding_name(&binding) {
-                                    let visible_from = binding
-                                        .value()
-                                        .map(|v| v.range().end())
-                                        .unwrap_or(binding.range().end());
                                     self.register(
                                         name,
                                         BindingKind::LetBinding,
                                         scope,
-                                        visible_from,
+                                        let_expr.range().start(),
                                     );
                                 }
                                 if let Some(value) = binding.value() {
@@ -540,10 +559,9 @@ impl<'a> Builder<'a> {
                                 if let Some(source) = inherit.source() {
                                     self.walk_expr(source);
                                 }
-                                // inherit binds its names at its own
-                                // position: visible to later bindings
-                                // and the body, not to earlier values.
-                                let visible_from = inherit.range().end();
+                                // inherit binds its names like the
+                                // other let entries: recursively.
+                                let visible_from = let_expr.range().start();
                                 for name in inherit.names() {
                                     self.register(
                                         name,
@@ -570,23 +588,19 @@ impl<'a> Builder<'a> {
                         self.register(token, BindingKind::LambdaParam, scope, token.range().end());
                     }
                     LambdaParam::Formals(formals, at_name) => {
+                        // Nix formals defaults are recursive: a param is
+                        // visible in its own and later defaults, so
+                        // register before walking.
                         for param in formals.params() {
-                            if let Some(default) = param.default {
-                                self.walk_expr(default);
-                            }
-                            // Sequential like let: param i is visible in
-                            // the defaults of j > i and in the body; its
-                            // own default (walked above) is excluded.
-                            let visible_from = param
-                                .default
-                                .map(|d| d.range().end())
-                                .unwrap_or(param.name.range().end());
                             self.register(
                                 param.name,
                                 BindingKind::LambdaParam,
                                 scope,
-                                visible_from,
+                                lambda.range().start(),
                             );
+                            if let Some(default) = param.default {
+                                self.walk_expr(default);
+                            }
                         }
                         if let Some(at) = at_name {
                             // The at-name is visible only in the body,
@@ -745,9 +759,9 @@ impl<'a> Builder<'a> {
                 if let Some(base) = select.base() {
                     self.walk_expr(base);
                 }
-                // The attrpath (`b` in `a.b`) is NOT an expression
-                // position: field names are never references. Only the
-                // `or default` part is walked.
+                // Field names are not references, but interpolated
+                // segments (a.${b}.c) ARE expression positions.
+                self.walk_attrpath_interps(select.attrpath());
                 if let Some(default) = select.default() {
                     self.walk_expr(default);
                 }
@@ -778,6 +792,20 @@ impl<'a> Builder<'a> {
             if let StringPart::Interp(interp) = part {
                 if let Some(inner) = interp.expr() {
                     self.walk_expr(inner);
+                }
+            }
+        }
+    }
+
+    /// Interpolations inside (quoted or unquoted) attrpath segments are
+    /// evaluated, so they are expression positions.
+    fn walk_attrpath_interps(&mut self, path: Option<strictix_syntax::Attrpath<'a>>) {
+        if let Some(p) = path {
+            for element in p.elements() {
+                if let AttrName::Interp(interp) = element {
+                    if let Some(inner) = interp.expr() {
+                        self.walk_expr(inner);
+                    }
                 }
             }
         }

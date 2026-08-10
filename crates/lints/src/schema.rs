@@ -158,7 +158,7 @@ impl Rule for UnknownOption {
                         AttrName::Ident(token) => {
                             segments.push(token.text(model.source()).to_string())
                         }
-                        AttrName::Str(_) => valid = false,
+                        AttrName::Str(_) | AttrName::Interp(_) => valid = false,
                     }
                 }
             }
