@@ -222,31 +222,28 @@ impl Rule for ShadowedBinding {
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
-        let bindings = model.bindings();
-        for (idx, binding) in bindings.iter().enumerate() {
+        for binding in model.bindings() {
             // InheritName binds only as a field of a fresh (non-rec) attrset;
             // it never hides anything, so it cannot shadow.
             if binding.kind == BindingKind::InheritName {
                 continue;
             }
             let name = binding.name.text(model.source());
-            let offset = binding.name.range().start();
-            let Some(other) = model.resolve_lexical(name, offset) else {
-                continue;
-            };
-            // Identity by index: rec attrs see their own name at the
-            // attr-name position (rec binds inside values, but the
-            // model is position-based), which is not a shadow.
-            let other_idx = bindings.iter().position(|b| std::ptr::eq(b, other));
-            if other_idx == Some(idx) {
+            // Names starting with `_` are idiomatically shadowed
+            // (nested lambdas, ignored params) — skip.
+            if name.starts_with('_') {
                 continue;
             }
-            diags.push(Diagnostic::new(
-                self.code(),
-                self.severity(),
-                format!("binding '{name}' shadows an outer binding"),
-                binding.name.range(),
-            ));
+            // outer_shadow resolves from the enclosing scope outward, so a
+            // recursive `let` binding does not count itself.
+            if model.outer_shadow(binding).is_some() {
+                diags.push(Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!("binding '{name}' shadows an outer binding"),
+                    binding.name.range(),
+                ));
+            }
         }
     }
 }
@@ -320,7 +317,7 @@ impl Rule for SelfReferentialLet {
     }
 
     fn description(&self) -> &'static str {
-        "Flags a let binding whose value references its own name with nothing else bound to that name — `let x = x;` evaluates to an infinite recursion at runtime."
+        "Flags a let binding whose value forces its own name — `let x = x;` or `let x = x + 1;`. Evaluation of the value immediately re-enters the binding, so forcing it never terminates. References behind lazy barriers (lambda bodies, list items, attrset values) are fine: `let f = n: f (n - 1);` recurses safely."
     }
 
     fn severity(&self) -> Severity {
@@ -328,29 +325,40 @@ impl Rule for SelfReferentialLet {
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
-        for binding in model.bindings() {
+        let source = model.source();
+        for (idx, binding) in model.bindings().iter().enumerate() {
             if binding.kind != BindingKind::LetBinding {
                 continue;
             }
-            let Some(binding_node) = containing_binding(model.root(), binding.name.range()) else {
+            // An inherit name has no value expression: skip it.
+            let name_range = binding.name.range();
+            let is_inherit = model.root().descendants().any(|n| {
+                n.kind() == strictix_syntax::SyntaxKind::InheritStmt && n.range().contains(name_range.start())
+            });
+            if is_inherit {
+                continue;
+            }
+            let Some(binding_node) = containing_binding(model.root(), name_range) else {
                 continue;
             };
             let Some(value) = binding_node.value() else {
                 continue;
             };
             let value_range = value.range();
-            let name = binding.name.text(model.source());
-            for reference in model.references() {
-                let range = reference.name.range();
-                if !(value_range.contains(range.start()) && value_range.end() >= range.end()) {
-                    continue;
-                }
-                if reference.name.text(model.source()) != name {
-                    continue;
-                }
-                if model.is_bound(name, range.start()) {
-                    continue;
-                }
+            let name = binding.name.text(source);
+            // A self-reference is only a bug when the value's EAGER
+            // evaluation forces it: direct, arithmetic, select base,
+            // string interpolation, condition. Behind a lambda body, a
+            // list item, or an attrset value it is guarded by laziness.
+            let forced = model.references().iter().any(|r| {
+                let range = r.name.range();
+                r.name.text(source) == name
+                    && r.resolved == Some(idx)
+                    && value_range.contains(range.start())
+                    && value_range.end() >= range.end()
+                    && eager_contains(value, range)
+            });
+            if forced {
                 diags.push(Diagnostic::new(
                     self.code(),
                     self.severity(),
@@ -359,5 +367,86 @@ impl Rule for SelfReferentialLet {
                 ));
             }
         }
+    }
+}
+
+/// Whether forcing `expr` would evaluate the ident at `range`.
+///
+/// Lambda bodies, list items, and attrset values are lazy: the ident is
+/// only evaluated if the enclosing thunk is forced later, which is normal
+/// recursion, not this bug. Everything else (operands, bases, conditions,
+/// interpolations, application functions) is forced with the value.
+fn eager_contains(expr: strictix_syntax::Expr<'_>, range: TextRange) -> bool {
+    use strictix_syntax::{AttrItem, AttrName, Expr, StringPart};
+    match expr {
+        Expr::Ident(t) => t.range() == range,
+        Expr::Let(e) => {
+            let bindings = e
+                .bindings()
+                .map(|b| {
+                    b.items().any(|item| match item {
+                        AttrItem::Binding(binding) => binding
+                            .value()
+                            .map_or(false, |v| eager_contains(v, range)),
+                        AttrItem::Inherit(inh) => inh
+                            .source()
+                            .map_or(false, |src| eager_contains(src, range)),
+                    })
+                })
+                .unwrap_or(false);
+            bindings || e.body().map_or(false, |b| eager_contains(b, range))
+        }
+        Expr::With(w) => {
+            w.scope().map_or(false, |s| eager_contains(s, range))
+                || w.body().map_or(false, |b| eager_contains(b, range))
+        }
+        Expr::Assert(a) => {
+            a.cond().map_or(false, |c| eager_contains(c, range))
+                || a.body().map_or(false, |b| eager_contains(b, range))
+        }
+        Expr::If(i) => {
+            i.cond().map_or(false, |c| eager_contains(c, range))
+                || i.then_branch().map_or(false, |b| eager_contains(b, range))
+                || i.else_branch().map_or(false, |b| eager_contains(b, range))
+        }
+        Expr::Apply(a) => a.func().map_or(false, |f| eager_contains(f, range)),
+        Expr::Unary(u) => u.operand().map_or(false, |o| eager_contains(o, range)),
+        Expr::Bin(b) => {
+            b.lhs().map_or(false, |l| eager_contains(l, range))
+                || b.rhs().map_or(false, |r| eager_contains(r, range))
+        }
+        Expr::Select(s) => {
+            let base = s.base().map_or(false, |b| eager_contains(b, range));
+            let interp = s
+                .attrpath()
+                .map(|ap| {
+                    ap.elements().any(|e| {
+                        if let AttrName::Interp(i) = e {
+                            i.expr().map_or(false, |x| eager_contains(x, range))
+                        } else {
+                            false
+                        }
+                    })
+                })
+                .unwrap_or(false);
+            base || interp
+        }
+        Expr::HasAttr(h) => h.base().map_or(false, |b| eager_contains(b, range)),
+        Expr::String(s) => s.parts().any(|part| match part {
+            StringPart::Content(_) => false,
+            StringPart::Interp(i) => i.expr().map_or(false, |x| eager_contains(x, range)),
+        }),
+        Expr::IndString(s) => s.parts().any(|part| match part {
+            StringPart::Content(_) => false,
+            StringPart::Interp(i) => i.expr().map_or(false, |x| eager_contains(x, range)),
+        }),
+        Expr::Paren(p) => p.expr().map_or(false, |i| eager_contains(i, range)),
+        // Barriers: lambda body, list items, attrset/rec values.
+        Expr::Lambda(_) | Expr::List(_) | Expr::Attrset(_) | Expr::RecAttrset(_) => false,
+        Expr::Int(_)
+        | Expr::Float(_)
+        | Expr::Path(_)
+        | Expr::SearchPath(_)
+        | Expr::Uri(_) => false,
     }
 }

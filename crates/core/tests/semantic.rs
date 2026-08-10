@@ -75,15 +75,30 @@ fn let_value_sees_earlier_bindings() {
 }
 
 #[test]
-fn let_binding_not_visible_in_own_value() {
-    // The Nix gotcha: 'let x = x;' — RHS x resolves to NOTHING.
+fn let_binding_visible_in_own_value() {
+    // Nix `let` is recursive: the RHS x resolves to the binding itself,
+    // which is infinite recursion only when forced at runtime.
     let src = "let x = x; in x";
     let m = model(src);
     let r: Vec<_> = refs(&m);
-    // First x (in the value): unbound. Second x (body): bound to the let.
+    // First x (in the value): resolves to the let binding itself.
+    // Second x (body): also the let binding.
     assert_eq!(r[0].0, "x");
-    assert_eq!(r[0].1, None, "value x must not see the binding itself");
+    assert_eq!(r[0].1, Some(0), "recursive let sees its own binding");
     assert_eq!(r[1].1, Some(0), "body x resolves to the let binding");
+}
+
+#[test]
+fn let_forward_reference_works() {
+    // Recursive let: a binding can forward-reference a later one.
+    let src = "let a = b; b = 1; in a";
+    let m = model(src);
+    let a = one_binding(&m, "a", BindingKind::LetBinding);
+    let b = one_binding(&m, "b", BindingKind::LetBinding);
+    assert_eq!(a.references.len(), 1, "a's value references b");
+    assert_eq!(b.references.len(), 1, "body references b");
+    let r = refs(&m);
+    assert_eq!(r[0].1, Some(1), "forward reference resolves to b");
 }
 
 // --- 3. rec self-ref --------------------------------------------------------
@@ -257,13 +272,24 @@ fn with_scope_expr_resolves_outside() {
 }
 
 #[test]
-fn shadowing_across_scopes_via_resolve_lexical() {
-    // resolve_lexical at the inner binding's name position sees the outer.
+fn shadowing_across_scopes_via_outer_shadow() {
+    // Recursive let sees itself at its own name position; shadowing is
+    // detected from the enclosing scope outward.
     let src = "let a = 1; in let a = 2; in a";
     let m = model(src);
     let inner = bindings_named(&m, "a").pop().expect("inner a");
     let resolved = m
         .resolve_lexical(inner.name.text(src), inner.name.range().start())
-        .expect("outer a is visible at the inner binding position");
-    assert_eq!(resolved.name.range(), m.bindings()[0].name.range());
+        .expect("recursive let sees itself");
+    assert_eq!(resolved.name.range(), inner.name.range(), "resolves to itself");
+    let outer = m.outer_shadow(inner).expect("outer a shadows the inner");
+    assert_eq!(outer.name.range(), m.bindings()[0].name.range());
+}
+
+#[test]
+fn select_attrpath_interp_is_a_reference() {
+    let src = r#"let name = "x"; in cfg.folders.${name}.id"#;
+    let m = model(src);
+    let name = one_binding(&m, "name", BindingKind::LetBinding);
+    assert_eq!(name.references.len(), 1, "the attrpath interpolation resolves");
 }

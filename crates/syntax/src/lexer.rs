@@ -277,6 +277,13 @@ impl<'a> Lexer<'a> {
             b'?' => self.emit_len(SyntaxKind::Question, 1),
             b'@' => self.emit_len(SyntaxKind::At, 1),
             b':' => self.emit_len(SyntaxKind::Colon, 1),
+            b'$' if self.peek_at(1) == b'{' => {
+                // Unquoted interpolation: valid in attrpaths (dynamic
+                // segment) and in string-literal positions outside strings.
+                self.emit_len(SyntaxKind::InterpStart, 2);
+                self.modes.push(Mode::Normal);
+                self.braces.push(0);
+            }
             _ if is_ident_start(c) => self.ident_or_keyword(),
             _ => self.emit_len(SyntaxKind::Error, 1),
         }

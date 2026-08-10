@@ -533,6 +533,9 @@ impl<'a> Parser<'a> {
                 self.bump();
             } else if self.current() == K::StringStart {
                 self.parse_string(K::StringExpr, K::StringEnd);
+            } else if self.current() == K::InterpStart {
+                // Unquoted dynamic segment: the expr in a.${b}.c.
+                self.parse_interp();
             } else {
                 break;
             }
