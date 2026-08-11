@@ -554,6 +554,11 @@ impl<'a> Builder<'a> {
                                 if let Some(value) = binding.value() {
                                     self.walk_expr(value);
                                 }
+                                // Walk string interpolations in the
+                                // binding attrpath ("${x}" = ...).
+                                if let Some(ap) = binding.attrpath() {
+                                    self.walk_attrpath_interps(Some(ap));
+                                }
                             }
                             AttrItem::Inherit(inherit) => {
                                 if let Some(source) = inherit.source() {
@@ -651,6 +656,11 @@ impl<'a> Builder<'a> {
                             if let Some(value) = binding.value() {
                                 self.walk_expr(value);
                             }
+                            // Walk string interpolations in the
+                            // binding attrpath ("${x}" = ...).
+                            if let Some(ap) = binding.attrpath() {
+                                self.walk_attrpath_interps(Some(ap));
+                            }
                         }
                         AttrItem::Inherit(inherit) => {
                             if let Some(source) = inherit.source() {
@@ -690,6 +700,11 @@ impl<'a> Builder<'a> {
                                 }
                                 if let Some(value) = binding.value() {
                                     self.walk_expr(value);
+                                }
+                                // Walk string interpolations in the
+                                // binding attrpath ("${x}" = ...).
+                                if let Some(ap) = binding.attrpath() {
+                                    self.walk_attrpath_interps(Some(ap));
                                 }
                             }
                             AttrItem::Inherit(inherit) => {
@@ -813,10 +828,18 @@ impl<'a> Builder<'a> {
     fn walk_attrpath_interps(&mut self, path: Option<strictix_syntax::Attrpath<'a>>) {
         if let Some(p) = path {
             for element in p.elements() {
-                if let AttrName::Interp(interp) = element {
-                    if let Some(inner) = interp.expr() {
-                        self.walk_expr(inner);
+                match element {
+                    AttrName::Interp(interp) => {
+                        if let Some(inner) = interp.expr() {
+                            self.walk_expr(inner);
+                        }
                     }
+                    // Quoted segments ("${foo}" or "plain") carry
+                    // StringExpr parts; walk interpolations inside.
+                    AttrName::Str(string_expr) => {
+                        self.walk_string_parts(string_expr.parts());
+                    }
+                    AttrName::Ident(_) => {}
                 }
             }
         }
