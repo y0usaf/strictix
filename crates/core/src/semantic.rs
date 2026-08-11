@@ -559,17 +559,23 @@ impl<'a> Builder<'a> {
                                 if let Some(source) = inherit.source() {
                                     self.walk_expr(source);
                                 }
-                                // inherit binds its names like the
-                                // other let entries: recursively.
-                                let visible_from = let_expr.range().start();
                                 for name in inherit.names() {
-                                    self.register(
-                                        name,
-                                        BindingKind::LetBinding,
-                                        scope,
-                                        visible_from,
-                                    );
-                                }
+                                // Record the inherited name as a
+                                // reference to the outer binding so the
+                                // linter treats it as "used".
+                                self.idents.push(name);
+                                // The new binding enters visibility at its
+                                // own token's end, NOT at the let's start,
+                                // so the reference above resolves to the
+                                // outer binding, not this one.
+                                let visible_from = name.range().end();
+                                self.register(
+                                    name,
+                                    BindingKind::LetBinding,
+                                    scope,
+                                    visible_from,
+                                );
+                            }
                             }
                         }
                     }
@@ -650,11 +656,13 @@ impl<'a> Builder<'a> {
                             if let Some(source) = inherit.source() {
                                 self.walk_expr(source);
                             }
-                            // Recorded (rules can see them) but never
-                            // resolvable: the attrset scope is skipped
-                            // during resolution.
-                            let visible_from = inherit.range().end();
                             for name in inherit.names() {
+                                // Record as a reference to the outer
+                                // binding (the name came from there).
+                                self.idents.push(name);
+                                // The new name binds forward in the
+                                // attrset — other attrs can inherit it.
+                                let visible_from = name.range().end();
                                 self.register(name, BindingKind::InheritName, scope, visible_from);
                             }
                         }
@@ -689,11 +697,14 @@ impl<'a> Builder<'a> {
                                     self.walk_expr(source);
                                 }
                                 for name in inherit.names() {
+                                    // Record as a reference to the outer
+                                    // binding.
+                                    self.idents.push(name);
                                     self.register(
                                         name,
                                         BindingKind::RecAttr,
                                         scope,
-                                        attrset.range().start(),
+                                        name.range().end(),
                                     );
                                 }
                             }
