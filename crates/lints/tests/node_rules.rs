@@ -164,6 +164,11 @@ fn tautology_andand() {
         run("x && x"),
         vec!["[tautology] warning 0..6 tautological comparison"],
     );
+    // `&&`/`||` carry no fix: folding to the bare operand would change
+    // the result type (an inline forces the operand to boolean, the
+    // operand may not be boolean). Verify no fix is attached.
+    let diags = run_rules_only("x && x", vec![Box::new(Tautology {})]);
+    assert!(diags[0].fix.is_none(), "&& tautology has no fix");
 }
 
 #[test]
@@ -202,6 +207,38 @@ fn tautology_flagged_inside_let_body() {
         run("let x = 1; in x == x"),
         vec!["[tautology] warning 13..20 tautological comparison"],
     );
+}
+
+// --- tautology fixes ------------------------------------------------
+
+#[test]
+fn tautology_eq_fix_folds_to_true() {
+    let source = "x == x";
+    let diags = run_rules_only(source, vec![Box::new(Tautology {})]);
+    let fix = diags[0].fix.as_ref().expect("== tautology carries a fix");
+    assert_eq!(fix.label, "replace with true");
+    let result = apply_fixes(source, &fix.edits).expect("fix applies");
+    assert_eq!(result, "true");
+}
+
+#[test]
+fn tautology_neq_fix_folds_to_false() {
+    let source = "x != x";
+    let diags = run_rules_only(source, vec![Box::new(Tautology {})]);
+    let fix = diags[0].fix.as_ref().expect("!= tautology carries a fix");
+    assert_eq!(fix.label, "replace with false");
+    let result = apply_fixes(source, &fix.edits).expect("fix applies");
+    assert_eq!(result, "false");
+}
+
+#[test]
+fn tautology_int_eq_fix_folds_to_true() {
+    let source = "1 == 1";
+    let diags = run_rules_only(source, vec![Box::new(Tautology {})]);
+    let fix = diags[0].fix.as_ref().expect("int == carries a fix");
+    assert_eq!(fix.label, "replace with true");
+    let result = apply_fixes(source, &fix.edits).expect("fix applies");
+    assert_eq!(result, "true");
 }
 
 // --- multi-rule -----------------------------------------------------

@@ -134,12 +134,22 @@ impl Rule for UnusedLambdaParam {
             if name.starts_with('_') {
                 continue;
             }
-            diags.push(Diagnostic::new(
-                self.code(),
-                self.severity(),
-                format!("parameter '{name}' is never used"),
-                range,
-            ));
+            // Fix: rename to the leading-underscore form. The parameter
+            // has zero references, so renaming just its token cannot
+            // break a use; the `_` prefix is this rule's own documented
+            // opt-out, so the fix makes the intent explicit instead of
+            // deleting an interface.
+            let range = binding.name.range();
+            let fix = Fix::new("rename to _-prefixed").edit(range, format!("_{name}"));
+            diags.push(
+                Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!("parameter '{name}' is never used"),
+                    range,
+                )
+                .with_fix(fix),
+            );
         }
     }
 }
@@ -187,12 +197,20 @@ impl Rule for UnusedFormal {
             if name.starts_with('_') {
                 continue;
             }
-            diags.push(Diagnostic::new(
-                self.code(),
-                self.severity(),
-                format!("parameter '{name}' is never used"),
-                range,
-            ));
+            // Same rename-to-_-prefixed fix as UnusedLambdaParam: the
+            // formal is never referenced, so renaming just its token is
+            // safe and aligns the name with the rule's opt-out.
+            let range = binding.name.range();
+            let fix = Fix::new("rename to _-prefixed").edit(range, format!("_{name}"));
+            diags.push(
+                Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!("parameter '{name}' is never used"),
+                    range,
+                )
+                .with_fix(fix),
+            );
         }
     }
 }
