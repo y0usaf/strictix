@@ -13,8 +13,7 @@ use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::{BindingKind, SemanticModel};
-use strictix_syntax::{AstNode, Binding, Formals, SyntaxKind, SyntaxNode, TextRange};
-
+use strictix_syntax::{AstNode, Binding, Formals, SyntaxKind, SyntaxNode, TextRange, WithExpr};
 /// The innermost [Binding] node whose range contains `name_range`, if
 /// any. Bindings nest when a value contains a `let` or attrset, so a
 /// range scan must pick the smallest containing node — the direct
@@ -306,12 +305,40 @@ impl Rule for RedundantWith {
                 .iter()
                 .all(|r| r.resolved.is_some() && r.via_with.is_none());
             if all_lexical {
-                diags.push(Diagnostic::new(
+                // Safe to remove: the rule only fires when every body
+                // reference resolves lexically (no `via_with`), so the
+                // `with` scope is never consulted and deleting it cannot
+                // break a reference. The deletion spans from the scope
+                // start through the semicolon that terminates it.
+                //
+                // The terminator is found as a direct child token of the
+                // WithExpr node: nested semicolons (inside an attrset or
+                // let on the right) live in child nodes, so `child_tokens`
+                // yields exactly the scope's own `;`. If it cannot be
+                // found, no fix is offered rather than risk a corrupting
+                // edit.
+                let with_expr = model.root().descendants().find_map(|node| {
+                    WithExpr::cast(node).filter(|w| w.range() == site.scope_range)
+                });
+                let semi_end = with_expr.and_then(|w| {
+                    w.syntax()
+                        .child_tokens()
+                        .find(|t| t.kind() == SyntaxKind::Semicolon)
+                        .map(|t| t.range().end())
+                });
+                let mut diag = Diagnostic::new(
                     self.code(),
                     self.severity(),
                     "with-scope is never used",
                     site.scope_range,
-                ));
+                );
+                if let Some(semi_end) = semi_end {
+                    diag = diag.with_fix(
+                        Fix::new("remove with scope")
+                            .edit(TextRange::new(site.scope_range.start(), semi_end), ""),
+                    );
+                }
+                diags.push(diag);
             }
         }
     }
