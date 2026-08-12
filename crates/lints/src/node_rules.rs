@@ -193,12 +193,27 @@ impl Rule for Tautology {
             .zip(atom_text(rhs, source))
             .is_some_and(|(l, r)| l == r);
         if same_kind && same_text {
-            diags.push(Diagnostic::new(
+            // Nix equality is pure, total, and reflexive, so a same-
+            // operand comparison folds to a constant exactly. (`&&`/`||`
+            // are NOT folded: they force the operand to a boolean, so
+            // for a non-boolean operand an inline adds a forced-eval
+            // error that "replace with the operand" would silently
+            // remove — too risky for an automated fix.)
+            let fix = match op {
+                K::EqEq => Some(Fix::new("replace with true").edit(node.range(), "true")),
+                K::Neq => Some(Fix::new("replace with false").edit(node.range(), "false")),
+                _ => None, // && / || carry no fix
+            };
+            let mut diag = Diagnostic::new(
                 "tautology",
                 Severity::Warning,
                 "tautological comparison",
                 node.range(),
-            ));
+            );
+            if let Some(fix) = fix {
+                diag = diag.with_fix(fix);
+            }
+            diags.push(diag);
         }
     }
 }
