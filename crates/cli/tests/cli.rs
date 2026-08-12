@@ -186,6 +186,42 @@ fn fix_rewrites_dirty_copy() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn fix_dry_run_does_not_write_and_shows_diff() {
+    if !rules_available() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "strictix-cli-dry-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let copy = dir.join("dirty-copy.nix");
+    std::fs::copy(fixture("dirty.nix"), &copy).expect("copy fixture");
+
+    let before = std::fs::read_to_string(&copy).expect("read before");
+    let out = run(&["fix", "--dry-run", copy.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    let after = std::fs::read_to_string(&copy).expect("read after");
+    assert_eq!(before, after, "dry-run leaves the file untouched");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("would apply 1 fix(es)"),
+        "dry-run says would-apply: {stdout}"
+    );
+    // The diff shows the removed binding spanning the whole line.
+    assert!(
+        stdout.contains("-let x = 1; in 2") && stdout.contains("+let in 2"),
+        "diff shown: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // --- usage errors ---------------------------------------------------
 
 #[test]

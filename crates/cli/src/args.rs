@@ -59,6 +59,7 @@ pub struct Args {
     pub ignore_file: Option<PathBuf>,
     pub disabled: Vec<String>,
     pub schema: Option<PathBuf>,
+    pub dry_run: bool,
     pub help: bool,
     pub version: bool,
 }
@@ -77,6 +78,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut ignore_file = None;
     let mut disabled = Vec::new();
     let mut schema = None;
+    let mut dry_run = false;
     let mut help = false;
     let mut version = false;
     let mut end_of_flags = false;
@@ -113,6 +115,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                     let value = next_value(args, &mut i, "--schema")?;
                     schema = Some(PathBuf::from(value));
                 }
+                "--dry-run" => dry_run = true,
                 other => return Err(format!("unknown flag '{other}'")),
             }
             i += 1;
@@ -136,6 +139,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         ignore_file,
         disabled,
         schema,
+        dry_run,
         help,
         version,
     })
@@ -183,5 +187,6 @@ OPTIONS:
     --ignore-file FILE    Ignore patterns (default: ./.strictixignore if present)
     --disable CODE        Skip a rule by code (repeatable)
     --schema FILE         options.json path, enabling the unknown-option rule
+    --dry-run             (fix) show what would change without writing
 "
 }

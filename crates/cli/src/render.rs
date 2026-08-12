@@ -157,3 +157,38 @@ pub fn summary_line(files: usize, diagnostics: usize) -> String {
     };
     format!("{files} file(s) linted, {diag_part}")
 }
+
+/// A minimal unified-style diff between two sources, for showing what a
+/// fix would change. Lines are split; a shared prefix/suffix are elided
+/// so only the neighborhood of the change is shown. Pure line diff (no
+/// inter-line hunks) — enough to preview a text-splice fix.
+#[must_use]
+pub fn diff(before: &str, after: &str) -> String {
+    let a: Vec<&str> = before.split('\n').collect();
+    let b: Vec<&str> = after.split('\n').collect();
+
+    // Trim the common prefix and suffix so small edits show a small hunk.
+    let mut start = 0usize;
+    while start < a.len() && start < b.len() && a[start] == b[start] {
+        start += 1;
+    }
+    let mut a_end = a.len();
+    let mut b_end = b.len();
+    while a_end > start && b_end > start && a[a_end - 1] == b[b_end - 1] {
+        a_end -= 1;
+        b_end -= 1;
+    }
+
+    let mut out = String::new();
+    for line in &a[start..a_end] {
+        out.push('-');
+        out.push_str(line);
+        out.push('\n');
+    }
+    for line in &b[start..b_end] {
+        out.push('+');
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}

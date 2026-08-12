@@ -150,7 +150,8 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
     let results: Vec<FileResult> = std::thread::scope(|scope| {
         let mut handles = Vec::new();
         for file in &files {
-            handles.push(scope.spawn(|| process_file(file, &rules, &config, fix_mode)));
+            handles
+                .push(scope.spawn(|| process_file(file, &rules, &config, fix_mode, !args.dry_run)));
         }
         handles
             .into_iter()
@@ -202,11 +203,20 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
     if fix_mode && args.format == Format::Human {
         for result in &results {
             if result.fixes_applied > 0 {
+                let verb = if args.dry_run {
+                    "would apply"
+                } else {
+                    "applied"
+                };
                 println!(
-                    "{}: applied {} fix(es)",
+                    "{}: {} {} fix(es)",
                     result.path.display(),
+                    verb,
                     result.fixes_applied
                 );
+                if let Some(fixed) = &result.fixed {
+                    print!("{}", render::diff(&result.source, fixed));
+                }
             }
             if let Some(err) = &result.write_error {
                 eprintln!("error: {}: {err}", result.path.display());
@@ -280,6 +290,9 @@ struct FileResult {
     diagnostics: Vec<Diagnostic>,
     read_error: Option<String>,
     fixes_applied: usize,
+    /// The result of splicing all fixes, `Some` when any fix exists (the
+    /// text the file would become). Written to disk unless dry-run.
+    fixed: Option<String>,
     write_error: Option<String>,
     apply_error: Option<String>,
 }
@@ -295,6 +308,7 @@ fn process_file(
     rules: &[Box<dyn Rule>],
     config: &LintConfig,
     fix_mode: bool,
+    write: bool,
 ) -> FileResult {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
@@ -305,6 +319,7 @@ fn process_file(
                 diagnostics: Vec::new(),
                 read_error: Some(format!("{}: {err}", path.display())),
                 fixes_applied: 0,
+                fixed: None,
                 write_error: None,
                 apply_error: None,
             };
@@ -318,6 +333,7 @@ fn process_file(
     diagnostics.sort_by_key(|diag| diag.range.start());
 
     let mut fixes_applied = 0usize;
+    let mut fixed = None;
     let mut write_error = None;
     let mut apply_error = None;
     if fix_mode {
@@ -328,10 +344,17 @@ fn process_file(
             .flat_map(|fix| fix.edits.iter().cloned())
             .collect();
         match apply_fixes(&source, &edits) {
-            Ok(fixed) if fixed != source => match std::fs::write(path, &fixed) {
-                Ok(()) => fixes_applied = fix_count,
-                Err(err) => write_error = Some(err.to_string()),
-            },
+            Ok(result) if result != source => {
+                if write {
+                    match std::fs::write(path, &result) {
+                        Ok(()) => fixes_applied = fix_count,
+                        Err(err) => write_error = Some(err.to_string()),
+                    }
+                } else {
+                    fixes_applied = fix_count; // reported as would-apply
+                }
+                fixed = Some(result);
+            }
             Ok(_) => {}
             Err(err) => apply_error = Some(format!("{err:?}")),
         }
@@ -343,6 +366,7 @@ fn process_file(
         diagnostics,
         read_error: None,
         fixes_applied,
+        fixed,
         write_error,
         apply_error,
     }
