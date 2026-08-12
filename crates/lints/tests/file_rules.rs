@@ -284,6 +284,51 @@ fn redundant_with_clean_when_with_is_needed() {
     assert_eq!(run("with lib; f", &rules, cfg), Vec::<String>::new());
 }
 
+#[test]
+fn redundant_with_offers_removal_fix() {
+    let source = "let pkgs = 1; in with pkgs; pkgs.hello";
+    let tree = parse(source);
+    let model = SemanticModel::new(source, &tree);
+    let mut diags = Vec::new();
+    run_rules(
+        &one(Box::new(RedundantWith {})),
+        &tree,
+        &model,
+        &LintConfig::default(),
+        source,
+        &mut diags,
+    );
+    let fix = diags[0].fix.as_ref().expect("redundant with gets a fix");
+    assert_eq!(fix.label, "remove with scope");
+    assert_eq!(fix.edits.len(), 1);
+    // Deletes from the scope start (the `with` key) through the body
+    // start, leaving exactly the body.
+    assert_eq!(fix.edits[0].replacement, "");
+    assert_eq!(fix.edits[0].range.start(), 16);
+    assert_eq!(fix.edits[0].range.end(), 27);
+    let result = strictix_core::fix::apply_fixes(source, &fix.edits).expect("fix applies");
+    assert_eq!(result, "let pkgs = 1; in pkgs.hello");
+}
+
+#[test]
+fn redundant_with_fix_removes_let_body_with() {
+    let source = "let x = 1; in with { y = 2; }; x";
+    let tree = parse(source);
+    let model = SemanticModel::new(source, &tree);
+    let mut diags = Vec::new();
+    run_rules(
+        &one(Box::new(RedundantWith {})),
+        &tree,
+        &model,
+        &LintConfig::default(),
+        source,
+        &mut diags,
+    );
+    let fix = diags[0].fix.as_ref().expect("redundant with gets a fix");
+    let result = strictix_core::fix::apply_fixes(source, &fix.edits).expect("fix applies");
+    assert_eq!(result, "let x = 1; in x");
+}
+
 // --- self-referential-let -------------------------------------------
 
 #[test]
