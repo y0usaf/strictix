@@ -299,12 +299,26 @@ fn unknown_option_off_without_schema() {
 fn self_referential_let_lambda_guard_not_flagged() {
     // Recursion behind a lambda body is normal Nix, not this bug.
     let src = "let f = n: if n == 0 then 0 else f (n - 1); in f 3";
-    assert_eq!(run(src, &[Box::new(SelfReferentialLet {})], LintConfig::default()), Vec::<String>::new());
+    assert_eq!(
+        run(
+            src,
+            &[Box::new(SelfReferentialLet {})],
+            LintConfig::default()
+        ),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
 fn self_referential_let_attrset_guard_not_flagged() {
     // Lazy attrset value: self-reference is fine until forced.
     let src = "let x = { a = x; }; in x";
-    assert_eq!(run(src, &[Box::new(SelfReferentialLet {})], LintConfig::default()), Vec::<String>::new());
+    assert_eq!(
+        run(
+            src,
+            &[Box::new(SelfReferentialLet {})],
+            LintConfig::default()
+        ),
+        Vec::<String>::new()
+    );
 }

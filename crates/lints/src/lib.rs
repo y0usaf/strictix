@@ -9,7 +9,10 @@ pub mod file_rules;
 pub mod node_rules;
 pub mod schema;
 
-use file_rules::{RedundantWith, SelfReferentialLet, ShadowedBinding, UnusedFormal, UnusedLambdaParam, UnusedLetBinding};
+use file_rules::{
+    RedundantWith, SelfReferentialLet, ShadowedBinding, UnusedFormal, UnusedLambdaParam,
+    UnusedLetBinding,
+};
 use node_rules::{AssertTrue, ConstantIf, Tautology};
 use schema::UnknownOption;
 use strictix_core::rules::Rule;

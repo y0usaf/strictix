@@ -565,22 +565,22 @@ impl<'a> Builder<'a> {
                                     self.walk_expr(source);
                                 }
                                 for name in inherit.names() {
-                                // Record the inherited name as a
-                                // reference to the outer binding so the
-                                // linter treats it as "used".
-                                self.idents.push(name);
-                                // The new binding enters visibility at its
-                                // own token's end, NOT at the let's start,
-                                // so the reference above resolves to the
-                                // outer binding, not this one.
-                                let visible_from = name.range().end();
-                                self.register(
-                                    name,
-                                    BindingKind::LetBinding,
-                                    scope,
-                                    visible_from,
-                                );
-                            }
+                                    // Record the inherited name as a
+                                    // reference to the outer binding so the
+                                    // linter treats it as "used".
+                                    self.idents.push(name);
+                                    // The new binding enters visibility at its
+                                    // own token's end, NOT at the let's start,
+                                    // so the reference above resolves to the
+                                    // outer binding, not this one.
+                                    let visible_from = name.range().end();
+                                    self.register(
+                                        name,
+                                        BindingKind::LetBinding,
+                                        scope,
+                                        visible_from,
+                                    );
+                                }
                             }
                         }
                     }

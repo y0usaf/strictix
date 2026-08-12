@@ -443,7 +443,9 @@ impl<'a> Parser<'a> {
                 K::KwIn => break,
                 K::KwInherit => self.parse_inherit(),
                 K::Eof => break,
-                _ if self.current().is_attr_name() || self.current() == K::StringStart => self.parse_binding(),
+                _ if self.current().is_attr_name() || self.current() == K::StringStart => {
+                    self.parse_binding()
+                }
                 _ => self.loop_error(),
             }
         }
@@ -490,7 +492,9 @@ impl<'a> Parser<'a> {
                 K::RBrace => break,
                 K::KwInherit => self.parse_inherit(),
                 K::Eof => break,
-                _ if self.current().is_attr_name() || self.current() == K::StringStart => self.parse_binding(),
+                _ if self.current().is_attr_name() || self.current() == K::StringStart => {
+                    self.parse_binding()
+                }
                 _ => self.loop_error(),
             }
         }

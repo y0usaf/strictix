@@ -333,7 +333,8 @@ impl Rule for SelfReferentialLet {
             // An inherit name has no value expression: skip it.
             let name_range = binding.name.range();
             let is_inherit = model.root().descendants().any(|n| {
-                n.kind() == strictix_syntax::SyntaxKind::InheritStmt && n.range().contains(name_range.start())
+                n.kind() == strictix_syntax::SyntaxKind::InheritStmt
+                    && n.range().contains(name_range.start())
             });
             if is_inherit {
                 continue;
@@ -385,44 +386,44 @@ fn eager_contains(expr: strictix_syntax::Expr<'_>, range: TextRange) -> bool {
                 .bindings()
                 .map(|b| {
                     b.items().any(|item| match item {
-                        AttrItem::Binding(binding) => binding
-                            .value()
-                            .map_or(false, |v| eager_contains(v, range)),
-                        AttrItem::Inherit(inh) => inh
-                            .source()
-                            .map_or(false, |src| eager_contains(src, range)),
+                        AttrItem::Binding(binding) => {
+                            binding.value().is_some_and(|v| eager_contains(v, range))
+                        }
+                        AttrItem::Inherit(inh) => {
+                            inh.source().is_some_and(|src| eager_contains(src, range))
+                        }
                     })
                 })
                 .unwrap_or(false);
-            bindings || e.body().map_or(false, |b| eager_contains(b, range))
+            bindings || e.body().is_some_and(|b| eager_contains(b, range))
         }
         Expr::With(w) => {
-            w.scope().map_or(false, |s| eager_contains(s, range))
-                || w.body().map_or(false, |b| eager_contains(b, range))
+            w.scope().is_some_and(|s| eager_contains(s, range))
+                || w.body().is_some_and(|b| eager_contains(b, range))
         }
         Expr::Assert(a) => {
-            a.cond().map_or(false, |c| eager_contains(c, range))
-                || a.body().map_or(false, |b| eager_contains(b, range))
+            a.cond().is_some_and(|c| eager_contains(c, range))
+                || a.body().is_some_and(|b| eager_contains(b, range))
         }
         Expr::If(i) => {
-            i.cond().map_or(false, |c| eager_contains(c, range))
-                || i.then_branch().map_or(false, |b| eager_contains(b, range))
-                || i.else_branch().map_or(false, |b| eager_contains(b, range))
+            i.cond().is_some_and(|c| eager_contains(c, range))
+                || i.then_branch().is_some_and(|b| eager_contains(b, range))
+                || i.else_branch().is_some_and(|b| eager_contains(b, range))
         }
-        Expr::Apply(a) => a.func().map_or(false, |f| eager_contains(f, range)),
-        Expr::Unary(u) => u.operand().map_or(false, |o| eager_contains(o, range)),
+        Expr::Apply(a) => a.func().is_some_and(|f| eager_contains(f, range)),
+        Expr::Unary(u) => u.operand().is_some_and(|o| eager_contains(o, range)),
         Expr::Bin(b) => {
-            b.lhs().map_or(false, |l| eager_contains(l, range))
-                || b.rhs().map_or(false, |r| eager_contains(r, range))
+            b.lhs().is_some_and(|l| eager_contains(l, range))
+                || b.rhs().is_some_and(|r| eager_contains(r, range))
         }
         Expr::Select(s) => {
-            let base = s.base().map_or(false, |b| eager_contains(b, range));
+            let base = s.base().is_some_and(|b| eager_contains(b, range));
             let interp = s
                 .attrpath()
                 .map(|ap| {
                     ap.elements().any(|e| {
                         if let AttrName::Interp(i) = e {
-                            i.expr().map_or(false, |x| eager_contains(x, range))
+                            i.expr().is_some_and(|x| eager_contains(x, range))
                         } else {
                             false
                         }
@@ -431,22 +432,18 @@ fn eager_contains(expr: strictix_syntax::Expr<'_>, range: TextRange) -> bool {
                 .unwrap_or(false);
             base || interp
         }
-        Expr::HasAttr(h) => h.base().map_or(false, |b| eager_contains(b, range)),
+        Expr::HasAttr(h) => h.base().is_some_and(|b| eager_contains(b, range)),
         Expr::String(s) => s.parts().any(|part| match part {
             StringPart::Content(_) => false,
-            StringPart::Interp(i) => i.expr().map_or(false, |x| eager_contains(x, range)),
+            StringPart::Interp(i) => i.expr().is_some_and(|x| eager_contains(x, range)),
         }),
         Expr::IndString(s) => s.parts().any(|part| match part {
             StringPart::Content(_) => false,
-            StringPart::Interp(i) => i.expr().map_or(false, |x| eager_contains(x, range)),
+            StringPart::Interp(i) => i.expr().is_some_and(|x| eager_contains(x, range)),
         }),
-        Expr::Paren(p) => p.expr().map_or(false, |i| eager_contains(i, range)),
+        Expr::Paren(p) => p.expr().is_some_and(|i| eager_contains(i, range)),
         // Barriers: lambda body, list items, attrset/rec values.
         Expr::Lambda(_) | Expr::List(_) | Expr::Attrset(_) | Expr::RecAttrset(_) => false,
-        Expr::Int(_)
-        | Expr::Float(_)
-        | Expr::Path(_)
-        | Expr::SearchPath(_)
-        | Expr::Uri(_) => false,
+        Expr::Int(_) | Expr::Float(_) | Expr::Path(_) | Expr::SearchPath(_) | Expr::Uri(_) => false,
     }
 }

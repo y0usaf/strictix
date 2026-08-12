@@ -290,7 +290,9 @@ impl<'a> Attrpath<'a> {
         self.syntax().children().iter().filter_map(|c| match c {
             NodeOrToken::Token(t) if t.kind().is_attr_name() => Some(AttrName::Ident(t)),
             NodeOrToken::Node(n) if n.kind() == K::StringExpr => Some(AttrName::Str(StringExpr(n))),
-            NodeOrToken::Node(n) if n.kind() == K::InterpExpr => Some(AttrName::Interp(InterpExpr(n))),
+            NodeOrToken::Node(n) if n.kind() == K::InterpExpr => {
+                Some(AttrName::Interp(InterpExpr(n)))
+            }
             _ => None,
         })
     }

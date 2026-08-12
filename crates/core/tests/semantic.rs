@@ -1,4 +1,3 @@
-
 //! with-fallback, import sites, laziness.
 
 use strictix_core::semantic::{BindingKind, SemanticModel};
@@ -281,7 +280,11 @@ fn shadowing_across_scopes_via_outer_shadow() {
     let resolved = m
         .resolve_lexical(inner.name.text(src), inner.name.range().start())
         .expect("recursive let sees itself");
-    assert_eq!(resolved.name.range(), inner.name.range(), "resolves to itself");
+    assert_eq!(
+        resolved.name.range(),
+        inner.name.range(),
+        "resolves to itself"
+    );
     let outer = m.outer_shadow(inner).expect("outer a shadows the inner");
     assert_eq!(outer.name.range(), m.bindings()[0].name.range());
 }
@@ -291,5 +294,9 @@ fn select_attrpath_interp_is_a_reference() {
     let src = r#"let name = "x"; in cfg.folders.${name}.id"#;
     let m = model(src);
     let name = one_binding(&m, "name", BindingKind::LetBinding);
-    assert_eq!(name.references.len(), 1, "the attrpath interpolation resolves");
+    assert_eq!(
+        name.references.len(),
+        1,
+        "the attrpath interpolation resolves"
+    );
 }
