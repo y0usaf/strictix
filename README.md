@@ -57,5 +57,6 @@ Config (strictix.toml) toggles rules; .strictixignore prunes paths;
 
 
 
-See  for locked decisions and the roadmap (M0–M8, all
-complete), and  for the module map.
+See [DESIGN.md](./DESIGN.md) for locked decisions and the roadmap
+(M0–M8, all complete), and [docs/architecture.md](./docs/architecture.md)
+for the module map.
