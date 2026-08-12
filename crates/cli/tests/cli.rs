@@ -6,11 +6,9 @@
 //! binary. Two fixtures carry the cleanliness guarantees the rule set
 //! depends on: the clean fixture ("let x = 1; in x") produces zero
 //! diagnostics under every rule, and the dirty fixture
-//! ("let x = 1; in 2") triggers exactly unused-let-binding (when the
-//! registry is populated). Tests that depend on a populated registry
-//! detect it first via the list command and skip their assertions when
-//! the registry is still an empty stub (sibling milestones land in any
-//! order).
+//! ("let x = 1; in 2") triggers exactly unused-let-binding. Tests
+//! confirm the rule is present (via the list command) before asserting
+//! on it.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -39,10 +37,9 @@ fn fixture(rel: &str) -> PathBuf {
         .join(rel)
 }
 
-/// Whether the rule registry has rules yet (detected by running
-/// 'strictix list' and looking for a real rule code). The registry is
-/// built by a sibling milestone and may be an empty stub while that
-/// work is still landing.
+/// Whether the rule registry has the builtin rules (detected by running
+/// 'strictix list' and looking for a real rule code). Guards tests that
+/// assert on rule behavior against a registry that lacks the rules.
 fn rules_available() -> bool {
     let out = run(&["list"]);
     out.status.code() == Some(0)

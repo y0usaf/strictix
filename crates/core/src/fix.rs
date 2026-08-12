@@ -89,7 +89,7 @@ pub fn apply_fixes(source: &str, edits: &[TextEdit]) -> Result<String, FixError>
     // Descending by start: the edit closest to the end of the file
     // first. That ordering makes the overlap rule a single comparison
     // between neighbours (see below).
-    sorted.sort_by(|a, b| b.range.start().cmp(&a.range.start()));
+    sorted.sort_by_key(|b| std::cmp::Reverse(b.range.start()));
 
     let src_len = source.len() as u32;
     for edit in &sorted {
