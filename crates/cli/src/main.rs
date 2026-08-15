@@ -274,10 +274,7 @@ fn resolve_ignore_file(args: &Args) -> Option<PathBuf> {
 /// Print the JSON document for a run.
 fn print_json(files: &[render::JsonFile]) {
     let value = render::json(files);
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&value).expect("JSON serialization cannot fail")
-    );
+    println!("{}", value.to_string_pretty());
 }
 
 /// One file's outcome, carried out of the worker thread.

@@ -1,7 +1,7 @@
 //! A minimal, dependency-free JSON parser (M8).
 //!
-//! strictix's blessed dependencies are serde + toml, and only inside the
-//! CLI crate. The core crate therefore parses options.json (nixpkgs
+//! strictix is stdlib-only: no third-party dependencies anywhere in the
+//! workspace. The core crate therefore parses options.json (nixpkgs
 //! schema data) by hand. This module implements the full JSON grammar:
 //! objects, arrays, strings with escapes (including \uXXXX surrogate
 //! pairs), numbers, true/false/null, and arbitrary whitespace.
@@ -427,4 +427,123 @@ impl Parser<'_> {
             }
         }
     }
+}
+
+impl JsonValue {
+    /// This value as a number, if it is one.
+    #[must_use]
+    pub fn as_number(&self) -> Option<f64> {
+        match self {
+            JsonValue::Number(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// Serialize to a compact JSON string.
+    #[must_use]
+    pub fn to_string(&self) -> String {
+        let mut out = String::new();
+        self.write_compact(&mut out);
+        out
+    }
+
+    /// Serialize to an indented (pretty) JSON string.
+    #[must_use]
+    pub fn to_string_pretty(&self) -> String {
+        let mut out = String::new();
+        self.write_pretty(&mut out, 0);
+        out
+    }
+
+    fn write_compact(&self, out: &mut String) {
+        match self {
+            JsonValue::Null => out.push_str("null"),
+            JsonValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            JsonValue::Number(n) => out.push_str(&format_number(*n)),
+            JsonValue::String(s) => write_json_string(s, out),
+            JsonValue::Array(items) => {
+                out.push('[');
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 { out.push(','); }
+                    item.write_compact(out);
+                }
+                out.push(']');
+            }
+            JsonValue::Object(entries) => {
+                out.push('{');
+                for (i, (k, v)) in entries.iter().enumerate() {
+                    if i > 0 { out.push(','); }
+                    write_json_string(k, out);
+                    out.push(':');
+                    v.write_compact(out);
+                }
+                out.push('}');
+            }
+        }
+    }
+
+    fn write_pretty(&self, out: &mut String, indent: usize) {
+        match self {
+            JsonValue::Null => out.push_str("null"),
+            JsonValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            JsonValue::Number(n) => out.push_str(&format_number(*n)),
+            JsonValue::String(s) => write_json_string(s, out),
+            JsonValue::Array(items) => {
+                if items.is_empty() { out.push_str("[]"); return; }
+                out.push_str("[\n");
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 { out.push_str(",\n"); }
+                    out.push_str(&"  ".repeat(indent + 1));
+                    item.write_pretty(out, indent + 1);
+                }
+                out.push('\n');
+                out.push_str(&"  ".repeat(indent));
+                out.push(']');
+            }
+            JsonValue::Object(entries) => {
+                if entries.is_empty() { out.push_str("{}"); return; }
+                out.push_str("{\n");
+                for (i, (k, v)) in entries.iter().enumerate() {
+                    if i > 0 { out.push_str(",\n"); }
+                    out.push_str(&"  ".repeat(indent + 1));
+                    write_json_string(k, out);
+                    out.push_str(": ");
+                    v.write_pretty(out, indent + 1);
+                }
+                out.push('\n');
+                out.push_str(&"  ".repeat(indent));
+                out.push('}');
+            }
+        }
+    }
+}
+
+/// Format a finite f64 as a JSON number: whole numbers print without a
+/// decimal point. The parser rejects NaN/Infinity, and the CLI only
+/// builds numbers from integers, so this is the only live path.
+fn format_number(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
+}
+
+/// Write a string with JSON escaping (quote, backslash, control chars).
+fn write_json_string(s: &str, out: &mut String) {
+    out.push('"');
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{0008}' => out.push_str("\\b"),
+            '\u{000C}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
 }

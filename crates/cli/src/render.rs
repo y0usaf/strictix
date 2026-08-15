@@ -11,10 +11,11 @@
 //! The human format adds the file path, 1-based byte line/column, the
 //! offending source line with a caret under the diagnostic's range, and
 //! an optional help line. The JSON format mirrors the same fields as a
-//! serde_json document, one entry per file plus a summary.
+//! JsonValue document, one entry per file plus a summary.
 
 use strictix_core::diagnostic::Diagnostic;
 use strictix_core::fix::Fix;
+use strictix_core::json::JsonValue;
 use strictix_syntax::TextRange;
 
 /// The deterministic one-line rendering shared by CLI and tests:
@@ -98,46 +99,80 @@ fn source_excerpt(source: &str, range: TextRange) -> Option<(&str, String)> {
 /// Build the JSON document for a whole run: one entry per file holding
 /// that file's diagnostics, plus a summary object. `fix` is `null`
 /// when a diagnostic carries no fix; `help` likewise.
-pub fn json(files: &[JsonFile]) -> serde_json::Value {
+pub fn json(files: &[JsonFile]) -> JsonValue {
     let mut file_values = Vec::with_capacity(files.len());
     let mut diag_total = 0usize;
     for file in files {
         let mut diags = Vec::with_capacity(file.diagnostics.len());
         for diag in &file.diagnostics {
             diag_total += 1;
-            diags.push(serde_json::json!({
-                "code": diag.code,
-                "severity": diag.severity_str(),
-                "message": diag.message,
-                "range": { "start": diag.range.start(), "end": diag.range.end() },
-                "help": diag.help,
-                "fix": diag.fix.as_ref().map(fix_json),
-            }));
+            diags.push(JsonValue::Object(vec![
+                ("code".to_owned(), JsonValue::String(diag.code.to_string())),
+                (
+                    "severity".to_owned(),
+                    JsonValue::String(diag.severity_str().to_owned()),
+                ),
+                (
+                    "message".to_owned(),
+                    JsonValue::String(diag.message.clone()),
+                ),
+                ("range".to_owned(), range_json(diag.range)),
+                (
+                    "help".to_owned(),
+                    diag.help.as_ref().map_or(JsonValue::Null, |h| {
+                        JsonValue::String(h.clone())
+                    }),
+                ),
+                (
+                    "fix".to_owned(),
+                    diag.fix.as_ref().map_or(JsonValue::Null, fix_json),
+                ),
+            ]));
         }
-        file_values.push(serde_json::json!({
-            "path": file.path,
-            "diagnostics": diags,
-        }));
+        file_values.push(JsonValue::Object(vec![
+            ("path".to_owned(), JsonValue::String(file.path.clone())),
+            ("diagnostics".to_owned(), JsonValue::Array(diags)),
+        ]));
     }
-    serde_json::json!({
-        "files": file_values,
-        "summary": { "files": files.len(), "diagnostics": diag_total },
-    })
+    JsonValue::Object(vec![
+        ("files".to_owned(), JsonValue::Array(file_values)),
+        (
+            "summary".to_owned(),
+            JsonValue::Object(vec![
+                ("files".to_owned(), JsonValue::Number(files.len() as f64)),
+                ("diagnostics".to_owned(), JsonValue::Number(diag_total as f64)),
+            ]),
+        ),
+    ])
 }
 
 /// The JSON shape of one fix: label plus its edits.
-fn fix_json(fix: &Fix) -> serde_json::Value {
-    let edits: Vec<serde_json::Value> = fix
+fn fix_json(fix: &Fix) -> JsonValue {
+    let edits: Vec<JsonValue> = fix
         .edits
         .iter()
         .map(|edit| {
-            serde_json::json!({
-                "range": { "start": edit.range.start(), "end": edit.range.end() },
-                "replacement": edit.replacement,
-            })
+            JsonValue::Object(vec![
+                ("range".to_owned(), range_json(edit.range)),
+                (
+                    "replacement".to_owned(),
+                    JsonValue::String(edit.replacement.clone()),
+                ),
+            ])
         })
         .collect();
-    serde_json::json!({ "label": fix.label, "edits": edits })
+    JsonValue::Object(vec![
+        ("label".to_owned(), JsonValue::String(fix.label.clone())),
+        ("edits".to_owned(), JsonValue::Array(edits)),
+    ])
+}
+
+/// The JSON object for a text range: `{"start": n, "end": m}`.
+fn range_json(range: TextRange) -> JsonValue {
+    JsonValue::Object(vec![
+        ("start".to_owned(), JsonValue::Number(range.start() as f64)),
+        ("end".to_owned(), JsonValue::Number(range.end() as f64)),
+    ])
 }
 
 /// One file's worth of results, as the JSON renderer consumes it.
