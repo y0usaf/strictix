@@ -13,6 +13,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use strictix_core::json::JsonValue;
+
 /// Run the binary with the given args from the workspace directory.
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_strictix"))
@@ -111,10 +113,13 @@ fn check_clean_fixture_json_summary() {
     ]);
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let value: serde_json::Value = serde_json::from_str(&stdout).expect("output is valid JSON");
+    let value = JsonValue::parse(&stdout).expect("output is valid JSON");
     assert_eq!(
-        value["summary"]["diagnostics"].as_u64(),
-        Some(0),
+        value
+            .get("summary")
+            .and_then(|s| s.get("diagnostics"))
+            .and_then(JsonValue::as_number),
+        Some(0.0),
         "json summary reports zero diagnostics"
     );
 }

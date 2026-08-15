@@ -1,8 +1,8 @@
 //! Per-run lint configuration.
 //!
-//! A plain data struct: no serde here (serde is the CLI's job — the CLI
-//! deserializes its own TOML DTO and converts it into this type). The
-//! schema field backs the M8 `unknown-option` rule; `None` means that
+//! A plain data struct: no serde here (the CLI hand-parses its own TOML
+//! subset and converts it into this type). The schema field backs the
+//! M8 `unknown-option` rule; `None` means that
 //! rule is off for this run.
 
 use std::path::PathBuf;
