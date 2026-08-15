@@ -19,7 +19,7 @@ use schema::UnknownOption;
 use style_rules::{
     CollapsibleLetIn, DeprecatedToPath, EmptyInherit, EmptyLetIn, EmptyListConcat, EmptyPattern,
     EtaReduction, ManualInherit, ManualInheritFrom, RedundantPatternBind, RepeatedKeys,
-    UnquotedSplice, UnquotedUri, UselessHasAttr, UselessParens,
+    UnquotedUri, UselessHasAttr, UselessParens,
 };
 use strictix_core::rules::Rule;
 
@@ -52,7 +52,6 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         DeprecatedToPath,
         UselessHasAttr,
         EmptyListConcat,
-        UnquotedSplice,
         UselessParens,
         RepeatedKeys,
         UnquotedUri,

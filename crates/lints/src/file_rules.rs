@@ -13,7 +13,11 @@ use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::{BindingKind, SemanticModel};
-use strictix_syntax::{AstNode, Binding, Formals, SyntaxKind, SyntaxNode, TextRange, WithExpr};
+use strictix_syntax::{
+    AstNode, Binding, Expr, Formals, LambdaExpr, LambdaParam, SyntaxKind, SyntaxNode, TextRange,
+    WithExpr,
+};
+use std::collections::HashSet;
 /// The innermost [Binding] node whose range contains `name_range`, if
 /// any. Bindings nest when a value contains a `let` or attrset, so a
 /// range scan must pick the smallest containing node — the direct
@@ -91,6 +95,30 @@ impl Rule for UnusedLetBinding {
     }
 }
 
+/// Byte ranges of the two bare params in an overlay lambda
+/// (`a: b: { ... }`). The Nixpkgs overlay convention is a bare-param
+/// lambda whose body is another bare-param lambda whose body is an
+/// attrset; the params are a fixed positional interface, not
+/// accidentally-unused names, so UnusedLambdaParam must skip them.
+fn overlay_param_ranges(root: &SyntaxNode) -> HashSet<u32> {
+    let mut skip = HashSet::new();
+    for node in root.descendants() {
+        if node.kind() != SyntaxKind::LambdaExpr {
+            continue;
+        }
+        let Some(outer) = LambdaExpr::cast(node) else { continue };
+        let LambdaParam::Ident(outer_param) = outer.param() else { continue };
+        let Some(Expr::Lambda(inner)) = outer.body() else { continue };
+        let LambdaParam::Ident(inner_param) = inner.param() else { continue };
+        if !matches!(inner.body(), Some(Expr::Attrset(_)) | Some(Expr::RecAttrset(_))) {
+            continue;
+        }
+        skip.insert(outer_param.range().start());
+        skip.insert(inner_param.range().start());
+    }
+    skip
+}
+
 /// Flags bare lambda parameters that are never used.
 ///
 /// `x: 1` — the parameter `x` is never referenced in the body. Formal
@@ -116,6 +144,7 @@ impl Rule for UnusedLambdaParam {
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let overlay_params = overlay_param_ranges(model.root());
         for binding in model.bindings() {
             if binding.kind != BindingKind::LambdaParam {
                 continue;
@@ -124,6 +153,9 @@ impl Rule for UnusedLambdaParam {
             // Formal parameters belong to UnusedFormal; this rule only
             // covers the bare `x: body` form.
             if inside_formals(model.root(), range) {
+                continue;
+            }
+            if overlay_params.contains(&range.start()) {
                 continue;
             }
             if !binding.references.is_empty() {

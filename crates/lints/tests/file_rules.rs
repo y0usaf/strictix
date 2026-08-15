@@ -170,6 +170,24 @@ fn unused_lambda_param_clean_cases() {
     );
 }
 
+#[test]
+fn unused_lambda_param_skips_overlay_params() {
+    let rules = one(Box::new(UnusedLambdaParam {}));
+    let cfg = LintConfig::default();
+    // An overlay is a bare-param lambda whose body is a bare-param
+    // lambda whose body is a (rec) attrset: neither param is flagged.
+    assert_eq!(run("final: prev: {}", &rules, cfg.clone()), Vec::<String>::new());
+    assert_eq!(
+        run("final: prev: rec { x = prev.y; }", &rules, cfg.clone()),
+        Vec::<String>::new()
+    );
+    // A non-overlay (body is not an attrset) still flags the unused param.
+    assert_eq!(
+        run("final: prev: prev", &rules, cfg),
+        ["[unused-lambda-param] warning 0..5 parameter 'final' is never used"]
+    );
+}
+
 // --- unused-formal ---------------------------------------------------
 
 #[test]
