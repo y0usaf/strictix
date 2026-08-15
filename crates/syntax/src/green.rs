@@ -131,6 +131,21 @@ impl SyntaxNode {
         self.range
     }
 
+    /// The byte range spanning this node's first and last non-trivia
+    /// token, excluding leading and trailing whitespace/comments.
+    /// Diagnostics and replacement fixes use this so they point at code,
+    /// not trivia. Falls back to the full range when the subtree has no
+    /// non-trivia token.
+    #[must_use]
+    pub fn content_range(&self) -> TextRange {
+        let first = first_significant(self).map(|t| t.range.start());
+        let last = last_significant(self).map(|t| t.range.end());
+        match (first, last) {
+            (Some(s), Some(e)) => TextRange::new(s, e),
+            _ => self.range,
+        }
+    }
+
     /// The direct children of this node, in source order.
     #[must_use]
     pub fn children(&self) -> &[NodeOrToken] {
@@ -264,4 +279,36 @@ impl TreeBuilder {
         }
         self.root.expect("no root node was produced")
     }
+}
+
+/// The first non-trivia token in a node's subtree, depth-first.
+fn first_significant(node: &SyntaxNode) -> Option<SyntaxToken> {
+    for child in node.children() {
+        match child {
+            NodeOrToken::Token(t) if !t.kind().is_trivia() => return Some(*t),
+            NodeOrToken::Token(_) => {}
+            NodeOrToken::Node(n) => {
+                if let Some(t) = first_significant(n) {
+                    return Some(t);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The last non-trivia token in a node's subtree, depth-first.
+fn last_significant(node: &SyntaxNode) -> Option<SyntaxToken> {
+    for child in node.children().iter().rev() {
+        match child {
+            NodeOrToken::Token(t) if !t.kind().is_trivia() => return Some(*t),
+            NodeOrToken::Token(_) => {}
+            NodeOrToken::Node(n) => {
+                if let Some(t) = last_significant(n) {
+                    return Some(t);
+                }
+            }
+        }
+    }
+    None
 }

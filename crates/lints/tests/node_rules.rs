@@ -205,7 +205,7 @@ fn tautology_flagged_inside_let_body() {
     // is still textually x == x, so it is flagged — intended.
     assert_eq!(
         run("let x = 1; in x == x"),
-        vec!["[tautology] warning 13..20 tautological comparison"],
+        vec!["[tautology] warning 14..20 tautological comparison"],
     );
 }
 
@@ -251,7 +251,7 @@ fn multi_rule_two_diagnostics_in_source_order() {
         run("assert true; if true then a else b"),
         vec![
             "[assert-true] warning 0..34 assert true is always satisfied",
-            "[constant-if] warning 12..34 constant condition in if",
+            "[constant-if] warning 13..34 constant condition in if",
         ],
     );
 }

@@ -124,7 +124,7 @@ fn empty_let_in_fix_removes_let() {
 fn manual_inherit_diag() {
     assert_eq!(
         run("{ a = a; }"),
-        vec!["[manual-inherit] warning 1..8 assignment instead of inherit"],
+        vec!["[manual-inherit] warning 2..8 assignment instead of inherit"],
     );
 }
 
@@ -135,7 +135,7 @@ fn manual_inherit_no_diag_for_distinct_names() {
 
 #[test]
 fn manual_inherit_fix_uses_inherit() {
-    assert_eq!(fix_result("{ a = a; }", "manual-inherit"), "{inherit a; }");
+    assert_eq!(fix_result("{ a = a; }", "manual-inherit"), "{ inherit a; }");
 }
 
 // --- manual-inherit-from ---------------------------------------------
@@ -144,7 +144,7 @@ fn manual_inherit_fix_uses_inherit() {
 fn manual_inherit_from_diag() {
     assert_eq!(
         run("{ a = some.a; }"),
-        vec!["[manual-inherit-from] warning 1..13 assignment instead of inherit from"],
+        vec!["[manual-inherit-from] warning 2..13 assignment instead of inherit from"],
     );
 }
 
@@ -152,7 +152,7 @@ fn manual_inherit_from_diag() {
 fn manual_inherit_from_fix_uses_inherit_from() {
     assert_eq!(
         fix_result("{ a = some.a; }", "manual-inherit-from"),
-        "{inherit (some) a; }",
+        "{ inherit (some) a; }",
     );
 }
 
@@ -160,7 +160,7 @@ fn manual_inherit_from_fix_uses_inherit_from() {
 fn manual_inherit_from_static_multi_segment_diag() {
     assert_eq!(
         run("{ dev = cfg.devices.dev; }"),
-        vec!["[manual-inherit-from] warning 1..24 assignment instead of inherit from"],
+        vec!["[manual-inherit-from] warning 2..24 assignment instead of inherit from"],
     );
 }
 
@@ -168,7 +168,7 @@ fn manual_inherit_from_static_multi_segment_diag() {
 fn manual_inherit_from_static_multi_segment_fix() {
     assert_eq!(
         fix_result("{ dev = cfg.devices.dev; }", "manual-inherit-from"),
-        "{inherit (cfg.devices) dev; }",
+        "{ inherit (cfg.devices) dev; }",
     );
 }
 
@@ -178,6 +178,19 @@ fn manual_inherit_from_dynamic_select_no_diag() {
     // path is not a static ident equal to the binding key, so the rule
     // must NOT fire.
     assert!(run("{ dev = cfg.devices.${name}; }").is_empty());
+}
+
+#[test]
+fn manual_inherit_from_multiline_fix_preserves_newline() {
+    // The binding's node range includes the leading newline; the fix must
+    // not eat it (that would merge `let` + `inherit` into `letinherit`).
+    assert_eq!(
+        fix_result(
+            "let\n  system = pkgs.stdenv.hostPlatform.system;\nin null",
+            "manual-inherit-from"
+        ),
+        "let\n  inherit (pkgs.stdenv.hostPlatform) system;\nin null",
+    );
 }
 
 // --- collapsible-let-in ----------------------------------------------
@@ -262,7 +275,7 @@ fn redundant_pattern_bind_fix_drops_formals() {
 fn empty_inherit_diag() {
     assert_eq!(
         run("{ inherit; }"),
-        vec!["[empty-inherit] warning 1..10 empty inherit statement"],
+        vec!["[empty-inherit] warning 2..10 empty inherit statement"],
     );
 }
 
@@ -364,7 +377,7 @@ fn useless_parens_general_case_preserves_space() {
 fn repeated_keys_diag() {
     assert_eq!(
         run("{ a.b = 1; a.c = 2; a.d = 3; }"),
-        vec!["[repeated-keys] warning 1..10 key `a` is repeated 3 times; consider nesting"],
+        vec!["[repeated-keys] warning 2..10 key `a` is repeated 3 times; consider nesting"],
     );
 }
 

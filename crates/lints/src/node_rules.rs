@@ -68,7 +68,7 @@ impl Rule for ConstantIf {
             "constant-if",
             Severity::Warning,
             "constant condition in if",
-            node.range(),
+            node.content_range(),
         );
         if let Some(branch_expr) = branch {
             let label = if is_true {
@@ -76,7 +76,7 @@ impl Rule for ConstantIf {
             } else {
                 "replace with else branch"
             };
-            let fix = Fix::new(label).edit(node.range(), branch_expr.text(source));
+            let fix = Fix::new(label).edit(node.content_range(), branch_expr.text(source));
             diag = diag.with_fix(fix);
         }
         diags.push(diag);
@@ -128,7 +128,7 @@ impl Rule for AssertTrue {
             "assert-true",
             Severity::Warning,
             "assert true is always satisfied",
-            node.range(),
+            node.content_range(),
         );
         // The AssertExpr node's range runs through the body, so the fix
         // targets assert-start .. the semicolon that ends the condition.
@@ -200,15 +200,19 @@ impl Rule for Tautology {
             // error that "replace with the operand" would silently
             // remove — too risky for an automated fix.)
             let fix = match op {
-                K::EqEq => Some(Fix::new("replace with true").edit(node.range(), "true")),
-                K::Neq => Some(Fix::new("replace with false").edit(node.range(), "false")),
+                K::EqEq => Some(
+                    Fix::new("replace with true").edit(node.content_range(), "true"),
+                ),
+                K::Neq => Some(
+                    Fix::new("replace with false").edit(node.content_range(), "false"),
+                ),
                 _ => None, // && / || carry no fix
             };
             let mut diag = Diagnostic::new(
                 "tautology",
                 Severity::Warning,
                 "tautological comparison",
-                node.range(),
+                node.content_range(),
             );
             if let Some(fix) = fix {
                 diag = diag.with_fix(fix);
