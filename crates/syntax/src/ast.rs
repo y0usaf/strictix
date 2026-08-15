@@ -310,11 +310,19 @@ impl<'a> InheritStmt<'a> {
     /// The inherited names, source expression excluded.
     pub fn names(&self) -> impl Iterator<Item = &'a SyntaxToken> + 'a {
         let node = self.syntax();
-        let start = node
-            .children()
-            .iter()
-            .position(|c| c.kind() == K::RParen)
-            .map_or(1, |i| i + 1);
+        // For `inherit (from) a b;` the names come after the RParen;
+        // otherwise they come after the leading `inherit` keyword. The
+        // keyword is located explicitly: unlike an RParen, it does not
+        // delimit the names, but the node may begin with leading trivia,
+        // so its index cannot be assumed to be 1.
+        let start = if let Some(rp) = node.children().iter().position(|c| c.kind() == K::RParen) {
+            rp + 1
+        } else {
+            node.children()
+                .iter()
+                .position(|c| c.kind() == K::KwInherit)
+                .map_or(1, |i| i + 1)
+        };
         node.children()[start..].iter().filter_map(|c| match c {
             NodeOrToken::Token(t) if t.kind().is_attr_name() => Some(t),
             _ => None,
