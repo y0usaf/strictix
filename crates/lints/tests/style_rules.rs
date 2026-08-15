@@ -15,7 +15,7 @@ use strictix_core::{
 use strictix_lints::style_rules::{
     CollapsibleLetIn, DeprecatedToPath, EmptyInherit, EmptyLetIn, EmptyListConcat, EmptyPattern,
     EtaReduction, ManualInherit, ManualInheritFrom, RedundantPatternBind, RepeatedKeys,
-    UnquotedSplice, UnquotedUri, UselessHasAttr, UselessParens,
+    UnquotedUri, UselessHasAttr, UselessParens,
 };
 use strictix_syntax::parse;
 
@@ -33,7 +33,6 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(DeprecatedToPath {}),
         Box::new(UselessHasAttr {}),
         Box::new(EmptyListConcat {}),
-        Box::new(UnquotedSplice {}),
         Box::new(UselessParens {}),
         Box::new(RepeatedKeys {}),
         Box::new(UnquotedUri {}),
@@ -155,6 +154,30 @@ fn manual_inherit_from_fix_uses_inherit_from() {
         fix_result("{ a = some.a; }", "manual-inherit-from"),
         "{inherit (some) a; }",
     );
+}
+
+#[test]
+fn manual_inherit_from_static_multi_segment_diag() {
+    assert_eq!(
+        run("{ dev = cfg.devices.dev; }"),
+        vec!["[manual-inherit-from] warning 1..24 assignment instead of inherit from"],
+    );
+}
+
+#[test]
+fn manual_inherit_from_static_multi_segment_fix() {
+    assert_eq!(
+        fix_result("{ dev = cfg.devices.dev; }", "manual-inherit-from"),
+        "{inherit (cfg.devices) dev; }",
+    );
+}
+
+#[test]
+fn manual_inherit_from_dynamic_select_no_diag() {
+    // `cfg.devices.${name}` is a dynamic select; the selected attribute
+    // path is not a static ident equal to the binding key, so the rule
+    // must NOT fire.
+    assert!(run("{ dev = cfg.devices.${name}; }").is_empty());
 }
 
 // --- collapsible-let-in ----------------------------------------------
@@ -307,21 +330,6 @@ fn empty_list_concat_diag() {
 #[test]
 fn empty_list_concat_fix_drops_empty_list() {
     assert_eq!(fix_result("[] ++ x", "empty-list-concat"), "x");
-}
-
-// --- unquoted-splice -------------------------------------------------
-
-#[test]
-fn unquoted_splice_diag() {
-    assert_eq!(
-        run("a.${b}"),
-        vec!["[unquoted-splice] warning 2..6 unquoted splice expression"],
-    );
-}
-
-#[test]
-fn unquoted_splice_fix_quotes() {
-    assert_eq!(fix_result("a.${b}", "unquoted-splice"), "a.\"${b}\"");
 }
 
 // --- useless-parens --------------------------------------------------

@@ -93,14 +93,46 @@ impl Rule for ManualInheritFrom {
         if elems.next().is_some() { return; }
         let Some(Expr::Select(select)) = binding.value() else { return };
         let Some(select_attrpath) = select.attrpath() else { return };
-        let mut sel_elems = select_attrpath.elements();
-        let Some(AttrName::Ident(index)) = sel_elems.next() else { return };
-        if sel_elems.next().is_some() { return; }
-        if key.text(source) != index.text(source) { return; }
         let Some(base) = select.base() else { return };
+
+        // Walk the selected attribute path. It must be composed entirely
+        // of static idents (no `${...}` interpolation, no quoted segment)
+        // so that `dev = cfg.devices.dev` -> `inherit (cfg.devices) dev;`
+        // is a sound rewrite. A dynamic select like `cfg.devices.${name}`
+        // is NOT a static attribute access and must not be flagged.
+        let mut elements = select_attrpath.elements();
+        let mut index: Option<&SyntaxToken> = None;
+        let mut from_suffix = String::new();
+        while let Some(element) = elements.next() {
+            match element {
+                AttrName::Ident(token) => {
+                    if let Some(prev) = index {
+                        if !from_suffix.is_empty() {
+                            from_suffix.push('.');
+                        }
+                        from_suffix.push_str(prev.text(source));
+                    }
+                    index = Some(token);
+                }
+                // Dynamic or quoted segment: not a static `some.path`
+                // access, so this binding cannot be rewritten via inherit.
+                AttrName::Str(_) | AttrName::Interp(_) => return,
+            }
+        }
+        let Some(index) = index else { return };
+        if key.text(source) != index.text(source) { return; }
+
+        // The `from` expression is the base + every path element except
+        // the final one: `cfg.devices.dev` -> `inherit (cfg.devices) dev;`
+        // and `some.a` -> `inherit (some) a;`.
+        let from = if from_suffix.is_empty() {
+            base.text(source).to_string()
+        } else {
+            format!("{}.{}", base.text(source), from_suffix)
+        };
         let fix = Fix::new("use inherit").edit(
             node.range(),
-            format!("inherit ({}) {};", base.text(source), key.text(source)),
+            format!("inherit ({}) {};", from, key.text(source)),
         );
         diags.push(Diagnostic::new(
             "manual-inherit-from", Severity::Warning, "assignment instead of inherit from", node.range(),
@@ -350,32 +382,6 @@ impl Rule for EmptyListConcat {
 
 fn is_empty_list(expr: Expr<'_>) -> bool {
     matches!(expr, Expr::List(l) if l.items().count() == 0)
-}
-
-// --- unquoted-splice -------------------------------------------------
-
-pub struct UnquotedSplice;
-
-impl Rule for UnquotedSplice {
-    fn code(&self) -> &'static str { "unquoted-splice" }
-    fn name(&self) -> &'static str { "Unquoted splice" }
-    fn description(&self) -> &'static str {
-        "Flags unquoted dynamic attribute segments like `a.${b}`. Prefer quoting: `a.\"${b}\"`."
-    }
-    fn severity(&self) -> Severity { Severity::Warning }
-    fn node_kind(&self) -> Option<K> { Some(K::Attrpath) }
-    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
-        let Some(attrpath) = strictix_syntax::Attrpath::cast(node) else { return };
-        for element in attrpath.elements() {
-            if let AttrName::Interp(interp) = element {
-                let fix = Fix::new("quote splice")
-                    .edit(interp.range(), format!("\"{}\"", interp.syntax().text(source)));
-                diags.push(Diagnostic::new(
-                    "unquoted-splice", Severity::Warning, "unquoted splice expression", interp.range(),
-                ).with_fix(fix));
-            }
-        }
-    }
 }
 
 // --- useless-parens (file rule) -------------------------------------
