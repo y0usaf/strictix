@@ -8,6 +8,7 @@
 pub mod file_rules;
 pub mod node_rules;
 pub mod schema;
+pub mod style_rules;
 
 use file_rules::{
     RedundantWith, SelfReferentialLet, ShadowedBinding, UnusedFormal, UnusedLambdaParam,
@@ -15,6 +16,11 @@ use file_rules::{
 };
 use node_rules::{AssertTrue, ConstantIf, Tautology};
 use schema::UnknownOption;
+use style_rules::{
+    CollapsibleLetIn, DeprecatedToPath, EmptyInherit, EmptyLetIn, EmptyListConcat, EmptyPattern,
+    EtaReduction, ManualInherit, ManualInheritFrom, RedundantPatternBind, RepeatedKeys,
+    UnquotedSplice, UnquotedUri, UselessHasAttr, UselessParens,
+};
 use strictix_core::rules::Rule;
 
 /// The full builtin registry, in declaration order.
@@ -35,5 +41,20 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         RedundantWith,
         SelfReferentialLet,
         UnknownOption,
+        EmptyLetIn,
+        ManualInherit,
+        ManualInheritFrom,
+        CollapsibleLetIn,
+        EtaReduction,
+        EmptyPattern,
+        RedundantPatternBind,
+        EmptyInherit,
+        DeprecatedToPath,
+        UselessHasAttr,
+        EmptyListConcat,
+        UnquotedSplice,
+        UselessParens,
+        RepeatedKeys,
+        UnquotedUri,
     }
 }

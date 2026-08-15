@@ -177,7 +177,9 @@ fn fix_rewrites_dirty_copy() {
     let after = std::fs::read_to_string(&copy).expect("read after");
 
     assert_ne!(before, after, "fix changed the file");
-    assert!(after.contains("in 2"), "body survives: {after}");
+    // unused-let-binding drops the dead binding, then the style
+    // empty-let-in rule collapses the now-empty let, leaving the body.
+    assert_eq!(after, "2", "body survives: {after}");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains(copy.to_str().unwrap()) || stdout.contains("fix"),
@@ -214,9 +216,11 @@ fn fix_dry_run_does_not_write_and_shows_diff() {
         stdout.contains("would apply 1 fix(es)"),
         "dry-run says would-apply: {stdout}"
     );
-    // The diff shows the removed binding spanning the whole line.
+    // The reactive fix loop removes the dead binding (unused-let-binding)
+    // and then collapses the resulting empty let (empty-let-in), leaving
+    // only the body.
     assert!(
-        stdout.contains("-let x = 1; in 2") && stdout.contains("+let in 2"),
+        stdout.contains("-let x = 1; in 2") && stdout.contains("+2"),
         "diff shown: {stdout}"
     );
     let _ = std::fs::remove_dir_all(&dir);
