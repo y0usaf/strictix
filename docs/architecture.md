@@ -67,9 +67,14 @@ Both declared via one mechanism, one registry.
 
 ## Fixes
 
-Text splices (range + replacement), applied in reverse order with an
-overlap check. AST-level rewriting deferred until semantic fixes must
-compose.
+Text splices (range + replacement). Both `check` and `fix` route
+through the single lint engine (`rules::lint`): check is one read-only
+pass, fix is the reactive loop. In fix mode each pass collects fixes,
+commits them as one mutation on the host-owned `Context` (recording a
+full-text inverse), and re-runs rules on the changed text — so a fix
+that reveals another finding is caught. Within a single pass, edits must
+not overlap (overlap check); across passes they compose. AST-level
+rewriting deferred until semantic fixes must compose within one pass.
 
 ## Seams (designed, not built)
 
