@@ -36,11 +36,11 @@ impl Rule for EmptyLetIn {
         if bindings.items().count() != 0 { return; }
         let Some(body) = let_expr.body() else { return };
         let mut diag = Diagnostic::new(
-            "empty-let-in", Severity::Warning, "useless let-in expression", node.range(),
+            "empty-let-in", Severity::Warning, "useless let-in expression", node.content_range(),
         );
         let has_comments = node.child_tokens().any(|t| t.kind() == K::Comment);
         if !has_comments {
-            diag = diag.with_fix(Fix::new("remove empty let").edit(node.range(), body.text(source)));
+            diag = diag.with_fix(Fix::new("remove empty let").edit(node.content_range(), body.text(source)));
         }
         diags.push(diag);
     }
@@ -66,9 +66,9 @@ impl Rule for ManualInherit {
         if elems.next().is_some() { return; }
         let Some(Expr::Ident(value)) = binding.value() else { return };
         if key.text(source) != value.text(source) { return; }
-        let fix = Fix::new("use inherit").edit(node.range(), format!("inherit {};", key.text(source)));
+        let fix = Fix::new("use inherit").edit(node.content_range(), format!("inherit {};", key.text(source)));
         diags.push(Diagnostic::new(
-            "manual-inherit", Severity::Warning, "assignment instead of inherit", node.range(),
+            "manual-inherit", Severity::Warning, "assignment instead of inherit", node.content_range(),
         ).with_fix(fix));
     }
 }
@@ -131,11 +131,11 @@ impl Rule for ManualInheritFrom {
             format!("{}.{}", base.text(source), from_suffix)
         };
         let fix = Fix::new("use inherit").edit(
-            node.range(),
+            node.content_range(),
             format!("inherit ({}) {};", from, key.text(source)),
         );
         diags.push(Diagnostic::new(
-            "manual-inherit-from", Severity::Warning, "assignment instead of inherit from", node.range(),
+            "manual-inherit-from", Severity::Warning, "assignment instead of inherit from", node.content_range(),
         ).with_fix(fix));
     }
 }
@@ -160,7 +160,7 @@ impl Rule for CollapsibleLetIn {
         let range = TextRange::new(in_token.range().start(), let_token.range().end());
         let fix = Fix::new("collapse let-in").edit(range, "");
         diags.push(Diagnostic::new(
-            "collapsible-let-in", Severity::Warning, "these let-in expressions are collapsible", node.range(),
+            "collapsible-let-in", Severity::Warning, "these let-in expressions are collapsible", node.content_range(),
         ).with_fix(fix));
     }
 }
@@ -185,9 +185,9 @@ impl Rule for EtaReduction {
         if arg.text(source) != param.text(source) { return; }
         let Some(Expr::Ident(func)) = apply.func() else { return };
         if func.text(source) == param.text(source) { return; }
-        let fix = Fix::new("eta-reduce").edit(node.range(), func.text(source));
+        let fix = Fix::new("eta-reduce").edit(node.content_range(), func.text(source));
         diags.push(Diagnostic::new(
-            "eta-reduction", Severity::Warning, "this function is eta-reducible", node.range(),
+            "eta-reduction", Severity::Warning, "this function is eta-reducible", node.content_range(),
         ).with_fix(fix));
     }
 }
@@ -211,9 +211,9 @@ impl Rule for EmptyPattern {
         if !formals.has_ellipsis() { return; }
         if at_name.is_some() { return; }
         if is_module(lambda.body(), source) { return; }
-        let fix = Fix::new("use `_`").edit(formals.range(), "_");
+        let fix = Fix::new("use `_`").edit(formals.syntax().content_range(), "_");
         diags.push(Diagnostic::new(
-            "empty-pattern", Severity::Warning, "empty pattern in function argument", node.range(),
+            "empty-pattern", Severity::Warning, "empty pattern in function argument", node.content_range(),
         ).with_fix(fix));
     }
 }
@@ -245,11 +245,11 @@ impl Rule for RedundantPatternBind {
         if formals.params().count() != 0 { return; }
         if !formals.has_ellipsis() { return; }
         let Some(at) = at_name else { return };
-        let start = at.range().start().min(formals.range().start());
-        let end = at.range().end().max(formals.range().end());
+        let start = at.range().start().min(formals.syntax().content_range().start());
+        let end = at.range().end().max(formals.syntax().content_range().end());
         let fix = Fix::new("remove redundant pattern").edit(TextRange::new(start, end), at.text(source));
         diags.push(Diagnostic::new(
-            "redundant-pattern-bind", Severity::Warning, "redundant pattern bind in function argument", node.range(),
+            "redundant-pattern-bind", Severity::Warning, "redundant pattern bind in function argument", node.content_range(),
         ).with_fix(fix));
     }
 }
@@ -272,7 +272,7 @@ impl Rule for EmptyInherit {
         if inherit.names().count() != 0 { return; }
         let fix = Fix::new("remove empty inherit").edit(node.range(), "");
         diags.push(Diagnostic::new(
-            "empty-inherit", Severity::Warning, "empty inherit statement", node.range(),
+            "empty-inherit", Severity::Warning, "empty inherit statement", node.content_range(),
         ).with_fix(fix));
     }
 }
@@ -297,7 +297,7 @@ impl Rule for DeprecatedToPath {
         diags.push(Diagnostic::new(
             "deprecated-to-path", Severity::Warning,
             format!("`{func_text}` is deprecated; use `/. +` or `./. +`"),
-            node.range(),
+            node.content_range(),
         ));
     }
 }
@@ -333,9 +333,9 @@ impl Rule for UselessHasAttr {
             format!("({default_text})")
         };
         let replacement = format!("{expected} or {default}");
-        let fix = Fix::new("use `or`").edit(node.range(), replacement);
+        let fix = Fix::new("use `or`").edit(node.content_range(), replacement);
         diags.push(Diagnostic::new(
-            "useless-has-attr", Severity::Warning, "this if-expression can be simplified with `or`", node.range(),
+            "useless-has-attr", Severity::Warning, "this if-expression can be simplified with `or`", node.content_range(),
         ).with_fix(fix));
     }
 }
@@ -373,9 +373,9 @@ impl Rule for EmptyListConcat {
         } else {
             return;
         };
-        let fix = Fix::new("remove empty-list concat").edit(node.range(), survivor.text(source));
+        let fix = Fix::new("remove empty-list concat").edit(node.content_range(), survivor.text(source));
         diags.push(Diagnostic::new(
-            "empty-list-concat", Severity::Warning, "concatenation with the empty list is a no-op", node.range(),
+            "empty-list-concat", Severity::Warning, "concatenation with the empty list is a no-op", node.content_range(),
         ).with_fix(fix));
     }
 }
@@ -516,7 +516,7 @@ impl Rule for RepeatedKeys {
             diags.push(Diagnostic::new(
                 "repeated-keys", Severity::Warning,
                 format!("key `{name}` is repeated {count} times; consider nesting"),
-                node.range(),
+                node.content_range(),
             ));
         });
     }
