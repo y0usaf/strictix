@@ -23,10 +23,7 @@ use std::process::ExitCode;
 use args::{Args, Command, Format};
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
-use strictix_core::fix::{apply_fixes, TextEdit};
 use strictix_core::rules::Rule;
-use strictix_core::semantic::SemanticModel;
-use strictix_syntax::parse;
 
 /// Print a usage error to stderr and exit 1.
 fn usage_error(message: &str) -> ExitCode {
@@ -326,37 +323,32 @@ fn process_file(
         }
     };
 
-    let tree = parse(&source);
-    let model = SemanticModel::new(&source, &tree);
     let mut diagnostics = Vec::new();
-    strictix_core::rules::run_rules(rules, &tree, &model, config, &source, &mut diagnostics);
-    diagnostics.sort_by_key(|diag| diag.range.start());
-
     let mut fixes_applied = 0usize;
     let mut fixed = None;
     let mut write_error = None;
     let mut apply_error = None;
+
+    // Single engine path: `check` (fix_mode=false) is one read-only
+    // pass; `fix` (fix_mode=true) is the reactive loop. Diagnostics
+    // reported are the first pass's — what the user started with.
+    let run = strictix_core::rules::lint(rules, &source, config, fix_mode);
+    diagnostics = run.diagnostics;
     if fix_mode {
         let fix_count = diagnostics.iter().filter(|d| d.fix.is_some()).count();
-        let edits: Vec<TextEdit> = diagnostics
-            .iter()
-            .filter_map(|d| d.fix.as_ref())
-            .flat_map(|fix| fix.edits.iter().cloned())
-            .collect();
-        match apply_fixes(&source, &edits) {
-            Ok(result) if result != source => {
-                if write {
-                    match std::fs::write(path, &result) {
-                        Ok(()) => fixes_applied = fix_count,
-                        Err(err) => write_error = Some(err.to_string()),
-                    }
-                } else {
-                    fixes_applied = fix_count; // reported as would-apply
+        if let Some(result) = run.fixed {
+            if write {
+                match std::fs::write(path, &result) {
+                    Ok(()) => fixes_applied = fix_count,
+                    Err(err) => write_error = Some(err.to_string()),
                 }
-                fixed = Some(result);
+            } else {
+                fixes_applied = fix_count;
             }
-            Ok(_) => {}
-            Err(err) => apply_error = Some(format!("{err:?}")),
+            fixed = Some(result);
+        }
+        if let Some(err) = run.error {
+            apply_error = Some(format!("{err:?}"));
         }
     }
 

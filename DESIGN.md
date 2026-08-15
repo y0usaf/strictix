@@ -29,6 +29,7 @@ What "done" feels like:
 | 05 one declaration mechanism | follows | Every rule — node or file kind — declared via the same macro and one registry. No hand-wired special cases. |
 | 06 bare core must boot | follows | `strictix-syntax` + `strictix-core` compile and pass tests with zero rules and zero config. CI: `nix flake check` builds and tests each crate. |
 | 07 nix source of truth | follows | Build and verify via `nix build` / `nix flake check`. `cargo` allowed locally for iteration (sanctioned exception: fmt/clippy/tests). |
+| 08 spatiotemporal composability | follows | Composition unit = rule; context = source text (tree/model are derived reads); revert = full-text snapshot inverses in `Context`. See Architecture. |
 
 ## Locked decisions
 
@@ -53,6 +54,35 @@ crates/
 
 See `docs/architecture.md` for the full description.
 
+## Spatiotemporal composability
+
+The lint pipeline is rules (components) over one piece of host-owned
+state: the source text. Rules read the text through derived views (the
+lossless tree and the lazy `SemanticModel`); they commit effects (fixes
+= text edits) and mutate nothing else.
+
+- **Composition unit**: a rule. It declares what it reads structurally —
+  a node rule reads the range of the node it fires on (`node_kind`), a
+  file rule reads the whole file (`None`).
+- **Context**: the source text, owned by `strictix_core::context::Context`.
+  Tree and `SemanticModel` are derived reads, rebuilt after each commit.
+- **Revert mechanism**: inverses. Each fix pass commits as one mutation
+  and records its inverse — the full pre-commit text snapshot. `rollback`
+  / `rollback_all` apply inverses in reverse order; unmount leaves no
+  residue (context returns to its mount snapshot).
+- **Reactivity**: after a committed fix changes the text, the runtime
+  re-runs the rules on the changed text to a fixpoint. This replaces the
+  old one-shot `apply_fixes` overlap-reject with composition across
+  passes.
+
+Single entry point: `rules::lint(fix: bool)` — `check` (fix=false) is
+one read-only pass, `fix` (fix=true) is the reactive loop. Both route
+through the same engine; `run_rules` and `apply_fixes` are internal to
+it, never called directly by the CLI.
+
+Check: `cargo test -p strictix-core spatiotemporal` — residue (commit,
+rollback_all, diff) and reactivity (chained fixes a→b→c take two passes).
+
 ## Deferred (and why)
 
 - **Daemon / LSP server** — one-shot model covers CI + AI hooks; revisit
@@ -62,7 +92,9 @@ See `docs/architecture.md` for the full description.
 - **Incremental reparsing** — whole-file parse is milliseconds at
   linter scale.
 - **AST-level (green-node) rewriting fixes** — text splices suffice
-  until semantic fixes need to compose; overlap check guards meanwhile.
+  until semantic fixes need to compose within a single pass; the
+  lint engine already composes across passes, and the overlap check
+  guards the within-pass case.
 - **Cross-file import DAG** — `ProjectContext` seam exists; built when
   intra-file semantics are done.
 - **Third-party plugin stability** — API churns while the semantic

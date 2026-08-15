@@ -6,9 +6,11 @@
 //! — one declaration mechanism, no hand-wired special cases.
 
 use crate::config::LintConfig;
+use crate::context::Context;
 use crate::diagnostic::{Diagnostic, Severity};
+use crate::fix::{FixError, TextEdit};
 use crate::semantic::SemanticModel;
-use strictix_syntax::{SyntaxKind, SyntaxNode};
+use strictix_syntax::{parse, SyntaxKind, SyntaxNode};
 
 /// A single lint rule.
 ///
@@ -77,6 +79,95 @@ pub fn run_rules(
             }
             None => rule.check_file(model, config, diags),
         }
+    }
+}
+
+/// Cap on fix passes. A rule whose fix re-triggers itself (a rule bug)
+/// would otherwise loop forever; ten passes is far beyond any real
+/// composition chain.
+pub const MAX_FIX_PASSES: usize = 10;
+
+/// Result of linting one file through the engine.
+pub struct LintRun {
+    /// Findings from the first pass — what the user sees.
+    pub diagnostics: Vec<Diagnostic>,
+    /// Final text, `Some` only when it differs from the input.
+    pub fixed: Option<String>,
+    /// Number of fix passes committed (zero in check mode).
+    pub passes: usize,
+    /// Set when a fix pass's edits overlap or go out of bounds. The
+    /// context is rolled back to the input, so `fixed` is `None`.
+    pub error: Option<FixError>,
+}
+
+/// The lint engine: the single entry point for one file.
+///
+/// Every path — `check` and `fix` — routes through here. The source
+/// text is the host-owned context ([`Context`]); rules read it through
+/// derived views (tree + model) and commit effects (fixes = text
+/// edits). `fix = false` is a single read-only pass. `fix = true` is
+/// the reactive loop: each pass collects fixes, commits them as one
+/// mutation, and re-runs rules on the changed text to a fixpoint, so a
+/// fix that reveals another finding is caught. Stops when a pass
+/// produces no fixes, or after [`MAX_FIX_PASSES`].
+///
+/// # Errors
+///
+/// Returns [`FixError`] when a pass's edits overlap or go out of bounds
+/// — the same validation as the one-shot [`crate::fix::apply_fixes`].
+pub fn lint(rules: &[Box<dyn Rule>], source: &str, config: &LintConfig, fix: bool) -> LintRun {
+    let mut context = Context::new(source.to_string());
+    let mut diagnostics = Vec::new();
+    let mut passes = 0usize;
+    let mut error = None;
+
+    loop {
+        let tree = parse(context.source());
+        let model = SemanticModel::new(context.source(), &tree);
+        let mut diags = Vec::new();
+        run_rules(rules, &tree, &model, config, context.source(), &mut diags);
+
+        let edits: Vec<TextEdit> = if fix {
+            diags
+                .iter()
+                .filter_map(|d| d.fix.as_ref())
+                .flat_map(|f| f.edits.iter().cloned())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        if passes == 0 {
+            diags.sort_by_key(|d| d.range.start());
+            diagnostics = diags;
+        }
+
+        if !fix || edits.is_empty() {
+            break;
+        }
+        match context.commit(&edits) {
+            Ok(()) => {}
+            Err(err) => {
+                // Atomic: undo any prior passes, leave the input intact.
+                context.rollback_all();
+                error = Some(err);
+                break;
+            }
+        }
+        passes += 1;
+        if passes >= MAX_FIX_PASSES {
+            break;
+        }
+    }
+
+    let final_text = context.source().to_string();
+    let fixed = (final_text != source).then_some(final_text);
+
+    LintRun {
+        diagnostics,
+        fixed,
+        passes,
+        error,
     }
 }
 

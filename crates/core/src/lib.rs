@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod context;
 pub mod diagnostic;
 pub mod fix;
 pub mod json;
