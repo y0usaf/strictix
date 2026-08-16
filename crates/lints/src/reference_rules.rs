@@ -112,6 +112,7 @@ const VALID_BUILTINS: &[&str] = &[
     "path",
     "pathExists",
     "placeholder",
+    "parseDrvName",
     "readDir",
     "readFile",
     "removeAttrs",
