@@ -166,16 +166,8 @@ impl<'a> Lexer<'a> {
         if self.pos > self.content_start {
             let start = self.content_start;
             self.content_start = self.pos;
-            self.emit_at(SyntaxKind::StringContent, start, self.pos);
+            self.emit(SyntaxKind::StringContent, start);
         }
-    }
-
-    fn emit_at(&mut self, kind: SyntaxKind, start: usize, end: usize) {
-        self.tokens.push(Token {
-            kind,
-            start: start as u32,
-            len: (end - start) as u32,
-        });
     }
 
     // --- normal mode ---
