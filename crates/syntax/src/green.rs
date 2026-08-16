@@ -35,12 +35,6 @@ impl TextRange {
         self.end
     }
 
-    /// Whether the range covers no text.
-    #[must_use]
-    pub const fn is_empty(self) -> bool {
-        self.start == self.end
-    }
-
     /// Whether `offset` falls inside `[start, end)`.
     #[must_use]
     pub const fn contains(self, offset: u32) -> bool {
@@ -173,11 +167,6 @@ impl SyntaxNode {
         self.child_nodes().find(|n| n.kind() == kind)
     }
 
-    /// All child nodes of the given kind, in source order.
-    pub fn child_nodes_of_kind(&self, kind: SyntaxKind) -> impl Iterator<Item = &SyntaxNode> {
-        self.child_nodes().filter(move |n| n.kind() == kind)
-    }
-
     /// All descendant nodes, depth-first pre-order, self first.
     pub fn descendants(&self) -> impl Iterator<Item = &SyntaxNode> {
         let mut stack = vec![self];
@@ -245,12 +234,10 @@ impl TreeBuilder {
     pub fn token(&mut self, kind: SyntaxKind, range: TextRange) {
         self.last_end = range.end();
         let token = SyntaxToken { kind, range };
-        match self.stack.last_mut() {
-            Some(node) => node.children.push(NodeOrToken::Token(token)),
-            None => {
-                // A token outside any node should not happen; the parser
-                // always wraps everything in a Root. Defensive no-op.
-            }
+        // A token outside any node should not happen; the parser always
+        // wraps everything in a Root.
+        if let Some(node) = self.stack.last_mut() {
+            node.children.push(NodeOrToken::Token(token));
         }
     }
 

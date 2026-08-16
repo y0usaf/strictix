@@ -37,7 +37,7 @@ What "done" feels like:
 |---|---|---|
 | Parser | hand-written, lossless CST, error recovery from day one | AI-generated Nix is often broken mid-generation; the linter must still diagnose. Owning the parser means owning error quality. |
 | Syntax tree | own green tree (`NodeOrToken`, ranges, trivia) | rowan's cleverness is incremental reparse, which a one-shot linter never uses. Owning ~400 lines demystifies everything above it. |
-| Dependencies | blessed: `serde`, `toml` only | Comprehension-per-dep ratio. Arg parsing, rendering, walking are small enough to own. |
+| Dependencies | none — stdlib only | Zero third-party deps. JSON (parse + serialize) and the TOML config subset are hand-rolled in-house. |
 | Old fork code | strict no-peek, no specs | Rewrite must not inherit decisions by osmosis. Lints written fresh from Nix knowledge. |
 | Runtime | one-shot CLI, disk cache later | Matches CI/pre-commit/AI-hook reality; daemon is months of plumbing for zero lint-quality gain. |
 | Plugin API | public but unstable | Dogfood via builtin lints; bump semver-major freely until the semantic model settles. |

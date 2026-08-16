@@ -17,8 +17,9 @@ enough to hold in your head.
   `}`, `in`.
 - **Own green tree.** `NodeOrToken`, text ranges, trivia attached to
   tokens so fixes never destroy formatting. No rowan.
-- **Minimal blessed deps:** `serde` + `toml` only. Hand-written arg
-  parsing, diagnostic rendering, and file walking.
+- **Stdlib only:** zero third-party dependencies. JSON (parse +
+  serialize) and the TOML config subset are hand-rolled; arg parsing,
+  rendering, and walking are owned too.
 - **Strict no-peek rule:** no code from the original statix fork is
   read or reused during this rewrite. Builtin lint rules are written
   fresh, from Nix knowledge and first principles.
@@ -35,8 +36,9 @@ enough to hold in your head.
   `strictix-core`; uses only its public API. API is **unstable**:
   bump semver-major freely, no stability promises yet. Includes the
   M8 `unknown-option` schema rule (hand-written JSON parser in core).
-- `strictix-cli`: entrypoint. Human + JSON output (`serde`),
-  TOML config (`toml`). Std threads for per-file parallelism.
+- `strictix-cli`: entrypoint. Human + JSON output (hand-rolled
+  serializer in core), TOML config (hand-rolled subset parser). Std
+  threads for per-file parallelism.
 
 ## Pipeline
 

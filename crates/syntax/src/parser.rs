@@ -102,12 +102,12 @@ impl<'a> Parser<'a> {
             .unwrap_or(K::Eof)
     }
 
-    /// Kind of the `offset`-th significant token after the current one.
-    fn peek(&self, offset: usize) -> SyntaxKind {
+    /// Kind of the next significant (non-trivia) token after the current one.
+    fn peek_next(&self) -> SyntaxKind {
         self.tokens[self.pos..]
             .iter()
             .filter(|t| !t.kind.is_trivia())
-            .nth(offset)
+            .nth(1)
             .map(|t| t.kind)
             .unwrap_or(K::Eof)
     }
@@ -306,9 +306,9 @@ impl<'a> Parser<'a> {
     fn parse_app(&mut self, checkpoint: usize) {
         match self.current() {
             // x: body
-            K::Ident if self.peek(1) == K::Colon => self.parse_lambda_ident(),
+            K::Ident if self.peek_next() == K::Colon => self.parse_lambda_ident(),
             // args@{ ... }: body
-            K::Ident if self.peek(1) == K::At => self.parse_lambda_named_formals(),
+            K::Ident if self.peek_next() == K::At => self.parse_lambda_named_formals(),
             // { formals }: body
             K::LBrace if !self.brace_is_attrset() => self.parse_lambda_formals(),
             _ => {
@@ -438,17 +438,7 @@ impl<'a> Parser<'a> {
         self.start(K::LetExpr);
         self.bump(); // `let`
         self.start(K::LetBindings);
-        loop {
-            match self.current() {
-                K::KwIn => break,
-                K::KwInherit => self.parse_inherit(),
-                K::Eof => break,
-                _ if self.current().is_attr_name() || self.current() == K::StringStart => {
-                    self.parse_binding()
-                }
-                _ => self.loop_error(),
-            }
-        }
+        self.parse_bindings(K::KwIn);
         self.finish(); // LetBindings
         self.expect(K::KwIn);
         self.parse_expr();
@@ -487,9 +477,15 @@ impl<'a> Parser<'a> {
     fn parse_attrset_body(&mut self) {
         self.start(K::AttrsetExpr);
         self.bump(); // `{`
+        self.parse_bindings(K::RBrace);
+        self.expect(K::RBrace);
+        self.finish();
+    }
+
+    fn parse_bindings(&mut self, term: SyntaxKind) {
         loop {
             match self.current() {
-                K::RBrace => break,
+                k if k == term => break,
                 K::KwInherit => self.parse_inherit(),
                 K::Eof => break,
                 _ if self.current().is_attr_name() || self.current() == K::StringStart => {
@@ -498,8 +494,6 @@ impl<'a> Parser<'a> {
                 _ => self.loop_error(),
             }
         }
-        self.expect(K::RBrace);
-        self.finish();
     }
 
     fn parse_binding(&mut self) {
