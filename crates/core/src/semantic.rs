@@ -565,15 +565,19 @@ impl<'a> Builder<'a> {
                                     self.walk_expr(source);
                                 }
                                 for name in inherit.names() {
-                                    // Record the inherited name as a
-                                    // reference to the outer binding so the
-                                    // linter treats it as "used".
-                                    self.idents.push(name);
-                                    // The new binding enters visibility at its
-                                    // own token's end, NOT at the let's start,
-                                    // so the reference above resolves to the
-                                    // outer binding, not this one.
-                                    let visible_from = name.range().end();
+                                    // Inherit names are definitions (fetched
+                                    // from the source) — only a sourceless
+                                    // `inherit x` is a lexical reference.
+                                    if inherit.source().is_none() {
+                                        self.idents.push(name);
+                                    }
+                                    // Nix `let` is recursive: an inherited
+                                    // binding is visible from the start of the
+                                    // let, so earlier sibling bindings and the
+                                    // body can reference it too. The reference
+                                    // pushed above is for a sourceless `inherit
+                                    // x`, which resolves to an outer binding.
+                                    let visible_from = let_expr.range().start();
                                     self.register(
                                         name,
                                         BindingKind::LetBinding,
@@ -667,9 +671,12 @@ impl<'a> Builder<'a> {
                                 self.walk_expr(source);
                             }
                             for name in inherit.names() {
-                                // Record as a reference to the outer
-                                // binding (the name came from there).
-                                self.idents.push(name);
+                                // Inherit names are definitions (fetched
+                                // from the source) — only a sourceless
+                                // `inherit x` is a lexical reference.
+                                if inherit.source().is_none() {
+                                    self.idents.push(name);
+                                }
                                 // The new name binds forward in the
                                 // attrset — other attrs can inherit it.
                                 let visible_from = name.range().end();
@@ -712,9 +719,12 @@ impl<'a> Builder<'a> {
                                     self.walk_expr(source);
                                 }
                                 for name in inherit.names() {
-                                    // Record as a reference to the outer
-                                    // binding.
-                                    self.idents.push(name);
+                                    // Inherit names are definitions (fetched
+                                    // from the source) — only a sourceless
+                                    // `inherit x` is a lexical reference.
+                                    if inherit.source().is_none() {
+                                        self.idents.push(name);
+                                    }
                                     self.register(
                                         name,
                                         BindingKind::RecAttr,
