@@ -144,6 +144,32 @@ fn inherit_in_let_binds_and_resolves_source() {
     assert_eq!(y.references.len(), 1, "body references y");
 }
 
+#[test]
+fn inherit_from_source_name_is_not_a_lexical_reference() {
+    // `inherit (cfg) bar;` defines `bar` by copying `bar` out of `cfg`;
+    // the name is NOT a lexical use, so it must not appear as an
+    // (unresolved) reference.
+    let src = "let cfg = {}; in { inherit (cfg) bar; }";
+    let m = model(src);
+    assert!(
+        !m.references().iter().any(|r| r.name.text(src) == "bar"),
+        "inherit-from name must not be recorded as a reference"
+    );
+    // The inherit name still binds locally.
+    assert!(bindings_named(&m, "bar").len() >= 1);
+}
+
+#[test]
+fn sourceless_inherit_is_still_a_lexical_reference() {
+    // `inherit baz;` reads the outer `baz` binding, so it must still
+    // resolve.
+    let src = "let baz = 1; in { inherit baz; }";
+    let m = model(src);
+    let r = refs(&m);
+    let baz = r.iter().find(|x| x.0 == "baz").expect("baz reference");
+    assert_eq!(baz.1, Some(0), "sourceless inherit still resolves");
+}
+
 // --- 7. with fallback -------------------------------------------------------
 
 #[test]
