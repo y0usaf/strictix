@@ -181,6 +181,14 @@ fn manual_inherit_from_dynamic_select_no_diag() {
 }
 
 #[test]
+fn manual_inherit_from_or_default_no_diag() {
+    // `x = foo.bar or default` is a SelectExpr with an `or` fallback;
+    // rewriting it to `inherit (foo) bar;` would silently drop the
+    // default, so the rule must NOT fire.
+    assert!(run("{ x = foo.bar or null; }").is_empty());
+}
+
+#[test]
 fn manual_inherit_from_multiline_fix_preserves_newline() {
     // The binding's node range includes the leading newline; the fix must
     // not eat it (that would merge `let` + `inherit` into `letinherit`).

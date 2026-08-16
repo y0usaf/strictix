@@ -92,6 +92,9 @@ impl Rule for ManualInheritFrom {
         let Some(AttrName::Ident(key)) = elems.next() else { return };
         if elems.next().is_some() { return; }
         let Some(Expr::Select(select)) = binding.value() else { return };
+        // A select with an `or` default (`x = a.b or default`) cannot be
+        // rewritten via inherit without dropping the fallback, so bail out.
+        if select.default().is_some() { return; }
         let Some(select_attrpath) = select.attrpath() else { return };
         let Some(base) = select.base() else { return };
 
