@@ -156,7 +156,7 @@ fn inherit_from_source_name_is_not_a_lexical_reference() {
         "inherit-from name must not be recorded as a reference"
     );
     // The inherit name still binds locally.
-    assert!(bindings_named(&m, "bar").len() >= 1);
+    assert!(!bindings_named(&m, "bar").is_empty());
 }
 
 #[test]
