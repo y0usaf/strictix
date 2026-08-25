@@ -56,7 +56,10 @@ One walk of a file's tree produces: static bindings (lambda params,
 `let` entries, `rec` attrsets, pattern entries), shadow-aware
 references resolved to their binding, `with` sites, and `import` sites.
 Built lazily — node rules never pay for it; the first file rule that
-asks triggers the build, shared thereafter.
+asks triggers the build, shared thereafter. The model also carries the
+linted file's on-disk path when the CLI knows it (`with_path`), so
+rules that resolve relative path literals (dangling-path) have an
+anchor; models built from anonymous sources never attach one.
 
 ## Rules
 
@@ -78,13 +81,19 @@ that reveals another finding is caught. Within a single pass, edits must
 not overlap (overlap check); across passes they compose. AST-level
 rewriting deferred until semantic fixes must compose within one pass.
 
-## Seams (designed, not built)
+## Seams
 
-- **`ProjectContext`**: empty handle passed to file rules today;
-  cross-file import DAG slots in later without signature changes.
-- **Disk cache**: materializes when schema checks need it.
-- **Schema checks**: verify `config.*` attrpaths against nixpkgs
-  `options.json` + locally declared options. No evaluator, ever.
+- **`ProjectContext`**: not built. Cross-file analysis today is limited
+  to the file path carried by the model; a cross-file import DAG slots
+  in later without signature changes.
+- **Schema checks** (built, M9): `--schema options.json` verifies
+  option attrpaths against nixpkgs + locally declared options — reads
+  off the `config` module argument AND write-side definitions in module
+  files, wildcard-aware (`users.users.<name>.home`), plus literal
+  value/type contradictions (option-type-mismatch). No evaluator, ever.
+- **Disk cache** (built): the parsed schema is cached next to a content
+  fingerprint (`{fnv1a:x}:v2` header, `path\ttype` lines) in the OS
+  temp dir; a stale or v1 cache misses and reparses.
 
 ## Non-goals
 
@@ -104,3 +113,5 @@ rewriting deferred until semantic fixes must compose within one pass.
 - M6: builtin lints written fresh (snapshot tests; growing coverage)
 - M7: CLI + config polish
 - M8+: AI-slop rules, schema checks
+- M9: schema write-side + option types, path rules, simplification
+  batch (54 rules total)
