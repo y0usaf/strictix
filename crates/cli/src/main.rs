@@ -320,7 +320,6 @@ fn process_file(
         }
     };
 
-    let mut diagnostics = Vec::new();
     let mut fixes_applied = 0usize;
     let mut fixed = None;
     let mut write_error = None;
@@ -329,8 +328,8 @@ fn process_file(
     // Single engine path: `check` (fix_mode=false) is one read-only
     // pass; `fix` (fix_mode=true) is the reactive loop. Diagnostics
     // reported are the first pass's — what the user started with.
-    let run = strictix_core::rules::lint(rules, &source, config, fix_mode);
-    diagnostics = run.diagnostics;
+    let run = strictix_core::rules::lint(rules, &source, Some(path), config, fix_mode);
+    let diagnostics = run.diagnostics;
     if fix_mode {
         let fix_count = diagnostics.iter().filter(|d| d.fix.is_some()).count();
         if let Some(result) = run.fixed {

@@ -115,7 +115,13 @@ pub struct LintRun {
 ///
 /// Returns [`FixError`] when a pass's edits overlap or go out of bounds
 /// — the same validation as the one-shot [`crate::fix::apply_fixes`].
-pub fn lint(rules: &[Box<dyn Rule>], source: &str, config: &LintConfig, fix: bool) -> LintRun {
+pub fn lint(
+    rules: &[Box<dyn Rule>],
+    source: &str,
+    path: Option<&std::path::Path>,
+    config: &LintConfig,
+    fix: bool,
+) -> LintRun {
     let mut context = Context::new(source.to_string());
     let mut diagnostics = Vec::new();
     let mut passes = 0usize;
@@ -123,7 +129,7 @@ pub fn lint(rules: &[Box<dyn Rule>], source: &str, config: &LintConfig, fix: boo
 
     loop {
         let tree = parse(context.source());
-        let model = SemanticModel::new(context.source(), &tree);
+        let model = SemanticModel::new(context.source(), &tree).with_path(path);
         let mut diags = Vec::new();
         run_rules(rules, &tree, &model, config, context.source(), &mut diags);
 

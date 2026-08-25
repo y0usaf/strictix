@@ -103,7 +103,7 @@ fn fixpoint_reruns_consumers_after_a_commit() {
     ];
     let config = LintConfig::default();
 
-    let run = lint(&rules, "a", &config, true);
+    let run = lint(&rules, "a", None, &config, true);
 
     assert_eq!(run.passes, 2, "one pass per revealed fix");
     assert_eq!(
@@ -125,7 +125,7 @@ fn lint_is_stable_when_no_fixes_exist() {
     })];
     let config = LintConfig::default();
 
-    let run = lint(&rules, "abc", &config, true);
+    let run = lint(&rules, "abc", None, &config, true);
 
     assert_eq!(run.passes, 0, "no commit when nothing to fix");
     assert_eq!(run.fixed, None, "unchanged text yields no fixed output");
@@ -144,7 +144,7 @@ fn check_mode_does_not_apply_fixes() {
     })];
     let config = LintConfig::default();
 
-    let run = lint(&rules, "a", &config, false);
+    let run = lint(&rules, "a", None, &config, false);
 
     assert_eq!(run.passes, 0, "check mode commits nothing");
     assert_eq!(run.fixed, None, "check mode leaves text untouched");
@@ -172,7 +172,7 @@ fn overlapping_fixes_fail_atomically_and_preserve_diagnostics() {
     ];
     let config = LintConfig::default();
 
-    let run = lint(&rules, "a", &config, true);
+    let run = lint(&rules, "a", None, &config, true);
 
     assert!(run.error.is_some(), "overlapping edits error out");
     assert_eq!(run.fixed, None, "atomic: file left untouched on error");

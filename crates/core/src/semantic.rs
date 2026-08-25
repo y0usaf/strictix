@@ -185,6 +185,7 @@ pub struct Built<'a> {
 pub struct SemanticModel<'a> {
     source: &'a str,
     root: &'a SyntaxNode,
+    path: Option<&'a std::path::Path>,
     built: OnceLock<Built<'a>>,
 }
 
@@ -195,8 +196,25 @@ impl<'a> SemanticModel<'a> {
         Self {
             source,
             root,
+            path: None,
             built: OnceLock::new(),
         }
+    }
+
+    /// Attach the on-disk path of the linted file. Rules that resolve
+    /// relative path literals (e.g. dangling imports) need to know
+    /// where the file lives; models built from anonymous sources
+    /// (tests, stdin) simply never attach one.
+    #[must_use]
+    pub fn with_path(mut self, path: Option<&'a std::path::Path>) -> Self {
+        self.path = path;
+        self
+    }
+
+    /// The on-disk path of the linted file, when known.
+    #[must_use]
+    pub fn path(&self) -> Option<&'a std::path::Path> {
+        self.path
     }
 
     /// The source text this model was built over.
