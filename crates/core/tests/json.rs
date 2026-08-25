@@ -330,6 +330,15 @@ fn errors() {
 }
 
 #[test]
+fn display_serializes_compact_json() {
+    let value = ok(r#"{"message": "line\nnext", "values": [1, true, null]}"#);
+    assert_eq!(
+        value.to_string(),
+        r#"{"message":"line\nnext","values":[1,true,null]}"#
+    );
+}
+
+#[test]
 fn options_json_shape() {
     let doc = r#"{"options": {"services.foo.enable": {"type": "boolean", "description": "x"}}}"#;
     let v = ok(doc);

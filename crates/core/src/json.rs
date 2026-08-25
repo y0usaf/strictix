@@ -11,6 +11,8 @@
 //! [JsonError] carrying a message and the byte offset where the
 //! problem was detected.
 
+use std::fmt;
+
 /// A parsed JSON value.
 ///
 /// Objects keep their entries in insertion order as a Vec of key/value
@@ -439,14 +441,6 @@ impl JsonValue {
         }
     }
 
-    /// Serialize to a compact JSON string.
-    #[must_use]
-    pub fn to_string(&self) -> String {
-        let mut out = String::new();
-        self.write_compact(&mut out);
-        out
-    }
-
     /// Serialize to an indented (pretty) JSON string.
     #[must_use]
     pub fn to_string_pretty(&self) -> String {
@@ -464,7 +458,9 @@ impl JsonValue {
             JsonValue::Array(items) => {
                 out.push('[');
                 for (i, item) in items.iter().enumerate() {
-                    if i > 0 { out.push(','); }
+                    if i > 0 {
+                        out.push(',');
+                    }
                     item.write_compact(out);
                 }
                 out.push(']');
@@ -472,7 +468,9 @@ impl JsonValue {
             JsonValue::Object(entries) => {
                 out.push('{');
                 for (i, (k, v)) in entries.iter().enumerate() {
-                    if i > 0 { out.push(','); }
+                    if i > 0 {
+                        out.push(',');
+                    }
                     write_json_string(k, out);
                     out.push(':');
                     v.write_compact(out);
@@ -489,10 +487,15 @@ impl JsonValue {
             JsonValue::Number(n) => out.push_str(&format_number(*n)),
             JsonValue::String(s) => write_json_string(s, out),
             JsonValue::Array(items) => {
-                if items.is_empty() { out.push_str("[]"); return; }
+                if items.is_empty() {
+                    out.push_str("[]");
+                    return;
+                }
                 out.push_str("[\n");
                 for (i, item) in items.iter().enumerate() {
-                    if i > 0 { out.push_str(",\n"); }
+                    if i > 0 {
+                        out.push_str(",\n");
+                    }
                     out.push_str(&"  ".repeat(indent + 1));
                     item.write_pretty(out, indent + 1);
                 }
@@ -501,10 +504,15 @@ impl JsonValue {
                 out.push(']');
             }
             JsonValue::Object(entries) => {
-                if entries.is_empty() { out.push_str("{}"); return; }
+                if entries.is_empty() {
+                    out.push_str("{}");
+                    return;
+                }
                 out.push_str("{\n");
                 for (i, (k, v)) in entries.iter().enumerate() {
-                    if i > 0 { out.push_str(",\n"); }
+                    if i > 0 {
+                        out.push_str(",\n");
+                    }
                     out.push_str(&"  ".repeat(indent + 1));
                     write_json_string(k, out);
                     out.push_str(": ");
@@ -515,6 +523,15 @@ impl JsonValue {
                 out.push('}');
             }
         }
+    }
+}
+
+impl fmt::Display for JsonValue {
+    /// Write this value as compact JSON.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut out = String::new();
+        self.write_compact(&mut out);
+        formatter.write_str(&out)
     }
 }
 

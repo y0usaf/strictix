@@ -69,8 +69,10 @@ pub enum FixError {
     /// Two edits' ranges intersect; applying both would corrupt the text.
     /// Touching (adjacent) ranges are fine — no overlap by definition.
     Overlap(TextRange, TextRange),
-    /// An edit's range extends past the end of the source.
+    /// An edit's range is reversed or extends past the end of the source.
     InvalidRange(TextRange),
+    /// An edit starts or ends in the middle of a UTF-8 code point.
+    InvalidBoundary(TextRange),
 }
 
 /// Apply `edits` to `source`, producing the edited text.
