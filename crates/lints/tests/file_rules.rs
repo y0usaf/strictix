@@ -12,8 +12,8 @@ use strictix_core::diagnostic::Diagnostic;
 use strictix_core::rules::{run_rules, Rule};
 use strictix_core::semantic::SemanticModel;
 use strictix_lints::file_rules::{
-    RedundantWith, SelfReferentialLet, ShadowedBinding, UnusedFormal, UnusedLambdaParam,
-    UnusedLetBinding,
+    CircularLet, ReboundConstant, RedundantWith, SelfReferentialLet, ShadowedBinding, UnusedFormal,
+    UnusedLambdaParam, UnusedLetBinding,
 };
 use strictix_lints::schema::UnknownOption;
 use strictix_syntax::parse;
@@ -428,6 +428,101 @@ fn self_referential_let_attrset_guard_not_flagged() {
             &[Box::new(SelfReferentialLet {})],
             LintConfig::default()
         ),
+        Vec::<String>::new()
+    );
+}
+
+// --- circular-let ------------------------------------------------------
+
+#[test]
+fn circular_let_flags_two_node_cycle() {
+    let rules = one(Box::new(CircularLet {}));
+    assert_eq!(
+        run("let a = b; b = a; in a", &rules, LintConfig::default()),
+        ["[circular-let] error 4..5 bindings 'a' -> 'b' -> 'a' form an eager reference cycle; forcing any of them is infinite recursion"]
+    );
+}
+
+#[test]
+fn circular_let_flags_three_node_cycle() {
+    let rules = one(Box::new(CircularLet {}));
+    assert_eq!(
+        run("let a = b; b = c; c = a; in a", &rules, LintConfig::default()),
+        ["[circular-let] error 4..5 bindings 'a' -> 'b' -> 'c' -> 'a' form an eager reference cycle; forcing any of them is infinite recursion"]
+    );
+}
+
+#[test]
+fn circular_let_flags_rec_attrset_cycle() {
+    let rules = one(Box::new(CircularLet {}));
+    assert_eq!(
+        run("rec { a = b; b = a; }", &rules, LintConfig::default()),
+        ["[circular-let] error 6..7 bindings 'a' -> 'b' -> 'a' form an eager reference cycle; forcing any of them is infinite recursion"]
+    );
+}
+
+#[test]
+fn circular_let_clean_acyclic_reference() {
+    // a -> b is a plain edge, not a cycle.
+    let rules = one(Box::new(CircularLet {}));
+    assert_eq!(
+        run("let a = b; b = 1; in a", &rules, LintConfig::default()),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn circular_let_clean_lazy_carrier() {
+    // Attrset values are lazy: the mutual references are ordinary
+    // recursive data, never forced by forcing a or b themselves.
+    let rules = one(Box::new(CircularLet {}));
+    assert_eq!(
+        run(
+            "let a = { v = b; }; b = { v = a; }; in a",
+            &rules,
+            LintConfig::default()
+        ),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn circular_let_ignores_self_reference() {
+    // Length-1 cycles are self-referential-let's finding, not ours.
+    let rules = one(Box::new(CircularLet {}));
+    assert_eq!(
+        run("let x = x; in x", &rules, LintConfig::default()),
+        Vec::<String>::new()
+    );
+}
+
+// --- rebound-constant --------------------------------------------------
+
+#[test]
+fn rebound_constant_flags_let_binding() {
+    let rules = one(Box::new(ReboundConstant {}));
+    assert_eq!(
+        run("let true = 1; in 2", &rules, LintConfig::default()),
+        ["[rebound-constant] warning 4..8 binding rebinds the global constant 'true'"]
+    );
+}
+
+#[test]
+fn rebound_constant_flags_lambda_param() {
+    let rules = one(Box::new(ReboundConstant {}));
+    assert_eq!(
+        run("null: null", &rules, LintConfig::default()),
+        ["[rebound-constant] warning 0..4 binding rebinds the global constant 'null'"]
+    );
+}
+
+#[test]
+fn rebound_constant_clean_attrset_key() {
+    // A plain attrset key is data, not a scope binding: the model
+    // records nothing for it, so the rule stays silent by construction.
+    let rules = one(Box::new(ReboundConstant {}));
+    assert_eq!(
+        run("{ true = 1; }", &rules, LintConfig::default()),
         Vec::<String>::new()
     );
 }

@@ -12,7 +12,7 @@ use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
 use strictix_core::rules::Rule;
-use strictix_core::semantic::{BindingKind, SemanticModel};
+use strictix_core::semantic::{BindingKind, ScopeId, SemanticModel};
 use strictix_syntax::{
     AstNode, Binding, Expr, Formals, LambdaExpr, LambdaParam, SyntaxKind, SyntaxNode, TextRange,
     WithExpr,
@@ -522,5 +522,229 @@ fn eager_contains(expr: strictix_syntax::Expr<'_>, range: TextRange) -> bool {
         // Barriers: lambda body, list items, attrset/rec values.
         Expr::Lambda(_) | Expr::List(_) | Expr::Attrset(_) | Expr::RecAttrset(_) => false,
         Expr::Int(_) | Expr::Float(_) | Expr::Path(_) | Expr::SearchPath(_) | Expr::Uri(_) => false,
+    }
+}
+
+/// Flags eager reference cycles among sibling let/rec bindings.
+///
+/// `let a = b; b = a; in a` — forcing either binding forces the other
+/// before its own value exists, so evaluation never terminates. The
+/// same holds for `rec { a = b; b = a; }`. A cycle is reported once,
+/// on its first binding in source order. Length-1 cycles (self-edges)
+/// are excluded: `let x = x;` is [SelfReferentialLet]'s finding. Note
+/// that self-referential-let inspects only let bindings, so an eager
+/// rec self-reference (`rec { a = a + 1; }`) is covered by NEITHER
+/// rule — we still exclude self-edges here to keep the two rules'
+/// ownership disjoint.
+pub struct CircularLet;
+
+impl Rule for CircularLet {
+    fn code(&self) -> &'static str {
+        "circular-let"
+    }
+
+    fn name(&self) -> &'static str {
+        "Circular let bindings"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags sibling bindings whose values reference each other eagerly (`let a = b; b = a;`): forcing any of them is guaranteed infinite recursion. Lazy positions (attrset values, list items, lambda bodies) are ordinary recursion and never flagged."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Error
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let source = model.source();
+        let bindings = model.bindings();
+        // Sibling groups: every let and every rec attrset owns exactly
+        // one ScopeId, so grouping by scope id recovers the sibling
+        // sets. Declaration order is preserved, which makes "first in
+        // source order" the smallest local index within a group.
+        let mut groups: Vec<(ScopeId, Vec<usize>)> = Vec::new();
+        for (idx, binding) in bindings.iter().enumerate() {
+            if !matches!(binding.kind, BindingKind::LetBinding | BindingKind::RecAttr) {
+                continue;
+            }
+            // Inherit names register as let bindings but have no value
+            // expression of their own: skip them.
+            let name_range = binding.name.range();
+            let is_inherit = model.root().descendants().any(|n| {
+                n.kind() == SyntaxKind::InheritStmt && n.range().contains(name_range.start())
+            });
+            if is_inherit {
+                continue;
+            }
+            match groups.iter_mut().find(|(scope, _)| *scope == binding.scope) {
+                Some((_, members)) => members.push(idx),
+                None => groups.push((binding.scope, vec![idx])),
+            }
+        }
+        for (_, members) in &groups {
+            if members.len() < 2 {
+                continue;
+            }
+            // Edge i -> j (local indices) when member i's value eagerly
+            // forces a reference that model-resolves to member j.
+            // References inside the value that resolve elsewhere (inner
+            // shadows, outer bindings) never match a sibling index, so
+            // nested scopes are handled by resolution itself.
+            let mut adj: Vec<Vec<usize>> = vec![Vec::new(); members.len()];
+            for (local, &idx) in members.iter().enumerate() {
+                let Some(binding_node) =
+                    containing_binding(model.root(), bindings[idx].name.range())
+                else {
+                    continue;
+                };
+                let Some(value) = binding_node.value() else {
+                    continue;
+                };
+                let value_range = value.range();
+                for r in model.references() {
+                    let Some(target) = r.resolved else { continue };
+                    let Some(to) = members.iter().position(|&m| m == target) else {
+                        continue;
+                    };
+                    if to == local || adj[local].contains(&to) {
+                        continue;
+                    }
+                    let range = r.name.range();
+                    if value_range.contains(range.start())
+                        && value_range.end() >= range.end()
+                        && eager_contains(value, range)
+                    {
+                        adj[local].push(to);
+                    }
+                }
+            }
+            let mut color = vec![Color::White; members.len()];
+            let mut stack = Vec::new();
+            let mut cycles: Vec<Vec<usize>> = Vec::new();
+            for start in 0..members.len() {
+                if color[start] == Color::White {
+                    cycle_dfs(start, &adj, &mut color, &mut stack, &mut cycles);
+                }
+            }
+            // One report per distinct cycle: the same member set can be
+            // reached through several back-edges, so dedupe on the
+            // sorted member set, then rotate the recorded edge order so
+            // the first-in-source member leads.
+            let mut seen: HashSet<Vec<usize>> = HashSet::new();
+            for cycle in cycles {
+                let mut key = cycle.clone();
+                key.sort_unstable();
+                if !seen.insert(key) {
+                    continue;
+                }
+                let lead = cycle
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|&(_, &local)| local)
+                    .map(|(pos, _)| pos)
+                    .unwrap_or(0);
+                let names = cycle[lead..]
+                    .iter()
+                    .chain(cycle[..lead].iter())
+                    .chain(std::iter::once(&cycle[lead]))
+                    .map(|&local| format!("'{}'", bindings[members[local]].name.text(source)))
+                    .collect::<Vec<_>>()
+                    .join(" -> ");
+                diags.push(Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!(
+                        "bindings {names} form an eager reference cycle; forcing any of them is infinite recursion"
+                    ),
+                    bindings[members[cycle[lead]]].name.range(),
+                ));
+            }
+        }
+    }
+}
+
+/// DFS visit state for [CircularLet]'s cycle scan.
+#[derive(Clone, Copy, PartialEq)]
+enum Color {
+    White,
+    Gray,
+    Black,
+}
+
+/// Depth-first cycle scan for [CircularLet]: a back-edge to a node
+/// still on the path stack closes a cycle, recorded as the stack slice
+/// from that node onward (edge order). Self-edges never enter the
+/// adjacency lists, so every recorded cycle has length >= 2; the guard
+/// here is belt and braces. Sibling groups are tiny, so recursion
+/// depth is bounded by the group size.
+fn cycle_dfs(
+    node: usize,
+    adj: &[Vec<usize>],
+    color: &mut [Color],
+    stack: &mut Vec<usize>,
+    cycles: &mut Vec<Vec<usize>>,
+) {
+    color[node] = Color::Gray;
+    stack.push(node);
+    for &next in &adj[node] {
+        match color[next] {
+            Color::Gray => {
+                let pos = stack
+                    .iter()
+                    .position(|&n| n == next)
+                    .expect("gray node is on the path stack");
+                if stack.len() - pos >= 2 {
+                    cycles.push(stack[pos..].to_vec());
+                }
+            }
+            Color::White => cycle_dfs(next, adj, color, stack, cycles),
+            Color::Black => {}
+        }
+    }
+    stack.pop();
+    color[node] = Color::Black;
+}
+
+/// Flags bindings that rebind `true`, `false`, or `null`.
+///
+/// Nix has no boolean keywords: `true`, `false`, and `null` are
+/// ordinary names bound in builtins, so `let true = false; in ...`
+/// parses and evaluates — and makes every later use of the name a
+/// lie. Every model binding counts (let, rec attr, lambda param,
+/// @-name, inherit). Plain attrset keys are NOT model bindings — a
+/// bare attrset binds nothing for resolution — so a legitimate data
+/// key like `{ true = 1; }` stays silent automatically.
+pub struct ReboundConstant;
+
+impl Rule for ReboundConstant {
+    fn code(&self) -> &'static str {
+        "rebound-constant"
+    }
+
+    fn name(&self) -> &'static str {
+        "Rebound constant"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags a binding named true, false, or null. Nix accepts `let true = false;` — the names are ordinary globals — but rebinding them makes every later use a lie."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let source = model.source();
+        for binding in model.bindings() {
+            let name = binding.name.text(source);
+            if matches!(name, "true" | "false" | "null") {
+                diags.push(Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!("binding rebinds the global constant '{name}'"),
+                    binding.name.range(),
+                ));
+            }
+        }
     }
 }

@@ -103,10 +103,10 @@ impl Rule for ManualInheritFrom {
         // so that `dev = cfg.devices.dev` -> `inherit (cfg.devices) dev;`
         // is a sound rewrite. A dynamic select like `cfg.devices.${name}`
         // is NOT a static attribute access and must not be flagged.
-        let mut elements = select_attrpath.elements();
+        let elements = select_attrpath.elements();
         let mut index: Option<&SyntaxToken> = None;
         let mut from_suffix = String::new();
-        while let Some(element) = elements.next() {
+        for element in elements {
             match element {
                 AttrName::Ident(token) => {
                     if let Some(prev) = index {

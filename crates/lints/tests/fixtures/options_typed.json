@@ -1,0 +1,12 @@
+{"options": {
+  "services.example.enable": {"type": "boolean"},
+  "services.example.port": {"type": "16 bit unsigned integer; between 0 and 65535 (both inclusive)"},
+  "services.example.name": {"type": "string"},
+  "services.example.dataDir": {"type": "path"},
+  "services.example.extras": {"type": "list of string"},
+  "services.example.settings": {"type": "attribute set of string"},
+  "services.example.banner": {"type": "null or string"},
+  "services.example.package": {"type": "package"},
+  "users.users.<name>.home": {"type": "path"},
+  "environment.etc.<name>.text": {"type": "strings concatenated with \"\\n\""}
+}}

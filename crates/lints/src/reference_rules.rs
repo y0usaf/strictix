@@ -280,7 +280,7 @@ impl Rule for UnknownBuiltin {
             }
             // A `builtins` that resolves to a binding is a shadowed
             // name, not the constant — skip.
-            if model.resolve(&base).is_some() {
+            if model.resolve(base).is_some() {
                 continue;
             }
             // Only the single-hop form `builtins.<name>` is this rule's
