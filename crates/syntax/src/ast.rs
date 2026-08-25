@@ -179,6 +179,46 @@ impl<'a> Expr<'a> {
         }
     }
 
+    /// The byte range of this expression with leading trivia trimmed.
+    ///
+    /// The parser flushes leading whitespace and comments into node
+    /// ranges; atoms are exact tokens already. Diagnostics and message
+    /// snippets want the trimmed span.
+    #[must_use]
+    pub fn content_range(&self) -> TextRange {
+        match self {
+            Self::Ident(t)
+            | Self::Int(t)
+            | Self::Float(t)
+            | Self::Path(t)
+            | Self::SearchPath(t)
+            | Self::Uri(t) => t.range(),
+            Self::Let(e) => e.syntax().content_range(),
+            Self::With(e) => e.syntax().content_range(),
+            Self::Assert(e) => e.syntax().content_range(),
+            Self::If(e) => e.syntax().content_range(),
+            Self::Attrset(e) => e.syntax().content_range(),
+            Self::RecAttrset(e) => e.syntax().content_range(),
+            Self::List(e) => e.syntax().content_range(),
+            Self::Lambda(e) => e.syntax().content_range(),
+            Self::Apply(e) => e.syntax().content_range(),
+            Self::Unary(e) => e.syntax().content_range(),
+            Self::Bin(e) => e.syntax().content_range(),
+            Self::Select(e) => e.syntax().content_range(),
+            Self::HasAttr(e) => e.syntax().content_range(),
+            Self::String(e) => e.syntax().content_range(),
+            Self::IndString(e) => e.syntax().content_range(),
+            Self::Paren(e) => e.syntax().content_range(),
+        }
+    }
+
+    /// The source text of this expression with leading trivia trimmed.
+    #[must_use]
+    pub fn content_text<'s>(&self, source: &'s str) -> &'s str {
+        let r = self.content_range();
+        &source[r.start() as usize..r.end() as usize]
+    }
+
     /// The source text of this expression.
     #[must_use]
     pub fn text<'s>(&self, source: &'s str) -> &'s str {
