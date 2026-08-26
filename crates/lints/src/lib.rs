@@ -49,7 +49,10 @@ use non_callable_application::NonCallableApplication;
 use path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
 use reference_rules::{UndefinedVariable, UnknownBuiltin};
 use schema::{OptionTypeMismatch, UnknownOption};
-use simplification_rules::{BooleanIf, NegationSimplification, TrivialLet};
+use simplification_rules::{
+    BooleanIf, ConstantBooleanBinop, ConstantBooleanNot, EmptyAttrsetMerge, IdentityLambda,
+    NegationSimplification, TrivialLet,
+};
 use strictix_core::rules::Rule;
 use style_rules::{
     CollapsibleLetIn, DeprecatedToPath, EmptyInherit, EmptyLetIn, EmptyListConcat, EmptyPattern,
@@ -127,6 +130,10 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         OptionTypeMismatch,
         UnknownLibType,
         BooleanIf,
+        ConstantBooleanNot,
+        ConstantBooleanBinop,
+        IdentityLambda,
+        EmptyAttrsetMerge,
         NegationSimplification,
         TrivialLet,
         ManualHasattr,

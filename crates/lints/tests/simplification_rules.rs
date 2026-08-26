@@ -5,7 +5,10 @@ use strictix_core::{
     rules::{run_rules, Rule},
     semantic::SemanticModel,
 };
-use strictix_lints::simplification_rules::{BooleanIf, NegationSimplification, TrivialLet};
+use strictix_lints::simplification_rules::{
+    BooleanIf, ConstantBooleanBinop, ConstantBooleanNot, EmptyAttrsetMerge, IdentityLambda,
+    NegationSimplification, TrivialLet,
+};
 use strictix_syntax::parse;
 
 fn run(source: &str, rule: Box<dyn Rule>) -> Vec<Diagnostic> {
@@ -30,6 +33,61 @@ fn fixed(source: &str, rule: Box<dyn Rule>) -> String {
     assert_eq!(diagnostics.len(), 1, "one diagnostic for {source}");
     let fix = diagnostics[0].fix.as_ref().expect("fix present");
     apply_fixes(source, &fix.edits).expect("fix applies")
+}
+
+// --- constant-boolean-not -------------------------------------------
+
+#[test]
+fn constant_boolean_not_reduces_literals() {
+    assert_eq!(fixed("!true", Box::new(ConstantBooleanNot {})), "false");
+    assert_eq!(fixed("!(false)", Box::new(ConstantBooleanNot {})), "true");
+    assert!(run("!x", Box::new(ConstantBooleanNot {})).is_empty());
+}
+
+// --- constant-boolean-binop -----------------------------------------
+
+#[test]
+fn constant_boolean_binop_reduces_boolean_literals() {
+    for (source, expected) in [
+        ("true && false", "false"),
+        ("false && true", "false"),
+        ("true || false", "true"),
+        ("false || false", "false"),
+    ] {
+        assert_eq!(fixed(source, Box::new(ConstantBooleanBinop {})), expected);
+    }
+    assert!(run("true && x", Box::new(ConstantBooleanBinop {})).is_empty());
+}
+
+// --- identity-lambda -------------------------------------------------
+
+#[test]
+fn identity_lambda_is_diagnostic_only() {
+    let diagnostics = run("x: x", Box::new(IdentityLambda {}));
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "identity-lambda");
+    assert!(diagnostics[0].fix.is_none());
+    assert!(run("x: y", Box::new(IdentityLambda {})).is_empty());
+    assert!(run("{ x }: x", Box::new(IdentityLambda {})).is_empty());
+}
+
+// --- empty-attrset-merge --------------------------------------------
+
+#[test]
+fn empty_attrset_merge_removes_empty_operand() {
+    assert_eq!(
+        fixed("{} // attrs", Box::new(EmptyAttrsetMerge {})),
+        "attrs"
+    );
+    assert_eq!(
+        fixed("attrs // {}", Box::new(EmptyAttrsetMerge {})),
+        "attrs"
+    );
+    assert_eq!(
+        fixed("{} // (a // b)", Box::new(EmptyAttrsetMerge {})),
+        "(a // b)"
+    );
+    assert!(run("a // b", Box::new(EmptyAttrsetMerge {})).is_empty());
 }
 
 // --- boolean-if ------------------------------------------------------

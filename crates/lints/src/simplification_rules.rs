@@ -13,8 +13,8 @@ use strictix_core::{
     rules::Rule,
 };
 use strictix_syntax::{
-    AstNode, AttrItem, AttrName, Expr, IfExpr, LetExpr, SyntaxKind, SyntaxNode, TextRange,
-    UnaryExpr,
+    AstNode, AttrItem, AttrName, BinExpr, Expr, IfExpr, LambdaExpr, LambdaParam, LetExpr,
+    SyntaxKind, SyntaxNode, TextRange, UnaryExpr,
 };
 
 use SyntaxKind as K;
@@ -359,6 +359,250 @@ impl Rule for TrivialLet {
                     .edit(node.content_range(), trimmed_text(value, source)),
             ),
         );
+    }
+}
+
+/// Flags `!true` and `!false`, which have a constant result.
+pub struct ConstantBooleanNot;
+
+impl Rule for ConstantBooleanNot {
+    fn code(&self) -> &'static str {
+        "constant-boolean-not"
+    }
+
+    fn name(&self) -> &'static str {
+        "Constant boolean negation"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags boolean negations with a constant operand: `!true` is `false` and `!false` is `true`."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn node_kind(&self) -> Option<SyntaxKind> {
+        Some(SyntaxKind::UnaryExpr)
+    }
+
+    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
+        let Some(unary) = UnaryExpr::cast(node) else {
+            return;
+        };
+        if !node.child_tokens().any(|t| t.kind() == K::Bang) {
+            return;
+        }
+        let Some(operand) = unary.operand() else {
+            return;
+        };
+        let Some(value) = bool_literal(operand, source) else {
+            return;
+        };
+        let replacement = if value { "false" } else { "true" };
+        diags.push(
+            Diagnostic::new(
+                self.code(),
+                self.severity(),
+                "boolean negation has a constant result",
+                node.content_range(),
+            )
+            .with_fix(
+                Fix::new("replace with the opposite boolean")
+                    .edit(node.content_range(), replacement),
+            ),
+        );
+    }
+}
+
+/// Flags boolean binary operators whose two operands are constants.
+pub struct ConstantBooleanBinop;
+
+impl Rule for ConstantBooleanBinop {
+    fn code(&self) -> &'static str {
+        "constant-boolean-binop"
+    }
+
+    fn name(&self) -> &'static str {
+        "Constant boolean operation"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags `&&` and `||` expressions whose two operands are boolean constants."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn node_kind(&self) -> Option<SyntaxKind> {
+        Some(SyntaxKind::BinExpr)
+    }
+
+    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
+        let Some(binary) = BinExpr::cast(node) else {
+            return;
+        };
+        let Some(op) = binary.op() else { return };
+        if !matches!(op, K::AndAnd | K::OrOr) {
+            return;
+        }
+        let (Some(lhs), Some(rhs)) = (binary.lhs(), binary.rhs()) else {
+            return;
+        };
+        let (Some(left), Some(right)) = (bool_literal(lhs, source), bool_literal(rhs, source))
+        else {
+            return;
+        };
+        let result = match op {
+            K::AndAnd => left && right,
+            K::OrOr => left || right,
+            _ => unreachable!("operator checked above"),
+        };
+        let replacement = if result { "true" } else { "false" };
+        diags.push(
+            Diagnostic::new(
+                self.code(),
+                self.severity(),
+                "boolean operation has a constant result",
+                node.content_range(),
+            )
+            .with_fix(
+                Fix::new("replace with the boolean result").edit(node.content_range(), replacement),
+            ),
+        );
+    }
+}
+
+/// Flags the identity lambda `x: x`.
+pub struct IdentityLambda;
+
+impl Rule for IdentityLambda {
+    fn code(&self) -> &'static str {
+        "identity-lambda"
+    }
+
+    fn name(&self) -> &'static str {
+        "Identity lambda"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags a lambda that returns its only argument unchanged: `x: x`."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn node_kind(&self) -> Option<SyntaxKind> {
+        Some(SyntaxKind::LambdaExpr)
+    }
+
+    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
+        let Some(lambda) = LambdaExpr::cast(node) else {
+            return;
+        };
+        let LambdaParam::Ident(param) = lambda.param() else {
+            return;
+        };
+        let Some(Expr::Ident(body)) = lambda.body() else {
+            return;
+        };
+        if param.text(source) != body.text(source) {
+            return;
+        }
+        diags.push(Diagnostic::new(
+            self.code(),
+            self.severity(),
+            "lambda returns its argument unchanged",
+            node.content_range(),
+        ));
+    }
+}
+
+/// Flags merges with an empty attribute set, which contributes no attributes.
+pub struct EmptyAttrsetMerge;
+
+impl Rule for EmptyAttrsetMerge {
+    fn code(&self) -> &'static str {
+        "empty-attrset-merge"
+    }
+
+    fn name(&self) -> &'static str {
+        "Empty attribute-set merge"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags merges where one operand is an empty attribute set: `{ } // attrs` and `attrs // { }` return the other operand."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn node_kind(&self) -> Option<SyntaxKind> {
+        Some(SyntaxKind::BinExpr)
+    }
+
+    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
+        let Some(binary) = BinExpr::cast(node) else {
+            return;
+        };
+        if binary.op() != Some(K::SlashSlash) {
+            return;
+        }
+        let (Some(lhs), Some(rhs)) = (binary.lhs(), binary.rhs()) else {
+            return;
+        };
+        let lhs_empty = is_empty_attrset(lhs);
+        let rhs_empty = is_empty_attrset(rhs);
+        if lhs_empty == rhs_empty {
+            return;
+        }
+        let kept = if lhs_empty { rhs } else { lhs };
+        let replacement = splice_operand(kept, source);
+        let has_comments = node.child_tokens().any(|t| t.kind() == K::Comment);
+        if has_comments {
+            diags.push(Diagnostic::new(
+                self.code(),
+                self.severity(),
+                "merge with an empty attribute set",
+                node.content_range(),
+            ));
+        } else {
+            diags.push(
+                Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    "merge with an empty attribute set",
+                    node.content_range(),
+                )
+                .with_fix(
+                    Fix::new("remove the empty attribute set")
+                        .edit(node.content_range(), replacement),
+                ),
+            );
+        }
+    }
+}
+
+fn is_empty_attrset(expr: Expr<'_>) -> bool {
+    match unwrap_parens(expr) {
+        Expr::Attrset(set) => set.items().next().is_none(),
+        _ => false,
+    }
+}
+
+fn splice_operand(expr: Expr<'_>, source: &str) -> String {
+    let text = trimmed_text(expr, source);
+    match expr {
+        Expr::Bin(_)
+        | Expr::If(_)
+        | Expr::Let(_)
+        | Expr::Lambda(_)
+        | Expr::With(_)
+        | Expr::Assert(_) => format!("({text})"),
+        _ => text.to_owned(),
     }
 }
 
