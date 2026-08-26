@@ -92,6 +92,21 @@ fn builtin_arity_checks_missing_and_extra_arguments() {
     );
     assert!(codes("builtins.length xs", one(BuiltinArity)).is_empty());
     assert!(codes("builtins.elem", one(BuiltinArity)).is_empty());
+
+    // A complete application contains partial applications in its syntax tree.
+    // Only the outer application represents the call being checked.
+    assert!(codes(
+        r#"builtins.concatStringsSep " " ["a" "b"]"#,
+        one(BuiltinArity)
+    )
+    .is_empty());
+    assert!(codes(
+        r#"builtins.replaceStrings ["a"] ["b"] "a""#,
+        one(BuiltinArity)
+    )
+    .is_empty());
+    assert!(codes("builtins.filter (x: x > 1) [1 2]", one(BuiltinArity)).is_empty());
+    assert!(codes("builtins.map (x: x + 1) [1 2]", one(BuiltinArity)).is_empty());
 }
 
 #[test]

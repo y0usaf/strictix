@@ -237,7 +237,19 @@ impl Rule for BuiltinArity {
     }
     fn check_file(&self, m: &SemanticModel, _: &LintConfig, d: &mut Vec<Diagnostic>) {
         let source = m.source();
-        for n in nodes(m.root(), SyntaxKind::ApplyExpr) {
+        let apply_nodes: Vec<_> = nodes(m.root(), SyntaxKind::ApplyExpr).collect();
+        for n in apply_nodes.iter().copied() {
+            // A chained call has one ApplyExpr per argument. Check only the
+            // outermost node, because inner nodes are valid partial functions.
+            let range = n.range();
+            if apply_nodes.iter().any(|candidate| {
+                let candidate_range = candidate.range();
+                candidate_range != range
+                    && candidate_range.start() <= range.start()
+                    && candidate_range.end() >= range.end()
+            }) {
+                continue;
+            }
             let Some(apply) = ApplyExpr::cast(n) else {
                 continue;
             };
