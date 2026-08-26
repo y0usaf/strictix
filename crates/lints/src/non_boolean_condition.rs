@@ -31,8 +31,8 @@ impl Rule for NonBooleanCondition {
     fn check_file(&self, model: &SemanticModel, _: &LintConfig, diags: &mut Vec<Diagnostic>) {
         for node in model.root().descendants() {
             let condition = match node.kind() {
-                K::IfExpr => IfExpr::cast(&node).and_then(|expr| expr.cond()),
-                K::AssertExpr => AssertExpr::cast(&node).and_then(|expr| expr.cond()),
+                K::IfExpr => IfExpr::cast(node).and_then(|expr| expr.cond()),
+                K::AssertExpr => AssertExpr::cast(node).and_then(|expr| expr.cond()),
                 _ => None,
             };
             let Some(mut condition) = condition else {
