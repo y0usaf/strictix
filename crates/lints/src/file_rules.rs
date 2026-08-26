@@ -15,8 +15,8 @@ use strictix_core::fix::Fix;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::{BindingKind, ScopeId, SemanticModel};
 use strictix_syntax::{
-    AstNode, AttrItem, AttrName, Binding, Expr, Formals, InheritStmt, LambdaExpr, LambdaParam,
-    SelectExpr, SyntaxKind, SyntaxNode, TextRange, WithExpr,
+    AstNode, AttrItem, AttrName, BinExpr, Binding, Expr, Formals, InheritStmt, LambdaExpr,
+    LambdaParam, SelectExpr, SyntaxKind, SyntaxNode, TextRange, WithExpr,
 };
 /// The innermost [Binding] node whose range contains `name_range`, if
 /// any. Bindings nest when a value contains a `let` or attrset, so a
@@ -48,6 +48,89 @@ fn containing_formals<'a>(root: &'a SyntaxNode, name_range: TextRange) -> Option
         .filter(|n| n.kind() == SyntaxKind::Formals && n.range().contains(start))
         .min_by_key(|n| n.range().end() - n.range().start())
         .and_then(Formals::cast)
+}
+
+/// Maximum allowed cyclomatic complexity for one lambda.
+///
+/// Complexity starts at one and increases for each independent decision
+/// path. Nested lambdas are measured separately, so an inner function does
+/// not inflate the score of its enclosing function.
+pub const MAX_CYCLOMATIC_COMPLEXITY: usize = 5;
+
+/// Counts decision points in one lambda, excluding nested lambdas.
+fn lambda_complexity(lambda: LambdaExpr<'_>) -> usize {
+    fn walk(node: &SyntaxNode, root_start: u32, score: &mut usize) {
+        if node.kind() == SyntaxKind::LambdaExpr && node.range().start() != root_start {
+            return;
+        }
+        match node.kind() {
+            SyntaxKind::IfExpr | SyntaxKind::AssertExpr | SyntaxKind::HasAttrExpr => *score += 1,
+            SyntaxKind::BinExpr => {
+                if BinExpr::cast(node)
+                    .and_then(|expr| expr.op())
+                    .is_some_and(|op| matches!(op, SyntaxKind::AndAnd | SyntaxKind::OrOr))
+                {
+                    *score += 1;
+                }
+            }
+            SyntaxKind::SelectExpr => {
+                if SelectExpr::cast(node).is_some_and(|expr| expr.default().is_some()) {
+                    *score += 1;
+                }
+            }
+            _ => {}
+        }
+        for child in node.child_nodes() {
+            walk(child, root_start, score);
+        }
+    }
+
+    let mut decisions = 0;
+    let root = lambda.syntax();
+    for child in root.child_nodes() {
+        walk(child, root.range().start(), &mut decisions);
+    }
+    decisions + 1
+}
+
+/// Flags lambdas whose independent decision paths exceed the maintainability threshold.
+pub struct CyclomaticComplexity;
+
+impl Rule for CyclomaticComplexity {
+    fn code(&self) -> &'static str {
+        "cyclomatic-complexity"
+    }
+
+    fn name(&self) -> &'static str {
+        "Cyclomatic complexity"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags lambdas with more than 5 independent decision paths. Each if, assert, boolean short-circuit, attribute test, and `or` fallback adds one path. Nested lambdas are measured separately."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        for node in model.root().descendants() {
+            let Some(lambda) = LambdaExpr::cast(node) else {
+                continue;
+            };
+            let complexity = lambda_complexity(lambda);
+            if complexity > MAX_CYCLOMATIC_COMPLEXITY {
+                diags.push(Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!(
+                        "lambda has cyclomatic complexity {complexity}; maximum is {MAX_CYCLOMATIC_COMPLEXITY}"
+                    ),
+                    lambda.syntax().content_range(),
+                ));
+            }
+        }
+    }
 }
 
 /// Flags `let` bindings that are never referenced.

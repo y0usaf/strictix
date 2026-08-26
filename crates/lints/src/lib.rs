@@ -38,9 +38,9 @@ use duplicate_attr::DuplicateAttribute;
 use duplicate_formal::DuplicateFormal;
 use duplicate_inherit::DuplicateInherit;
 use file_rules::{
-    CircularLet, ImportCycle, MissingImport, ReboundConstant, RedundantWith, SelfReferentialLet,
-    ShadowedBinding, ShadowedFormal, UnnecessaryOr, UnusedFormal, UnusedInherit, UnusedLambdaParam,
-    UnusedLetBinding,
+    CircularLet, CyclomaticComplexity, ImportCycle, MissingImport, ReboundConstant, RedundantWith,
+    SelfReferentialLet, ShadowedBinding, ShadowedFormal, UnnecessaryOr, UnusedFormal,
+    UnusedInherit, UnusedLambdaParam, UnusedLetBinding,
 };
 use ill_typed_binop::IllTypedBinop;
 use ill_typed_unary_op::IllTypedUnaryOp;
@@ -130,6 +130,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         RedundantBooleanComparison,
         DuplicateLiteralListItem,
         CircularLet,
+        CyclomaticComplexity,
         ReboundConstant,
         CoercedInterpolation,
         RedundantInterpolation,

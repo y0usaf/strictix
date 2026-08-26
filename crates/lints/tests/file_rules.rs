@@ -12,8 +12,8 @@ use strictix_core::diagnostic::Diagnostic;
 use strictix_core::rules::{run_rules, Rule};
 use strictix_core::semantic::SemanticModel;
 use strictix_lints::file_rules::{
-    CircularLet, ReboundConstant, RedundantWith, SelfReferentialLet, ShadowedBinding,
-    UnnecessaryOr, UnusedFormal, UnusedLambdaParam, UnusedLetBinding,
+    CircularLet, CyclomaticComplexity, ReboundConstant, RedundantWith, SelfReferentialLet,
+    ShadowedBinding, UnnecessaryOr, UnusedFormal, UnusedLambdaParam, UnusedLetBinding,
 };
 use strictix_lints::schema::UnknownOption;
 use strictix_syntax::parse;
@@ -72,6 +72,46 @@ fn fixture(name: &str) -> String {
 
 fn schema_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/options.json")
+}
+
+// --- cyclomatic-complexity ------------------------------------------
+
+#[test]
+fn cyclomatic_complexity_flags_more_than_five_paths() {
+    let source = "x: if a then if b then if c then if d then if e then if f then if g then if h then if i then if j then if k then 1 else 2 else 3 else 4 else 5 else 6 else 7 else 8 else 9 else 10 else 11";
+    assert_eq!(
+        run(source, &[Box::new(CyclomaticComplexity {})], LintConfig::default()),
+        ["[cyclomatic-complexity] warning 0..186 lambda has cyclomatic complexity 12; maximum is 5"]
+    );
+}
+
+#[test]
+fn cyclomatic_complexity_counts_boolean_and_attribute_decisions() {
+    let source = "x: a && b || c && d || e && f || g && h || i && j || k ? x or y";
+    assert_eq!(
+        run(source, &[Box::new(CyclomaticComplexity {})], LintConfig::default()),
+        ["[cyclomatic-complexity] warning 0..58 lambda has cyclomatic complexity 12; maximum is 5"]
+    );
+}
+
+#[test]
+fn cyclomatic_complexity_measures_nested_lambdas_separately() {
+    let source = "outer: inner: if a then if b then if c then if d then if e then if f then if g then if h then if i then if j then if k then 1 else 2 else 3 else 4 else 5 else 6 else 7 else 8 else 9 else 10 else 11";
+    assert_eq!(
+        run(source, &[Box::new(CyclomaticComplexity {})], LintConfig::default()),
+        ["[cyclomatic-complexity] warning 7..197 lambda has cyclomatic complexity 12; maximum is 5"]
+    );
+}
+
+#[test]
+fn cyclomatic_complexity_allows_five_paths() {
+    let source = "x: if a then if b then if c then if d then 1 else 2 else 3 else 4 else 5";
+    assert!(run(
+        source,
+        &[Box::new(CyclomaticComplexity {})],
+        LintConfig::default()
+    )
+    .is_empty());
 }
 
 // --- unused-let-binding ---------------------------------------------
