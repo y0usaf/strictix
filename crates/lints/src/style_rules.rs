@@ -613,6 +613,74 @@ fn is_primary(expr: Expr<'_>) -> bool {
 
 pub struct EmptyListConcat;
 
+/// Flags concatenation of two singleton lists, which can be written as one
+/// list containing both elements.
+pub struct SingletonListConcat;
+
+impl Rule for SingletonListConcat {
+    fn code(&self) -> &'static str {
+        "singleton-list-concat"
+    }
+    fn name(&self) -> &'static str {
+        "Singleton-list concatenation"
+    }
+    fn description(&self) -> &'static str {
+        "Flags `[a] ++ [b]`, which is equivalent to `[a b]`. The fix is withheld when comments occur inside the lists, because moving list elements could change comment ownership."
+    }
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+    fn node_kind(&self) -> Option<K> {
+        Some(K::BinExpr)
+    }
+    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
+        let Some(bin) = BinExpr::cast(node) else {
+            return;
+        };
+        if bin.op() != Some(K::PlusPlus) {
+            return;
+        }
+        let (Some(Expr::List(left)), Some(Expr::List(right))) = (bin.lhs(), bin.rhs()) else {
+            return;
+        };
+        let mut left_items = left.items();
+        let Some(left_item) = left_items.next() else {
+            return;
+        };
+        if left_items.next().is_some() {
+            return;
+        }
+        let mut right_items = right.items();
+        let Some(right_item) = right_items.next() else {
+            return;
+        };
+        if right_items.next().is_some() {
+            return;
+        }
+        let has_comments = node
+            .descendants()
+            .flat_map(SyntaxNode::child_tokens)
+            .any(|token| token.kind() == K::Comment);
+        let mut diagnostic = Diagnostic::new(
+            self.code(),
+            self.severity(),
+            "concatenation of singleton lists can be one list",
+            node.content_range(),
+        );
+        if !has_comments {
+            let replacement = format!(
+                "[{} {}]",
+                left_item.text(source).trim(),
+                right_item.text(source).trim()
+            );
+            diagnostic = diagnostic.with_fix(
+                Fix::new("combine singleton lists").edit(node.content_range(), replacement),
+            );
+        }
+        diags.push(diagnostic);
+    }
+}
+
 impl Rule for EmptyListConcat {
     fn code(&self) -> &'static str {
         "empty-list-concat"

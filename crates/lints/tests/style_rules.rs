@@ -15,11 +15,11 @@ use strictix_core::{
 use strictix_lints::style_rules::{
     CollapsibleLetIn, DeprecatedToPath, EmptyInherit, EmptyLetIn, EmptyListConcat, EmptyPattern,
     EtaReduction, ManualInherit, ManualInheritFrom, RedundantPatternBind, RepeatedKeys,
-    UnquotedUri, UselessHasAttr, UselessParens,
+    SingletonListConcat, UnquotedUri, UselessHasAttr, UselessParens,
 };
 use strictix_syntax::parse;
 
-/// All fifteen style rules.
+/// All sixteen style rules.
 fn all_rules() -> Vec<Box<dyn Rule>> {
     vec![
         Box::new(EmptyLetIn {}),
@@ -33,13 +33,14 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(DeprecatedToPath {}),
         Box::new(UselessHasAttr {}),
         Box::new(EmptyListConcat {}),
+        Box::new(SingletonListConcat {}),
         Box::new(UselessParens {}),
         Box::new(RepeatedKeys {}),
         Box::new(UnquotedUri {}),
     ]
 }
 
-/// Parse `source` and run all fifteen style rules with an empty config.
+/// Parse `source` and run all sixteen style rules with an empty config.
 ///
 /// Diagnostics are sorted by (start, end) so results are in source
 /// order, then rendered as the contract one-line format.
@@ -332,6 +333,33 @@ fn useless_has_attr_fix_uses_or() {
         fix_result("if x ? a then x.a else 0", "useless-has-attr"),
         "x.a or 0",
     );
+}
+
+// --- singleton-list-concat ------------------------------------------
+
+#[test]
+fn singleton_list_concat_combines_lists() {
+    assert_eq!(fix_result("[a] ++ [b]", "singleton-list-concat"), "[a b]");
+}
+
+#[test]
+fn singleton_list_concat_requires_two_singletons() {
+    for source in ["[] ++ [b]", "[a c] ++ [b]", "[a] ++ values"] {
+        assert!(run(source)
+            .iter()
+            .all(|line| !line.contains("singleton-list-concat")));
+    }
+}
+
+#[test]
+fn singleton_list_concat_reports_comments_without_fix() {
+    let source = "[ # left\n  a\n] ++ [b]";
+    let diagnostics: Vec<_> = run_rules_only(source)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code == "singleton-list-concat")
+        .collect();
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0].fix.is_none());
 }
 
 // --- empty-list-concat -----------------------------------------------

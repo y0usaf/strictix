@@ -46,7 +46,7 @@ use ill_typed_binop::IllTypedBinop;
 use ill_typed_unary_op::IllTypedUnaryOp;
 use interpolation_rules::{CoercedInterpolation, RedundantInterpolation};
 use lib_type_rules::UnknownLibType;
-use node_rules::{AssertTrue, ConstantIf, Tautology};
+use node_rules::{AssertTrue, ConstantIf, ConstantIfBranches, Tautology};
 use non_boolean_condition::NonBooleanCondition;
 use non_callable_application::NonCallableApplication;
 use path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
@@ -60,7 +60,7 @@ use strictix_core::rules::Rule;
 use style_rules::{
     CollapsibleLetIn, DeprecatedToPath, EmptyInherit, EmptyLetIn, EmptyListConcat, EmptyPattern,
     EtaReduction, ManualInherit, ManualInheritFrom, RedundantPatternBind, RepeatedKeys,
-    UnquotedUri, UselessHasAttr, UselessParens,
+    SingletonListConcat, UnquotedUri, UselessHasAttr, UselessParens,
 };
 use suggested_rules::{
     AssertFalse, DuplicateLiteralListItem, LiteralDivisionByZero, RedundantBooleanComparison,
@@ -83,6 +83,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         UnreachableBranch,
         UnsafeWithShadowing,
         ConstantIf,
+        ConstantIfBranches,
         AssertTrue,
         Tautology,
         UnusedLetBinding,
@@ -108,6 +109,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         DeprecatedToPath,
         UselessHasAttr,
         EmptyListConcat,
+        SingletonListConcat,
         UselessParens,
         RepeatedKeys,
         UnquotedUri,

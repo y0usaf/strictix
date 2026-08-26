@@ -11,7 +11,7 @@ use strictix_core::{
     rules::{run_rules, Rule},
     semantic::SemanticModel,
 };
-use strictix_lints::node_rules::{AssertTrue, ConstantIf, Tautology};
+use strictix_lints::node_rules::{AssertTrue, ConstantIf, ConstantIfBranches, Tautology};
 use strictix_syntax::parse;
 
 /// Parse `source` and run all three node rules with an empty config.
@@ -109,6 +109,34 @@ fn constant_if_fix_false_replaces_with_else_branch() {
     assert_eq!(fix.label, "replace with else branch");
     let result = apply_fixes(source, &fix.edits).expect("fix applies");
     assert_eq!(result, "2");
+}
+
+// --- constant-if-branches ------------------------------------------
+
+#[test]
+fn constant_if_branches_flags_same_literal_without_fix() {
+    let source = "if condition then 1.5 else 1.5";
+    let diags = run_rules_only(source, vec![Box::new(ConstantIfBranches {})]);
+    assert_eq!(diags.len(), 1);
+    assert_eq!(diags[0].code, "constant-if-branches");
+    assert!(diags[0].fix.is_none());
+}
+
+#[test]
+fn constant_if_branches_does_not_overlap_boolean_if() {
+    let source = "if condition then true else true";
+    assert!(run_rules_only(source, vec![Box::new(ConstantIfBranches {})]).is_empty());
+}
+
+#[test]
+fn constant_if_branches_skips_non_literals_and_different_literals() {
+    for source in [
+        "if condition then value else value",
+        "if condition then 1 else 2",
+        "if condition then f 1 else f 1",
+    ] {
+        assert!(run_rules_only(source, vec![Box::new(ConstantIfBranches {})]).is_empty());
+    }
 }
 
 // --- assert-true ----------------------------------------------------
