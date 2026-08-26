@@ -66,6 +66,9 @@ fn dynamic_import_fires_for_interpolated_paths() {
         vec!["dynamic-import"]
     );
     assert!(codes("import ./module.nix", one(DynamicImport)).is_empty());
+    assert!(codes("import inputs.nixpkgs", one(DynamicImport)).is_empty());
+    assert!(codes("import (toString inputs.nixpkgs)", one(DynamicImport)).is_empty());
+    assert!(codes("import (toString flakeInputs.deno2nix)", one(DynamicImport)).is_empty());
 }
 
 #[test]
@@ -121,4 +124,10 @@ fn suspicious_import_argument_fires_for_non_path_literals() {
         vec!["suspicious-import-argument"]
     );
     assert!(codes("import ./module.nix", one(SuspiciousImportArgument)).is_empty());
+    assert!(codes("import inputs.nixpkgs", one(SuspiciousImportArgument)).is_empty());
+    assert!(codes(
+        "import (toString inputs.nixpkgs)",
+        one(SuspiciousImportArgument)
+    )
+    .is_empty());
 }

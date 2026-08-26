@@ -10,6 +10,23 @@ use strictix_syntax::{
     ApplyExpr, AstNode, AttrItem, Expr, IfExpr, ListExpr, RecAttrsetExpr, SyntaxKind,
 };
 
+fn is_trackable_flake_input(raw: &str) -> bool {
+    let raw = raw.trim();
+    let raw = raw.strip_prefix('(').unwrap_or(raw).trim();
+    let raw = raw.strip_suffix(')').unwrap_or(raw).trim();
+    let raw = raw.strip_prefix("toString").unwrap_or(raw).trim();
+    let Some((root, rest)) = raw.split_once('.') else {
+        return false;
+    };
+    if root != "inputs" && root != "flakeInputs" {
+        return false;
+    };
+    !rest.is_empty()
+        && rest
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+}
+
 fn nodes(
     root: &strictix_syntax::SyntaxNode,
     kind: SyntaxKind,
@@ -152,7 +169,8 @@ impl Rule for DynamicImport {
                 || raw.starts_with("/")
                 || raw.starts_with("~")
                 || raw.starts_with('"')
-                || raw.starts_with("\'\'");
+                || raw.starts_with("\'\'")
+                || is_trackable_flake_input(raw);
             if !static_ok {
                 d.push(Diagnostic::new(
                     self.code(),
@@ -350,9 +368,11 @@ impl Rule for SuspiciousImportArgument {
         for site in m.import_sites() {
             let raw =
                 m.source()[site.path_range.start() as usize..site.path_range.end() as usize].trim();
-            if raw.chars().next().is_some_and(|c| {
+            let literal_is_invalid = raw.chars().next().is_some_and(|c| {
                 c.is_ascii_digit() || c.is_ascii_alphabetic() || c == '{' || c == '['
-            }) {
+            });
+            let is_trackable = is_trackable_flake_input(raw);
+            if literal_is_invalid && !is_trackable {
                 d.push(Diagnostic::new(
                     self.code(),
                     self.severity(),
