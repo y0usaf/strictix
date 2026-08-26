@@ -21,16 +21,41 @@ use strictix_core::fix::Fix;
 use strictix_core::json::JsonValue;
 use strictix_syntax::TextRange;
 
-/// Enable ANSI styling only for interactive output, unless NO_COLOR is set.
+/// Standard ANSI styles inherit the terminal's configured color palette.
+struct Theme {
+    error: &'static str,
+    warning: &'static str,
+    rule: &'static str,
+    path: &'static str,
+    help: &'static str,
+    added: &'static str,
+    removed: &'static str,
+    clean: &'static str,
+}
+
+const TERMINAL: Theme = Theme {
+    error: "31;1",
+    warning: "33",
+    rule: "35",
+    path: "36;1",
+    help: "36",
+    added: "32",
+    removed: "31",
+    clean: "32",
+};
+
+/// Enable terminal colors only for interactive output, unless NO_COLOR is set.
 #[must_use]
 pub fn color_enabled() -> bool {
     std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
 }
 
-fn severity_color(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Warning => "33",
-        Severity::Error => "31;1",
+impl Theme {
+    fn severity(&self, severity: Severity) -> &'static str {
+        match severity {
+            Severity::Warning => self.warning,
+            Severity::Error => self.error,
+        }
     }
 }
 
@@ -62,19 +87,19 @@ pub fn one_line(diag: &Diagnostic) -> String {
 #[must_use]
 pub fn human(diag: &Diagnostic, path: &str, source: &str, color: bool) -> String {
     let (line, col) = line_col(source, diag.range.start());
-    let severity = paint(color, severity_color(diag.severity), diag.severity_str());
-    let code = paint(color, "35", diag.code);
-    let path = paint(color, "36;1", path);
+    let severity = paint(color, TERMINAL.severity(diag.severity), diag.severity_str());
+    let code = paint(color, TERMINAL.rule, diag.code);
+    let path = paint(color, TERMINAL.path, path);
     let mut out = format!("{path}:{line}:{col}: {severity}[{code}]: {}", diag.message);
     if let Some((text, caret)) = source_excerpt(source, diag.range) {
         out.push('\n');
         out.push_str(text);
         out.push('\n');
-        out.push_str(&paint(color, severity_color(diag.severity), &caret));
+        out.push_str(&paint(color, TERMINAL.severity(diag.severity), &caret));
     }
     if let Some(help) = &diag.help {
         out.push_str("\n  ");
-        out.push_str(&paint(color, "36", "help:"));
+        out.push_str(&paint(color, TERMINAL.help, "help:"));
         out.push(' ');
         out.push_str(help);
     }
@@ -213,9 +238,13 @@ pub struct JsonFile {
 #[must_use]
 pub fn summary_line(files: usize, diagnostics: usize, color: bool) -> String {
     let diag_part = if diagnostics == 0 {
-        paint(color, "32", "0 diagnostics found")
+        paint(color, TERMINAL.clean, "0 diagnostics found")
     } else {
-        paint(color, "33", format!("{diagnostics} diagnostic(s) found"))
+        paint(
+            color,
+            TERMINAL.warning,
+            format!("{diagnostics} diagnostic(s) found"),
+        )
     };
     format!("{files} file(s) linted, {diag_part}")
 }
@@ -243,10 +272,10 @@ pub fn diff(before: &str, after: &str, color: bool) -> String {
 
     let mut out = String::new();
     for line in &a[start..a_end] {
-        out.push_str(&paint(color, "31", format!("-{}\n", line)));
+        out.push_str(&paint(color, TERMINAL.removed, format!("-{}\n", line)));
     }
     for line in &b[start..b_end] {
-        out.push_str(&paint(color, "32", format!("+{}\n", line)));
+        out.push_str(&paint(color, TERMINAL.added, format!("+{}\n", line)));
     }
     out
 }
