@@ -10,6 +10,7 @@ pub mod bare_import_in_list;
 pub mod call_simplification;
 pub mod duplicate_attr;
 pub mod duplicate_formal;
+pub mod duplicate_inherit;
 pub mod file_rules;
 pub mod ill_typed_binop;
 pub mod ill_typed_unary_op;
@@ -35,9 +36,11 @@ use call_simplification::{
 };
 use duplicate_attr::DuplicateAttribute;
 use duplicate_formal::DuplicateFormal;
+use duplicate_inherit::DuplicateInherit;
 use file_rules::{
     CircularLet, ImportCycle, MissingImport, ReboundConstant, RedundantWith, SelfReferentialLet,
-    ShadowedBinding, UnusedFormal, UnusedLambdaParam, UnusedLetBinding,
+    ShadowedBinding, ShadowedFormal, UnusedFormal, UnusedInherit, UnusedLambdaParam,
+    UnusedLetBinding,
 };
 use ill_typed_binop::IllTypedBinop;
 use ill_typed_unary_op::IllTypedUnaryOp;
@@ -85,7 +88,9 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         UnusedLetBinding,
         UnusedLambdaParam,
         UnusedFormal,
+        UnusedInherit,
         ShadowedBinding,
+        ShadowedFormal,
         RedundantWith,
         SelfReferentialLet,
         UndefinedVariable,
@@ -107,6 +112,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         UnquotedUri,
         DuplicateAttribute,
         DuplicateFormal,
+        DuplicateInherit,
         NonBooleanCondition,
         IllTypedBinop,
         IllTypedUnaryOp,

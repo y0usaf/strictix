@@ -15,8 +15,8 @@ use strictix_core::fix::Fix;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::{BindingKind, ScopeId, SemanticModel};
 use strictix_syntax::{
-    AstNode, Binding, Expr, Formals, LambdaExpr, LambdaParam, SyntaxKind, SyntaxNode, TextRange,
-    WithExpr,
+    AstNode, Binding, Expr, Formals, InheritStmt, LambdaExpr, LambdaParam, SyntaxKind, SyntaxNode,
+    TextRange, WithExpr,
 };
 /// The innermost [Binding] node whose range contains `name_range`, if
 /// any. Bindings nest when a value contains a `let` or attrset, so a
@@ -203,6 +203,101 @@ impl Rule for UnusedLambdaParam {
 /// so only `_`-prefixed names are exempt otherwise.
 pub struct UnusedFormal;
 
+/// Flags inherited names that are never referenced by the surrounding
+/// recursive scope. In a plain attrset, the inherited field is the value
+/// produced by that attrset, so the binding has no local use to inspect.
+pub struct UnusedInherit;
+
+impl Rule for UnusedInherit {
+    fn code(&self) -> &'static str {
+        "unused-inherit"
+    }
+    fn name(&self) -> &'static str {
+        "Unused inherit"
+    }
+    fn description(&self) -> &'static str {
+        "Flags inherited names that are never used by the recursive scope that contains them."
+    }
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        for node in model.root().descendants() {
+            let Some(inherit) = InheritStmt::cast(node) else {
+                continue;
+            };
+            for name_token in inherit.names() {
+                let Some(binding) = model
+                    .bindings()
+                    .iter()
+                    .find(|binding| binding.name.range() == name_token.range())
+                else {
+                    continue;
+                };
+                // A sourceless inherit in a recursive attrset resolves its
+                // own name while building the output field. That is not a
+                // use of the inherited value.
+                let used_elsewhere = binding
+                    .references
+                    .iter()
+                    .any(|range| *range != name_token.range());
+                if used_elsewhere {
+                    continue;
+                }
+                let name = name_token.text(model.source());
+                if name.starts_with('_') {
+                    continue;
+                }
+                diags.push(Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!("inherited name '{name}' is never used"),
+                    name_token.range(),
+                ));
+            }
+        }
+    }
+}
+
+/// Flags a formal parameter that hides a visible outer binding.
+pub struct ShadowedFormal;
+
+impl Rule for ShadowedFormal {
+    fn code(&self) -> &'static str {
+        "shadowed-formal"
+    }
+    fn name(&self) -> &'static str {
+        "Shadowed formal parameter"
+    }
+    fn description(&self) -> &'static str {
+        "Flags a formal parameter whose name shadows an outer binding."
+    }
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        for binding in model.bindings() {
+            if binding.kind != BindingKind::LambdaParam
+                || !inside_formals(model.root(), binding.name.range())
+            {
+                continue;
+            }
+            let name = binding.name.text(model.source());
+            if name.starts_with('_') || model.outer_shadow(binding).is_none() {
+                continue;
+            }
+            diags.push(Diagnostic::new(
+                self.code(),
+                self.severity(),
+                format!("formal parameter '{name}' shadows an outer binding"),
+                binding.name.range(),
+            ));
+        }
+    }
+}
+
 impl Rule for UnusedFormal {
     fn code(&self) -> &'static str {
         "unused-formal"
@@ -284,8 +379,12 @@ impl Rule for ShadowedBinding {
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         for binding in model.bindings() {
             // InheritName binds only as a field of a fresh (non-rec) attrset;
-            // it never hides anything, so it cannot shadow.
-            if binding.kind == BindingKind::InheritName {
+            // it never hides anything, so it cannot shadow. Formal parameters
+            // have their own diagnostic owner in ShadowedFormal.
+            if binding.kind == BindingKind::InheritName
+                || (binding.kind == BindingKind::LambdaParam
+                    && inside_formals(model.root(), binding.name.range()))
+            {
                 continue;
             }
             let name = binding.name.text(model.source());

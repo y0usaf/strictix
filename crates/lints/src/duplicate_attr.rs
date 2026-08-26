@@ -46,6 +46,8 @@ struct StaticAttr {
     /// value. Only such leaves legally merge with dotted children in
     /// Nix, so they are exempt from prefix collisions.
     is_attrset_literal: bool,
+    /// Duplicate inherit names belong to `duplicate-inherit`.
+    is_inherit: bool,
 }
 
 /// Flags an attribute path defined twice inside one binding container.
@@ -111,7 +113,7 @@ fn check_container<'a>(
                     binding.value(),
                     Some(Expr::Attrset(_)) | Some(Expr::RecAttrset(_))
                 );
-                record(path, range, is_attrset_literal, &mut seen, diags);
+                record(path, range, is_attrset_literal, false, &mut seen, diags);
             }
             AttrItem::Inherit(inherit) => {
                 // `inherit a;` binds the one-element path `a`; `inherit
@@ -123,6 +125,7 @@ fn check_container<'a>(
                         vec![name.text(source).to_string()],
                         name.range(),
                         false,
+                        true,
                         &mut seen,
                         diags,
                     );
@@ -174,13 +177,14 @@ fn record(
     path: Vec<String>,
     range: TextRange,
     is_attrset_literal: bool,
+    is_inherit: bool,
     seen: &mut Vec<StaticAttr>,
     diags: &mut Vec<Diagnostic>,
 ) {
     let mut message: Option<String> = None;
     // (a) an identical full static path bound more than once.
     for prior in seen.iter() {
-        if prior.path == path {
+        if prior.path == path && !(prior.is_inherit && is_inherit) {
             message = Some(path.join("."));
             break;
         }
@@ -218,6 +222,7 @@ fn record(
     seen.push(StaticAttr {
         path,
         is_attrset_literal,
+        is_inherit,
     });
 }
 
