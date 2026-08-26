@@ -78,12 +78,31 @@ fn import_in_list_fires_for_direct_import_items() {
 }
 
 #[test]
-fn builtin_arity_fires_for_extra_fixed_builtin_arguments() {
+fn builtin_arity_checks_missing_and_extra_arguments() {
     assert_eq!(
         codes("builtins.length xs extra", one(BuiltinArity)),
         vec!["builtin-arity"]
     );
+    assert_eq!(
+        codes("builtins.elem x", one(BuiltinArity)),
+        vec!["builtin-arity"]
+    );
     assert!(codes("builtins.length xs", one(BuiltinArity)).is_empty());
+    assert!(codes("builtins.elem", one(BuiltinArity)).is_empty());
+}
+
+#[test]
+fn builtin_arity_skips_shadowed_and_with_provided_builtins() {
+    assert!(codes(
+        "let builtins = { length = x: x; }; in builtins.length",
+        one(BuiltinArity)
+    )
+    .is_empty());
+    assert!(codes(
+        "with { builtins = { length = x: x; }; }; builtins.length",
+        one(BuiltinArity)
+    )
+    .is_empty());
 }
 
 #[test]

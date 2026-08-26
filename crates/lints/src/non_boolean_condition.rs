@@ -1,22 +1,14 @@
-//! A node rule that flags if-expressions whose condition is statically
-//! a non-boolean literal.
-//!
-//! Nix has no truthiness: an `if <cond>` requires the condition to be a
-//! boolean, and any non-boolean literal there always fails at runtime
-//! with "attempt to use ... as a boolean". Because the evaluator is
-//! lazy, that error is only raised when the bad branch is actually
-//! forced, so it can lurk undetected. This rule catches the literal
-//! cases that are certain.
+//! Flags conditions that are certain to fail the Nix boolean check.
 
 use strictix_core::{
+    config::LintConfig,
     diagnostic::{Diagnostic, Severity},
     rules::Rule,
+    semantic::SemanticModel,
 };
-use strictix_syntax::{AstNode, Expr, IfExpr, SyntaxKind as K, SyntaxNode, TextRange};
+use strictix_syntax::{AssertExpr, AstNode, Expr, IfExpr, SyntaxKind as K, TextRange};
 
-/// Flags `if`-expressions whose condition is statically a non-boolean
-/// literal. No auto-fix: there is no safe rewrite for a condition that
-/// can never be boolean.
+/// Flags statically non-boolean `if` and `assert` conditions.
 pub struct NonBooleanCondition;
 
 impl Rule for NonBooleanCondition {
@@ -29,57 +21,56 @@ impl Rule for NonBooleanCondition {
     }
 
     fn description(&self) -> &'static str {
-        "Flags if-expressions whose condition is statically a non-boolean literal. Nix has no truthiness — such a condition always fails with 'attempt to use ... as a boolean', and because evaluation is lazy the error only surfaces when the bad branch is forced."
+        "Flags if and assert conditions that are statically non-boolean, including the global null value. Shadowed names remain unknown."
     }
 
     fn severity(&self) -> Severity {
         Severity::Error
     }
 
-    fn node_kind(&self) -> Option<K> {
-        Some(K::IfExpr)
-    }
-
-    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
-        let Some(if_expr) = IfExpr::cast(node) else {
-            return;
-        };
-        let Some(mut cond) = if_expr.cond() else {
-            return;
-        };
-        // Unwrap a single layer of parens fully: `if (0) ...` is still
-        // an integer, and `if ((x)) ...` is still just the ident x.
-        while let Expr::Paren(paren) = cond {
-            let Some(inner) = paren.expr() else {
-                return;
+    fn check_file(&self, model: &SemanticModel, _: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        for node in model.root().descendants() {
+            let condition = match node.kind() {
+                K::IfExpr => IfExpr::cast(&node).and_then(|expr| expr.cond()),
+                K::AssertExpr => AssertExpr::cast(&node).and_then(|expr| expr.cond()),
+                _ => None,
             };
-            cond = inner;
+            let Some(mut condition) = condition else {
+                continue;
+            };
+            while let Expr::Paren(paren) = condition {
+                let Some(inner) = paren.expr() else { break };
+                condition = inner;
+            }
+            let is_global_null = matches!(condition, Expr::Ident(token)
+            if token.text(model.source()) == "null"
+                && model.references().iter().any(|reference| {
+                    reference.name.range() == token.range()
+                        && reference.resolved.is_none()
+                        && reference.via_with.is_none()
+                }));
+            if !is_global_null && !is_non_boolean_literal(condition) {
+                continue;
+            }
+            let range = cond_range(condition);
+            let kind = if node.kind() == K::AssertExpr {
+                "assert"
+            } else {
+                "if"
+            };
+            diags.push(Diagnostic::new(
+                self.code(),
+                self.severity(),
+                format!(
+                    "{kind}-condition has non-boolean type: `{}`",
+                    condition.content_text(model.source())
+                ),
+                range,
+            ));
         }
-        // true/false/null and every variable are Idents — not provably
-        // non-boolean at this node, so never fire on Ident. Everything
-        // else in the non-boolean set is a literal that can never be a
-        // boolean.
-        if !is_non_boolean_literal(cond) {
-            return;
-        }
-        let range = cond_range(cond);
-        diags.push(Diagnostic::new(
-            "non-boolean-condition",
-            Severity::Error,
-            format!(
-                "if-condition has non-boolean type: `{}`",
-                cond.content_text(source)
-            ),
-            range,
-        ));
     }
 }
 
-/// Whether an expression is a literal that is statically never a
-/// boolean. The atom-literal and node-literal variants are all certain;
-/// Ident is deliberately omitted (variables, `true`, `false`, `null`
-/// are all idents) as are all compound/non-literal expressions (which
-/// may evaluate to a boolean).
 fn is_non_boolean_literal(expr: Expr<'_>) -> bool {
     matches!(
         expr,
@@ -96,9 +87,6 @@ fn is_non_boolean_literal(expr: Expr<'_>) -> bool {
     )
 }
 
-/// The content byte range of a condition. Atom literals are single
-/// tokens so their token range is exact; node literals flush leading
-/// trivia into their range, so the trimmed `content_range` is used.
 fn cond_range(cond: Expr<'_>) -> TextRange {
     match cond {
         Expr::Ident(t)

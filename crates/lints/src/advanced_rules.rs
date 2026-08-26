@@ -212,57 +212,78 @@ impl Rule for BuiltinArity {
         "Builtin arity"
     }
     fn description(&self) -> &'static str {
-        "Flags extra arguments passed to builtins with fixed arity."
+        "Flags too few or too many arguments passed to fixed-arity builtins. Bare builtin values remain valid partial functions."
     }
     fn severity(&self) -> Severity {
         Severity::Error
     }
     fn check_file(&self, m: &SemanticModel, _: &LintConfig, d: &mut Vec<Diagnostic>) {
-        let s = m.source();
+        let source = m.source();
         for n in nodes(m.root(), SyntaxKind::ApplyExpr) {
-            let Some(a) = ApplyExpr::cast(n) else {
+            let Some(apply) = ApplyExpr::cast(n) else {
                 continue;
             };
-            let Some(Expr::Apply(inner)) = a.func() else {
-                continue;
-            };
-            let Some(Expr::Select(sel)) = inner.func() else {
-                continue;
-            };
-            let Some(Expr::Ident(base)) = sel.base() else {
-                continue;
-            };
-            if base.text(s) != "builtins" {
-                continue;
-            };
-            let Some(ap) = sel.attrpath() else { continue };
-            let Some(strictix_syntax::AttrName::Ident(f)) = ap.elements().next() else {
-                continue;
-            };
-            let name = f.text(s);
-            let fixed = matches!(
-                name,
-                "length"
-                    | "head"
-                    | "tail"
-                    | "isNull"
-                    | "isAttrs"
-                    | "isBool"
-                    | "isInt"
-                    | "isList"
-                    | "isString"
-                    | "isFunction"
-            );
-            if fixed {
-                d.push(Diagnostic::new(
-                    self.code(),
-                    self.severity(),
-                    format!("builtin '{name}' receives too many arguments"),
-                    a.arg().map(|x| x.content_range()).unwrap_or(n.range()),
-                ));
+            let mut callee = apply.func();
+            let mut args = 1;
+            while let Some(Expr::Apply(inner)) = callee {
+                args += 1;
+                callee = inner.func();
             }
+            let Some(Expr::Select(select)) = callee else {
+                continue;
+            };
+            let Some(Expr::Ident(base)) = select.base() else {
+                continue;
+            };
+            if base.text(source) != "builtins"
+                || m.resolve(base).is_some()
+                || m.references().iter().any(|reference| {
+                    reference.name.range() == base.range() && reference.via_with.is_some()
+                })
+            {
+                continue;
+            }
+            let Some(path) = select.attrpath() else {
+                continue;
+            };
+            let Some(strictix_syntax::AttrName::Ident(function)) = path.elements().next() else {
+                continue;
+            };
+            let name = function.text(source);
+            let Some(required) = builtin_arity(name) else {
+                continue;
+            };
+            if args == required {
+                continue;
+            }
+            let message = if args < required {
+                format!("builtin '{name}' receives too few arguments")
+            } else {
+                format!("builtin '{name}' receives too many arguments")
+            };
+            d.push(Diagnostic::new(
+                self.code(),
+                self.severity(),
+                message,
+                apply
+                    .arg()
+                    .map(|arg| arg.content_range())
+                    .unwrap_or(n.range()),
+            ));
         }
     }
+}
+
+fn builtin_arity(name: &str) -> Option<usize> {
+    Some(match name {
+        "length" | "head" | "tail" | "isNull" | "isAttrs" | "isBool" | "isInt" | "isList"
+        | "isString" | "isFunction" => 1,
+        "add" | "sub" | "mul" | "div" | "mod" | "concatStringsSep" | "elem" | "elemAt"
+        | "getAttr" | "hasAttr" | "removeAttrs" | "intersectAttrs" | "genList" | "map"
+        | "filter" | "all" | "any" | "compareVersions" | "match" | "split" => 2,
+        "replaceStrings" | "substring" => 3,
+        _ => return None,
+    })
 }
 
 pub struct SuspiciousRecursion;

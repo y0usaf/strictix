@@ -130,3 +130,23 @@ fn clean_paren_ident_condition() {
     // (x) unwraps to an ident variable; not provable.
     assert_eq!(run("if (x) then a else b", rule()), Vec::<String>::new());
 }
+
+#[test]
+fn flags_global_null_in_if_and_assert() {
+    assert_eq!(
+        run("if null then a else b", rule()),
+        ["[non-boolean-condition] error 3..7 if-condition has non-boolean type: `null`"]
+    );
+    assert_eq!(
+        run("assert null; a", rule()),
+        ["[non-boolean-condition] error 7..11 assert-condition has non-boolean type: `null`"]
+    );
+}
+
+#[test]
+fn clean_shadowed_null_condition() {
+    assert_eq!(
+        run("let null = true; in if null then a else b", rule()),
+        Vec::<String>::new()
+    );
+}
