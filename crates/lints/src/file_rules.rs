@@ -15,8 +15,8 @@ use strictix_core::fix::Fix;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::{BindingKind, ScopeId, SemanticModel};
 use strictix_syntax::{
-    AstNode, Binding, Expr, Formals, InheritStmt, LambdaExpr, LambdaParam, SyntaxKind, SyntaxNode,
-    TextRange, WithExpr,
+    AstNode, AttrItem, AttrName, Binding, Expr, Formals, InheritStmt, LambdaExpr, LambdaParam,
+    SelectExpr, SyntaxKind, SyntaxNode, TextRange, WithExpr,
 };
 /// The innermost [Binding] node whose range contains `name_range`, if
 /// any. Bindings nest when a value contains a `let` or attrset, so a
@@ -401,6 +401,69 @@ impl Rule for ShadowedBinding {
                     self.severity(),
                     format!("binding '{name}' shadows an outer binding"),
                     binding.name.range(),
+                ));
+            }
+        }
+    }
+}
+
+/// Flags a default on an attribute selection whose literal attrset already
+/// contains the selected key. The default branch cannot be reached.
+pub struct UnnecessaryOr;
+
+impl Rule for UnnecessaryOr {
+    fn code(&self) -> &'static str {
+        "unnecessary-or"
+    }
+    fn name(&self) -> &'static str {
+        "Unnecessary attribute default"
+    }
+    fn description(&self) -> &'static str {
+        "Flags an attribute default whose literal attrset base contains the selected key, so the default can never be used."
+    }
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let source = model.source();
+        for node in model.root().descendants() {
+            let Some(select) = SelectExpr::cast(node) else {
+                continue;
+            };
+            if select.default().is_none() {
+                continue;
+            }
+            let Some(Expr::Attrset(set)) = select.base() else {
+                continue;
+            };
+            let Some(path) = select.attrpath() else {
+                continue;
+            };
+            let mut elements = path.elements();
+            let Some(AttrName::Ident(key)) = elements.next() else {
+                continue;
+            };
+            if elements.next().is_some() {
+                continue;
+            }
+            let found = set.items().any(|item| match item {
+                AttrItem::Binding(binding) => binding.attrpath().is_some_and(|attrpath| {
+                    let mut elements = attrpath.elements();
+                    matches!(elements.next(), Some(AttrName::Ident(name)) if name.text(source) == key.text(source))
+                        && elements.next().is_none()
+                }),
+                AttrItem::Inherit(_) => false,
+            });
+            if found {
+                diags.push(Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!(
+                        "attribute '{}' is present; the `or` default is unreachable",
+                        key.text(source)
+                    ),
+                    node.content_range(),
                 ));
             }
         }

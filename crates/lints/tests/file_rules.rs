@@ -12,8 +12,8 @@ use strictix_core::diagnostic::Diagnostic;
 use strictix_core::rules::{run_rules, Rule};
 use strictix_core::semantic::SemanticModel;
 use strictix_lints::file_rules::{
-    CircularLet, ReboundConstant, RedundantWith, SelfReferentialLet, ShadowedBinding, UnusedFormal,
-    UnusedLambdaParam, UnusedLetBinding,
+    CircularLet, ReboundConstant, RedundantWith, SelfReferentialLet, ShadowedBinding,
+    UnnecessaryOr, UnusedFormal, UnusedLambdaParam, UnusedLetBinding,
 };
 use strictix_lints::schema::UnknownOption;
 use strictix_syntax::parse;
@@ -348,6 +348,24 @@ fn redundant_with_fix_removes_let_body_with() {
     let fix = diags[0].fix.as_ref().expect("redundant with gets a fix");
     let result = strictix_core::fix::apply_fixes(source, &fix.edits).expect("fix applies");
     assert_eq!(result, "let x = 1; in x");
+}
+
+// --- unnecessary-or --------------------------------------------------
+
+#[test]
+fn unnecessary_or_flags_present_literal_attribute() {
+    let rules = one(Box::new(UnnecessaryOr {}));
+    assert_eq!(
+        run("{ a = 1; }.a or 2", &rules, LintConfig::default()),
+        ["[unnecessary-or] warning 0..17 attribute 'a' is present; the `or` default is unreachable"]
+    );
+}
+
+#[test]
+fn unnecessary_or_skips_missing_and_dynamic_attributes() {
+    let rules = one(Box::new(UnnecessaryOr {}));
+    assert!(run("{ a = 1; }.b or 2", &rules, LintConfig::default()).is_empty());
+    assert!(run("attrs.a or 2", &rules, LintConfig::default()).is_empty());
 }
 
 // --- self-referential-let -------------------------------------------

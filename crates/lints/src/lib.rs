@@ -39,7 +39,7 @@ use duplicate_formal::DuplicateFormal;
 use duplicate_inherit::DuplicateInherit;
 use file_rules::{
     CircularLet, ImportCycle, MissingImport, ReboundConstant, RedundantWith, SelfReferentialLet,
-    ShadowedBinding, ShadowedFormal, UnusedFormal, UnusedInherit, UnusedLambdaParam,
+    ShadowedBinding, ShadowedFormal, UnnecessaryOr, UnusedFormal, UnusedInherit, UnusedLambdaParam,
     UnusedLetBinding,
 };
 use ill_typed_binop::IllTypedBinop;
@@ -91,6 +91,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         UnusedInherit,
         ShadowedBinding,
         ShadowedFormal,
+        UnnecessaryOr,
         RedundantWith,
         SelfReferentialLet,
         UndefinedVariable,
