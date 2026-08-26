@@ -33,8 +33,8 @@ use strictix_core::{
     semantic::SemanticModel,
 };
 use strictix_syntax::{
-    AstNode, AttrItem, AttrName, Attrpath, AttrsetExpr, Expr, LetExpr, StringPart,
-    SyntaxKind as K, TextRange,
+    AstNode, AttrItem, AttrName, Attrpath, AttrsetExpr, Expr, LetExpr, StringPart, SyntaxKind as K,
+    TextRange,
 };
 
 /// The one path a binding container assigns in a known way.
@@ -52,12 +52,18 @@ struct StaticAttr {
 pub struct DuplicateAttribute;
 
 impl Rule for DuplicateAttribute {
-    fn code(&self) -> &'static str { "duplicate-attribute" }
-    fn name(&self) -> &'static str { "Duplicate attribute" }
+    fn code(&self) -> &'static str {
+        "duplicate-attribute"
+    }
+    fn name(&self) -> &'static str {
+        "Duplicate attribute"
+    }
     fn description(&self) -> &'static str {
         "Flags an attribute path defined more than once inside one attrset, rec attrset, or let-bindings section — Nix rejects it with `attribute '...' already defined`, and the recovering parser accepts it silently."
     }
-    fn severity(&self) -> Severity { Severity::Error }
+    fn severity(&self) -> Severity {
+        Severity::Error
+    }
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         let source = model.source();
         for node in model.root().descendants() {
@@ -66,11 +72,15 @@ impl Rule for DuplicateAttribute {
                 // an AttrsetExpr node under a RecAttrsetExpr, so walking
                 // this kind visits both the plain and the rec body.
                 K::AttrsetExpr => {
-                    let Some(attrset) = AttrsetExpr::cast(node) else { continue };
+                    let Some(attrset) = AttrsetExpr::cast(node) else {
+                        continue;
+                    };
                     check_container(attrset.items(), source, diags);
                 }
                 K::LetExpr => {
-                    let Some(let_expr) = LetExpr::cast(node) else { continue };
+                    let Some(let_expr) = LetExpr::cast(node) else {
+                        continue;
+                    };
                     if let Some(bindings) = let_expr.bindings() {
                         check_container(bindings.items(), source, diags);
                     }
@@ -91,7 +101,9 @@ fn check_container<'a>(
     for item in items {
         match item {
             AttrItem::Binding(binding) => {
-                let Some(attrpath) = binding.attrpath() else { continue };
+                let Some(attrpath) = binding.attrpath() else {
+                    continue;
+                };
                 let Some((path, range)) = static_attrpath(attrpath, source) else {
                     continue; // dynamic path: cannot prove a collision
                 };
@@ -123,7 +135,10 @@ fn check_container<'a>(
 /// Decode a binding's attrpath into a static dotted path, or None when
 /// any element is dynamic (`${...}` or a string containing an
 /// interpolation), in which case the collision cannot be proven.
-fn static_attrpath<'a>(attrpath: Attrpath<'a>, source: &'a str) -> Option<(Vec<String>, TextRange)> {
+fn static_attrpath<'a>(
+    attrpath: Attrpath<'a>,
+    source: &'a str,
+) -> Option<(Vec<String>, TextRange)> {
     let mut path = Vec::new();
     let mut first: Option<TextRange> = None;
     for element in attrpath.elements() {

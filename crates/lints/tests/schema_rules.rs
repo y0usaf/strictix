@@ -35,8 +35,10 @@ fn render(diags: &[Diagnostic]) -> Vec<String> {
 
 /// Run both schema rules over `source` against the typed fixture schema.
 fn run(source: &str) -> Vec<String> {
-    let rules: Vec<Box<dyn Rule>> = vec![Box::new(UnknownOption {}), Box::new(OptionTypeMismatch {})];
-    let schema = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/options_typed.json");
+    let rules: Vec<Box<dyn Rule>> =
+        vec![Box::new(UnknownOption {}), Box::new(OptionTypeMismatch {})];
+    let schema =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/options_typed.json");
     let config = LintConfig::default().with_schema(schema);
     let tree = parse(source);
     let model = SemanticModel::new(source, &tree);

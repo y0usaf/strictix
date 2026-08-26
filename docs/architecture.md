@@ -83,9 +83,7 @@ rewriting deferred until semantic fixes must compose within one pass.
 
 ## Seams
 
-- **`ProjectContext`**: not built. Cross-file analysis today is limited
-  to the file path carried by the model; a cross-file import DAG slots
-  in later without signature changes.
+- **`ProjectContext`**: built for conservative cross-file analysis of static relative imports. The CLI constructs a deterministic graph from collected files; `missing-import` and `import-cycle` consume it. Dynamic/interpolated imports remain unknown.
 - **Schema checks** (built, M9): `--schema options.json` verifies
   option attrpaths against nixpkgs + locally declared options — reads
   off the `config` module argument AND write-side definitions in module

@@ -8,6 +8,7 @@
 //! implementing [Rule] with only [Rule::check_file] overridden — the
 //! registry ([super::all_rules]) declares them all the same way.
 
+use std::collections::HashSet;
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
@@ -17,7 +18,6 @@ use strictix_syntax::{
     AstNode, Binding, Expr, Formals, LambdaExpr, LambdaParam, SyntaxKind, SyntaxNode, TextRange,
     WithExpr,
 };
-use std::collections::HashSet;
 /// The innermost [Binding] node whose range contains `name_range`, if
 /// any. Bindings nest when a value contains a `let` or attrset, so a
 /// range scan must pick the smallest containing node — the direct
@@ -106,11 +106,22 @@ fn overlay_param_ranges(root: &SyntaxNode) -> HashSet<u32> {
         if node.kind() != SyntaxKind::LambdaExpr {
             continue;
         }
-        let Some(outer) = LambdaExpr::cast(node) else { continue };
-        let LambdaParam::Ident(outer_param) = outer.param() else { continue };
-        let Some(Expr::Lambda(inner)) = outer.body() else { continue };
-        let LambdaParam::Ident(inner_param) = inner.param() else { continue };
-        if !matches!(inner.body(), Some(Expr::Attrset(_)) | Some(Expr::RecAttrset(_))) {
+        let Some(outer) = LambdaExpr::cast(node) else {
+            continue;
+        };
+        let LambdaParam::Ident(outer_param) = outer.param() else {
+            continue;
+        };
+        let Some(Expr::Lambda(inner)) = outer.body() else {
+            continue;
+        };
+        let LambdaParam::Ident(inner_param) = inner.param() else {
+            continue;
+        };
+        if !matches!(
+            inner.body(),
+            Some(Expr::Attrset(_)) | Some(Expr::RecAttrset(_))
+        ) {
             continue;
         }
         skip.insert(outer_param.range().start());
@@ -743,6 +754,121 @@ impl Rule for ReboundConstant {
                     self.severity(),
                     format!("binding rebinds the global constant '{name}'"),
                     binding.name.range(),
+                ));
+            }
+        }
+    }
+}
+
+fn relative_import(model: &SemanticModel, range: TextRange) -> Option<std::path::PathBuf> {
+    let expr = model
+        .root()
+        .descendants()
+        .find(|n| n.range() == range)
+        .and_then(Expr::cast)?;
+    let source = model.source();
+    match expr {
+        Expr::Path(path) => {
+            let text = path.text(source);
+            (text.starts_with("./") || text.starts_with("../")).then(|| text.into())
+        }
+        Expr::String(string) => {
+            let mut text = String::new();
+            for part in string.parts() {
+                match part {
+                    strictix_syntax::StringPart::Content(token) => {
+                        text.push_str(token.text(source))
+                    }
+                    strictix_syntax::StringPart::Interp(_) => return None,
+                }
+            }
+            (text.starts_with("./") || text.starts_with("../")).then(|| text.into())
+        }
+        _ => None,
+    }
+}
+
+/// Reports relative imports that are absent from the supplied project (or disk).
+pub struct MissingImport;
+impl Rule for MissingImport {
+    fn code(&self) -> &'static str {
+        "missing-import"
+    }
+    fn name(&self) -> &'static str {
+        "Missing import"
+    }
+    fn description(&self) -> &'static str {
+        "Flags relative imports whose target file does not exist."
+    }
+    fn severity(&self) -> Severity {
+        Severity::Error
+    }
+    fn check_file_project(
+        &self,
+        model: &SemanticModel,
+        _config: &LintConfig,
+        project: Option<&strictix_core::project::ProjectContext>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let Some(base) = model.path().and_then(|p| p.parent()) else {
+            return;
+        };
+        for site in model.import_sites() {
+            let Some(raw) = relative_import(model, site.path_range) else {
+                continue;
+            };
+            let target = base.join(raw);
+            let exists = project
+                .map(|p| p.contains(&target))
+                .unwrap_or_else(|| target.is_file());
+            if !exists {
+                diags.push(Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    "relative import target does not exist",
+                    site.path_range,
+                ));
+            }
+        }
+    }
+}
+
+/// Reports an import edge that reaches its source again in the project graph.
+pub struct ImportCycle;
+impl Rule for ImportCycle {
+    fn code(&self) -> &'static str {
+        "import-cycle"
+    }
+    fn name(&self) -> &'static str {
+        "Import cycle"
+    }
+    fn description(&self) -> &'static str {
+        "Flags relative imports that participate in a project import cycle."
+    }
+    fn severity(&self) -> Severity {
+        Severity::Error
+    }
+    fn check_file_project(
+        &self,
+        model: &SemanticModel,
+        _config: &LintConfig,
+        project: Option<&strictix_core::project::ProjectContext>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let (Some(project), Some(path)) = (project, model.path()) else {
+            return;
+        };
+        for site in model.import_sites() {
+            let Some(raw) = relative_import(model, site.path_range) else {
+                continue;
+            };
+            let target = path.parent().unwrap_or(std::path::Path::new(".")).join(raw);
+            if project.contains(&target) && project.has_cycle_from(path, &target) {
+                diags.push(Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    "relative import participates in an import cycle",
+                    site.path_range,
                 ));
             }
         }

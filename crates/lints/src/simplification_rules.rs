@@ -47,11 +47,9 @@ impl Rule for BooleanIf {
         let Some(if_expr) = IfExpr::cast(node) else {
             return;
         };
-        let (Some(cond), Some(then_b), Some(else_b)) = (
-            if_expr.cond(),
-            if_expr.then_branch(),
-            if_expr.else_branch(),
-        ) else {
+        let (Some(cond), Some(then_b), Some(else_b)) =
+            (if_expr.cond(), if_expr.then_branch(), if_expr.else_branch())
+        else {
             return;
         };
         // Ownership exclusion: a literal true/false condition belongs to
@@ -67,10 +65,9 @@ impl Rule for BooleanIf {
         // is parse-safe bare; only the *operands* need the guard below.
         let rewrite = match (then_lit, else_lit) {
             // if c then true else false  ->  c
-            (Some(true), Some(false)) => Some((
-                operand_text(cond, source),
-                "replace with the condition",
-            )),
+            (Some(true), Some(false)) => {
+                Some((operand_text(cond, source), "replace with the condition"))
+            }
             // if c then false else true  ->  !c
             (Some(false), Some(true)) => Some((
                 format!("!{}", operand_text(cond, source)),
@@ -212,10 +209,10 @@ impl Rule for NegationSimplification {
                         "double negation cancels out",
                         node.content_range(),
                     )
-                    .with_fix(Fix::new("remove double negation").edit(
-                        node.content_range(),
-                        trimmed_text(inner_operand, source),
-                    )),
+                    .with_fix(
+                        Fix::new("remove double negation")
+                            .edit(node.content_range(), trimmed_text(inner_operand, source)),
+                    ),
                 );
             }
             // !(a op b) -> (a flipped-op b). Nix comparisons are total
@@ -503,9 +500,7 @@ fn mentions_name(expr: Expr<'_>, source: &str, name: &str) -> bool {
     }
     match expr {
         Expr::Ident(t) => t.text(source) == name,
-        Expr::Int(_) | Expr::Float(_) | Expr::Path(_) | Expr::SearchPath(_) | Expr::Uri(_) => {
-            false
-        }
+        Expr::Int(_) | Expr::Float(_) | Expr::Path(_) | Expr::SearchPath(_) | Expr::Uri(_) => false,
         Expr::Let(e) => node_mentions(e.syntax(), source, name),
         Expr::With(e) => node_mentions(e.syntax(), source, name),
         Expr::Assert(e) => node_mentions(e.syntax(), source, name),

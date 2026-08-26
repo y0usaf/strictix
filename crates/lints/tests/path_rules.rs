@@ -1,10 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use strictix_core::{
-    config::LintConfig,
-    diagnostic::Diagnostic,
-    fix::apply_fixes,
-    rules::Rule,
+    config::LintConfig, diagnostic::Diagnostic, fix::apply_fixes, rules::Rule,
     semantic::SemanticModel,
 };
 use strictix_lints::path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};

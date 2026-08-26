@@ -283,10 +283,7 @@ fn is_boolean_bad(l: Lit) -> bool {
 fn concat_fix(lhs: Expr<'_>, rhs: Expr<'_>, source: &str, node: &SyntaxNode) -> Option<Fix> {
     let mut value = plain_string(lhs, source)?;
     value.push_str(&plain_string(rhs, source)?);
-    Some(
-        Fix::new("concatenate string literals")
-            .edit(node.content_range(), quote_string(&value)),
-    )
+    Some(Fix::new("concatenate string literals").edit(node.content_range(), quote_string(&value)))
 }
 
 /// The runtime value of a plain `"..."` (non-interpolated) string

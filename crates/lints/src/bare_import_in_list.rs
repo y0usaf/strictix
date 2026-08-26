@@ -35,9 +35,7 @@ const MESSAGE: &str =
 fn fixable_following(following: Expr<'_>) -> bool {
     match following {
         Expr::Path(_) => true,
-        Expr::String(s) => !s
-            .parts()
-            .any(|part| matches!(part, StringPart::Interp(_))),
+        Expr::String(s) => !s.parts().any(|part| matches!(part, StringPart::Interp(_))),
         // Compound nodes (lambdas, applies, the whole rest) are either
         // already a single expression we don't need to touch, or too
         // risky to rewrite by spanning text; give the user the plain
@@ -101,24 +99,16 @@ impl Rule for BareImportInList {
                     continue;
                 };
                 let following = *following;
-                let mut diag = Diagnostic::new(
-                    self.code(),
-                    self.severity(),
-                    MESSAGE,
-                    name.range(),
-                );
+                let mut diag = Diagnostic::new(self.code(), self.severity(), MESSAGE, name.range());
                 if fixable_following(following) {
                     // Replace the span from the bare `import` token
                     // through the end of the following item, reusing the
                     // ORIGINAL following text inside a paren frame:
                     // `(import <following>)`.
-                    let range =
-                        TextRange::new(name.range().start(), following.range().end());
-                    let replacement =
-                        format!("(import {})", following.text(source));
+                    let range = TextRange::new(name.range().start(), following.range().end());
+                    let replacement = format!("(import {})", following.text(source));
                     diag = diag.with_fix(
-                        Fix::new("parenthesize the import argument")
-                            .edit(range, replacement),
+                        Fix::new("parenthesize the import argument").edit(range, replacement),
                     );
                 }
                 diags.push(diag);

@@ -166,7 +166,11 @@ fn with_non_lib_subject_is_silent() {
 
 #[test]
 fn nested_ints_member_validates_second_hop() {
-    assert!(run("{ lib, ... }: lib.types.ints.u8", Box::new(UnknownLibType {})).is_empty());
+    assert!(run(
+        "{ lib, ... }: lib.types.ints.u8",
+        Box::new(UnknownLibType {})
+    )
+    .is_empty());
     let diagnostics = run(
         "{ lib, ... }: lib.types.ints.u42",
         Box::new(UnknownLibType {}),
@@ -198,8 +202,16 @@ fn nested_numbers_member_validates_second_hop() {
 
 #[test]
 fn has_attr_probe_never_fires() {
-    assert!(run("{ lib, ... }: lib.types ? string", Box::new(UnknownLibType {})).is_empty());
-    assert!(run("{ lib, ... }: lib ? types.string", Box::new(UnknownLibType {})).is_empty());
+    assert!(run(
+        "{ lib, ... }: lib.types ? string",
+        Box::new(UnknownLibType {})
+    )
+    .is_empty());
+    assert!(run(
+        "{ lib, ... }: lib ? types.string",
+        Box::new(UnknownLibType {})
+    )
+    .is_empty());
 }
 
 #[test]

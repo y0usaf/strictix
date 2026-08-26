@@ -200,12 +200,8 @@ impl Rule for Tautology {
             // error that "replace with the operand" would silently
             // remove — too risky for an automated fix.)
             let fix = match op {
-                K::EqEq => Some(
-                    Fix::new("replace with true").edit(node.content_range(), "true"),
-                ),
-                K::Neq => Some(
-                    Fix::new("replace with false").edit(node.content_range(), "false"),
-                ),
+                K::EqEq => Some(Fix::new("replace with true").edit(node.content_range(), "true")),
+                K::Neq => Some(Fix::new("replace with false").edit(node.content_range(), "false")),
                 _ => None, // && / || carry no fix
             };
             let mut diag = Diagnostic::new(

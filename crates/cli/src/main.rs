@@ -136,19 +136,39 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
 
     if files.is_empty() {
         match args.format {
-            Format::Human => println!("{}", render::summary_line(0, 0)),
+            Format::Human => println!("{}", render::summary_line(0, 0, render::color_enabled()),),
             Format::Json => print_json(&[]),
         }
         return ExitCode::SUCCESS;
     }
 
-    // Build the registry once and share it across worker threads.
+    let color = render::color_enabled();
     let rules = strictix_lints::all_rules();
+    let project_files: Vec<strictix_core::project::ProjectFile> = files
+        .iter()
+        .filter_map(|path| {
+            std::fs::read_to_string(path)
+                .ok()
+                .map(|source| strictix_core::project::ProjectFile {
+                    path: path.clone(),
+                    source,
+                })
+        })
+        .collect();
+    let project = strictix_core::project::ProjectContext::new(project_files);
     let results: Vec<FileResult> = std::thread::scope(|scope| {
         let mut handles = Vec::new();
         for file in &files {
-            handles
-                .push(scope.spawn(|| process_file(file, &rules, &config, fix_mode, !args.dry_run)));
+            handles.push(scope.spawn(|| {
+                process_file(
+                    file,
+                    &rules,
+                    &config,
+                    fix_mode,
+                    !args.dry_run,
+                    Some(&project),
+                )
+            }));
         }
         handles
             .into_iter()
@@ -181,7 +201,7 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
                     if i > 0 {
                         println!();
                     }
-                    println!("{}", render::human(diag, &path, &result.source));
+                    println!("{}", render::human(diag, &path, &result.source, color));
                 }
             }
         }
@@ -212,7 +232,7 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
                     result.fixes_applied
                 );
                 if let Some(fixed) = &result.fixed {
-                    print!("{}", render::diff(&result.source, fixed));
+                    print!("{}", render::diff(&result.source, fixed, color));
                 }
             }
             if let Some(err) = &result.write_error {
@@ -226,7 +246,7 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
     }
 
     if args.format == Format::Human {
-        println!("{}", render::summary_line(linted, total_diags));
+        println!("{}", render::summary_line(linted, total_diags, color));
     }
 
     if any_error {
@@ -303,6 +323,7 @@ fn process_file(
     config: &LintConfig,
     fix_mode: bool,
     write: bool,
+    project: Option<&strictix_core::project::ProjectContext>,
 ) -> FileResult {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
@@ -328,7 +349,8 @@ fn process_file(
     // Single engine path: `check` (fix_mode=false) is one read-only
     // pass; `fix` (fix_mode=true) is the reactive loop. Diagnostics
     // reported are the first pass's — what the user started with.
-    let run = strictix_core::rules::lint(rules, &source, Some(path), config, fix_mode);
+    let run =
+        strictix_core::rules::lint_project(rules, &source, Some(path), config, fix_mode, project);
     let diagnostics = run.diagnostics;
     if fix_mode {
         let fix_count = diagnostics.iter().filter(|d| d.fix.is_some()).count();

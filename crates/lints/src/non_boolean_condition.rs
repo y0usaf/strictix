@@ -12,9 +12,7 @@ use strictix_core::{
     diagnostic::{Diagnostic, Severity},
     rules::Rule,
 };
-use strictix_syntax::{
-    AstNode, Expr, IfExpr, SyntaxKind as K, SyntaxNode, TextRange,
-};
+use strictix_syntax::{AstNode, Expr, IfExpr, SyntaxKind as K, SyntaxNode, TextRange};
 
 /// Flags `if`-expressions whose condition is statically a non-boolean
 /// literal. No auto-fix: there is no safe rewrite for a condition that
@@ -103,8 +101,12 @@ fn is_non_boolean_literal(expr: Expr<'_>) -> bool {
 /// trivia into their range, so the trimmed `content_range` is used.
 fn cond_range(cond: Expr<'_>) -> TextRange {
     match cond {
-        Expr::Ident(t) | Expr::Int(t) | Expr::Float(t) | Expr::Path(t)
-        | Expr::SearchPath(t) | Expr::Uri(t) => t.range(),
+        Expr::Ident(t)
+        | Expr::Int(t)
+        | Expr::Float(t)
+        | Expr::Path(t)
+        | Expr::SearchPath(t)
+        | Expr::Uri(t) => t.range(),
         Expr::String(e) => e.syntax().content_range(),
         Expr::IndString(e) => e.syntax().content_range(),
         Expr::List(e) => e.syntax().content_range(),

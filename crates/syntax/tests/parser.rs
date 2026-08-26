@@ -231,6 +231,28 @@ fn error_recovery_recovers_at_in() {
 }
 
 #[test]
+fn error_nodes_expose_stable_content_ranges() {
+    let source = "1 $ % 2";
+    let tree = parse_rt(source);
+    let ranges: Vec<_> = tree
+        .error_nodes()
+        .map(|node| node.content_range())
+        .collect();
+    assert_eq!(ranges.len(), 1);
+    assert_eq!((ranges[0].start(), ranges[0].end()), (2, 7));
+    assert_eq!(
+        &source[ranges[0].start() as usize..ranges[0].end() as usize],
+        "$ % 2"
+    );
+}
+
+#[test]
+fn valid_input_has_no_error_nodes() {
+    let tree = parse_rt("let x = 1; in x");
+    assert_eq!(tree.error_nodes().count(), 0);
+}
+
+#[test]
 fn error_recovery_sibling_after_error() {
     // `x = !;` is broken; the next binding should still parse.
     let src = "{ a = !; b = 2; }";

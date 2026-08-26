@@ -58,7 +58,9 @@ pub fn load_config(
         }
     }
 
-    let schema = schema_flag.map(PathBuf::from).or_else(|| schema.map(PathBuf::from));
+    let schema = schema_flag
+        .map(PathBuf::from)
+        .or_else(|| schema.map(PathBuf::from));
 
     Ok(LintConfig { disabled, schema })
 }
@@ -89,8 +91,8 @@ fn parse_config(text: &str) -> Result<(Vec<String>, Option<String>), String> {
         let value = value.trim();
         match key {
             "disabled" => {
-                disabled = parse_string_array(value)
-                    .map_err(|e| format!("line {}: {e}", line_no + 1))?;
+                disabled =
+                    parse_string_array(value).map_err(|e| format!("line {}: {e}", line_no + 1))?;
             }
             "schema" => {
                 schema = Some(

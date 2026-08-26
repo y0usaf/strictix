@@ -5,16 +5,19 @@
 //! (syntax-level) live in [node_rules], file rules (semantic) in
 //! [file_rules], and the options-schema rule in [schema].
 
+pub mod advanced_rules;
 pub mod bare_import_in_list;
 pub mod call_simplification;
 pub mod duplicate_attr;
 pub mod duplicate_formal;
 pub mod file_rules;
 pub mod ill_typed_binop;
+pub mod ill_typed_unary_op;
 pub mod interpolation_rules;
 pub mod lib_type_rules;
 pub mod node_rules;
 pub mod non_boolean_condition;
+pub mod non_callable_application;
 pub mod path_rules;
 pub mod reference_rules;
 pub mod schema;
@@ -22,6 +25,10 @@ pub mod simplification_rules;
 pub mod style_rules;
 pub mod suggested_rules;
 
+use advanced_rules::{
+    BuiltinArity, DuplicateFunctionArgument, DynamicImport, SuspiciousImportArgument,
+    SuspiciousRecursion, UnreachableBranch, UnsafeWithShadowing,
+};
 use bare_import_in_list::BareImportInList;
 use call_simplification::{
     DeprecatedIsNull, ManualGetattr, ManualHasattr, ManualOptional, OptionalListArgument,
@@ -29,28 +36,30 @@ use call_simplification::{
 use duplicate_attr::DuplicateAttribute;
 use duplicate_formal::DuplicateFormal;
 use file_rules::{
-    CircularLet, ReboundConstant, RedundantWith, SelfReferentialLet, ShadowedBinding,
-    UnusedFormal, UnusedLambdaParam, UnusedLetBinding,
+    CircularLet, ImportCycle, MissingImport, ReboundConstant, RedundantWith, SelfReferentialLet,
+    ShadowedBinding, UnusedFormal, UnusedLambdaParam, UnusedLetBinding,
 };
 use ill_typed_binop::IllTypedBinop;
+use ill_typed_unary_op::IllTypedUnaryOp;
 use interpolation_rules::{CoercedInterpolation, RedundantInterpolation};
 use lib_type_rules::UnknownLibType;
+use node_rules::{AssertTrue, ConstantIf, Tautology};
 use non_boolean_condition::NonBooleanCondition;
+use non_callable_application::NonCallableApplication;
 use path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
 use reference_rules::{UndefinedVariable, UnknownBuiltin};
-use node_rules::{AssertTrue, ConstantIf, Tautology};
 use schema::{OptionTypeMismatch, UnknownOption};
 use simplification_rules::{BooleanIf, NegationSimplification, TrivialLet};
-use suggested_rules::{
-    AssertFalse, DuplicateLiteralListItem, LiteralDivisionByZero, RedundantBooleanComparison,
-    UnnecessaryRec, UnusedRecBinding,
-};
+use strictix_core::rules::Rule;
 use style_rules::{
     CollapsibleLetIn, DeprecatedToPath, EmptyInherit, EmptyLetIn, EmptyListConcat, EmptyPattern,
     EtaReduction, ManualInherit, ManualInheritFrom, RedundantPatternBind, RepeatedKeys,
     UnquotedUri, UselessHasAttr, UselessParens,
 };
-use strictix_core::rules::Rule;
+use suggested_rules::{
+    AssertFalse, DuplicateLiteralListItem, LiteralDivisionByZero, RedundantBooleanComparison,
+    UnnecessaryRec, UnusedRecBinding,
+};
 
 /// The full builtin registry, in declaration order.
 ///
@@ -60,6 +69,13 @@ use strictix_core::rules::Rule;
 #[must_use]
 pub fn all_rules() -> Vec<Box<dyn Rule>> {
     strictix_core::rules! {
+        BuiltinArity,
+        DuplicateFunctionArgument,
+        DynamicImport,
+        SuspiciousImportArgument,
+        SuspiciousRecursion,
+        UnreachableBranch,
+        UnsafeWithShadowing,
         ConstantIf,
         AssertTrue,
         Tautology,
@@ -90,6 +106,10 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         DuplicateFormal,
         NonBooleanCondition,
         IllTypedBinop,
+        IllTypedUnaryOp,
+        NonCallableApplication,
+        MissingImport,
+        ImportCycle,
         BareImportInList,
         UnnecessaryRec,
         UnusedRecBinding,

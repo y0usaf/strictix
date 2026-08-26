@@ -303,9 +303,7 @@ impl Rule for CoercedInterpolation {
                 Diagnostic::new(
                     self.code(),
                     self.severity(),
-                    format!(
-                        "interpolating {what} always fails — Nix cannot coerce it to a string"
-                    ),
+                    format!("interpolating {what} always fails — Nix cannot coerce it to a string"),
                     span,
                 )
                 .with_help(help),

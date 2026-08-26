@@ -331,3 +331,50 @@ fn multiple_node_rules_of_different_kinds_fire_on_same_tree() {
     assert_eq!(if_calls.load(Ordering::SeqCst), 1);
     assert_eq!(list_calls.load(Ordering::SeqCst), 2);
 }
+
+struct SuppressionRule;
+
+impl Rule for SuppressionRule {
+    fn code(&self) -> &'static str {
+        "test-suppressed"
+    }
+    fn name(&self) -> &'static str {
+        "Suppression test"
+    }
+    fn description(&self) -> &'static str {
+        "test"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+    fn node_kind(&self) -> Option<SyntaxKind> {
+        Some(SyntaxKind::Ident)
+    }
+    fn check_node(&self, node: &SyntaxNode, _source: &str, diags: &mut Vec<Diagnostic>) {
+        diags.push(Diagnostic::new(
+            self.code(),
+            self.severity(),
+            "test",
+            node.content_range(),
+        ));
+    }
+}
+
+#[test]
+fn disable_next_line_suppresses_matching_diagnostic() {
+    let source = "# strictix: disable-next-line=test-suppressed\nfoo";
+    let rules: Vec<Box<dyn Rule>> = vec![Box::new(SuppressionRule)];
+    let run = strictix_core::rules::lint(&rules, source, None, &LintConfig::default(), false);
+    assert!(run.diagnostics.is_empty());
+}
+
+#[test]
+fn malformed_or_unknown_suppression_is_safe() {
+    let source = "# strictix: disable-next-line= test-suppressed\nfoo";
+    let rules: Vec<Box<dyn Rule>> = vec![Box::new(SuppressionRule)];
+    let run = strictix_core::rules::lint(&rules, source, None, &LintConfig::default(), false);
+    assert!(
+        run.error.is_none(),
+        "malformed directives do not cause lint errors"
+    );
+}

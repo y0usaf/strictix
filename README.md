@@ -39,12 +39,12 @@ $ strictix fix slop.nix
 
 ## Rules
 
-54 builtin rules (`strictix list`):
+58 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
 | Dead code | unused-let-binding, unused-lambda-param, unused-formal, unused-rec-binding, redundant-with, unnecessary-rec |
-| Certain evaluation errors | self-referential-let, circular-let, undefined-variable, non-boolean-condition, ill-typed-binop, literal-division-by-zero, coerced-interpolation, assert-false, duplicate-attribute, duplicate-formal, dangling-path |
+| Certain evaluation errors | self-referential-let, circular-let, undefined-variable, non-boolean-condition, ill-typed-binop, ill-typed-unary-op, non-callable-application, literal-division-by-zero, coerced-interpolation, assert-false, duplicate-attribute, duplicate-formal, dangling-path, missing-import, import-cycle |
 | Hallucination checks | unknown-option, option-type-mismatch, unknown-builtin, unknown-lib-type |
 | Traps | shadowed-binding, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference |
 | Simplification | constant-if, boolean-if, tautology, assert-true, negation-simplification, trivial-let, collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, empty-list-concat, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, deprecated-is-null, deprecated-to-path |
@@ -61,10 +61,13 @@ description: Flags a let with exactly one binding whose body is exactly
 that binding's name: `let x = e; in x` is just `e`.
 ```
 
-Config (strictix.toml) toggles rules; .strictixignore prunes paths;
-`--schema options.json` enables the NixOS option checks (unknown
-option names on both the read and write side, plus literal/type
-mismatches); `--format json` for machine output.
+Config (strictix.toml) toggles rules; .strictixignore prunes paths.
+For a one-off finding, put a full-line `# strictix: disable-next-line=CODE`
+comment immediately above the code it reports. The directive is intentionally
+narrow: malformed or unknown codes are ignored, and it suppresses only that
+rule's diagnostic on the next source line. `--schema options.json` enables the
+NixOS option checks (unknown option names on both the read and write side,
+plus literal/type mismatches); `--format json` selects machine output.
 
 ## Development
 

@@ -10,10 +10,7 @@
 //! offsets recomputed from the source strings.
 
 use strictix_core::{
-    config::LintConfig,
-    diagnostic::Diagnostic,
-    fix::apply_fixes,
-    rules::run_rules,
+    config::LintConfig, diagnostic::Diagnostic, fix::apply_fixes, rules::run_rules,
     semantic::SemanticModel,
 };
 use strictix_lints::ill_typed_binop::IllTypedBinop;
@@ -253,7 +250,10 @@ fn paren_unwrap_one_layer_fires_with_fix() {
     );
     let src = "(\"a\") + \"b\"";
     let d = raw_diags(src);
-    let fix = d[0].fix.as_ref().expect("paren-wrapped string+string fixes");
+    let fix = d[0]
+        .fix
+        .as_ref()
+        .expect("paren-wrapped string+string fixes");
     let result = apply_fixes(src, &fix.edits).expect("fix applies");
     assert_eq!(result, "\"ab\"");
 }

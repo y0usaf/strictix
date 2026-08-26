@@ -70,7 +70,11 @@ fn duplicate_attribute_identical_dotted_path() {
 fn duplicate_attribute_let_bindings() {
     // `let a = 1; a = 2; in a` — second `a` at byte 11..12.
     assert_eq!(
-        run("let a = 1; a = 2; in a", &dup_rules(), LintConfig::default()),
+        run(
+            "let a = 1; a = 2; in a",
+            &dup_rules(),
+            LintConfig::default()
+        ),
         ["[duplicate-attribute] error 11..12 attribute 'a' defined more than once"]
     );
 }
@@ -89,7 +93,11 @@ fn duplicate_attribute_detect_nested_container() {
     // The inner attrset has its own duplicate; the outer `a` is a single
     // binding and must not produce one.
     assert_eq!(
-        run("{ a = { x = 1; x = 2; }; }", &dup_rules(), LintConfig::default()),
+        run(
+            "{ a = { x = 1; x = 2; }; }",
+            &dup_rules(),
+            LintConfig::default()
+        ),
         ["[duplicate-attribute] error 15..16 attribute 'x' defined more than once"]
     );
 }
@@ -111,7 +119,11 @@ fn duplicate_attribute_inherit_collides_with_binding() {
 fn duplicate_attribute_inherit_from_collides() {
     // `inherit (b) a;` re-binds `a`; confirmed error on the inherit name.
     assert_eq!(
-        run("{ a = 1; inherit (b) a; }", &dup_rules(), LintConfig::default()),
+        run(
+            "{ a = 1; inherit (b) a; }",
+            &dup_rules(),
+            LintConfig::default()
+        ),
         ["[duplicate-attribute] error 21..22 attribute 'a' defined more than once"]
     );
 }
@@ -135,7 +147,11 @@ fn duplicate_attribute_quoted_dotted_string_is_single_attr() {
     // }; "a.b" = 1; }`): a quoted dotted string is one attribute named
     // `a.b`, not a two-element path, so it cannot collide with `a.b`.
     assert_eq!(
-        run("{ \"a.b\" = 1; a.b = 2; }", &dup_rules(), LintConfig::default()),
+        run(
+            "{ \"a.b\" = 1; a.b = 2; }",
+            &dup_rules(),
+            LintConfig::default()
+        ),
         Vec::<String>::new()
     );
 }
@@ -159,7 +175,11 @@ fn duplicate_attribute_dynamic_key_untracked() {
 fn duplicate_attribute_clean_across_scope() {
     // The outer let `a` and the attrset `a` are different containers.
     assert_eq!(
-        run("let a = 1; in { a = 2; }", &dup_rules(), LintConfig::default()),
+        run(
+            "let a = 1; in { a = 2; }",
+            &dup_rules(),
+            LintConfig::default()
+        ),
         Vec::<String>::new()
     );
 }

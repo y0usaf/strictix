@@ -81,6 +81,7 @@ fn can_start_expr(kind: SyntaxKind) -> bool {
             | K::StringStart
             | K::IndStringStart
             | K::Bang
+            | K::Minus
     )
 }
 
@@ -270,9 +271,9 @@ impl<'a> Parser<'a> {
     /// binding power the caller will accept.
     fn parse_expr_bp(&mut self, min_bp: u8) {
         let checkpoint = self.events.len();
-        if self.current() == K::Bang && UNARY_BP >= min_bp {
+        if matches!(self.current(), K::Bang | K::Minus) && UNARY_BP >= min_bp {
             self.start(K::UnaryExpr);
-            self.bump(); // bang
+            self.bump(); // bang or minus
             self.parse_expr_bp(UNARY_BP);
             self.finish();
         } else {
@@ -313,7 +314,9 @@ impl<'a> Parser<'a> {
             K::LBrace if !self.brace_is_attrset() => self.parse_lambda_formals(),
             _ => {
                 self.parse_select();
-                while can_start_expr(self.current()) {
+                while can_start_expr(self.current())
+                    && !matches!(self.current(), K::Bang | K::Minus)
+                {
                     self.start_at(checkpoint, K::ApplyExpr);
                     self.parse_select();
                     self.finish();
@@ -488,7 +491,9 @@ impl<'a> Parser<'a> {
                 k if k == term => break,
                 K::KwInherit => self.parse_inherit(),
                 K::Eof => break,
-                _ if self.current().is_attr_name() || self.current() == K::StringStart => {
+                _ if self.current().is_attr_name()
+                    || matches!(self.current(), K::StringStart | K::InterpStart) =>
+                {
                     self.parse_binding()
                 }
                 _ => self.loop_error(),

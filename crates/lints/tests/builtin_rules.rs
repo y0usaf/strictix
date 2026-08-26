@@ -81,8 +81,14 @@ fn undefined_variable_offers_escape_fix_in_indented_string() {
         render(&diags),
         ["[undefined-variable] error 10..14 undefined variable 'HOME' in expression position is never bound"]
     );
-    let fix = diags[0].fix.as_ref().expect("indented-string case gets a fix");
-    assert_eq!(fix.label, "escape literal with ''$ (only in indented string)");
+    let fix = diags[0]
+        .fix
+        .as_ref()
+        .expect("indented-string case gets a fix");
+    assert_eq!(
+        fix.label,
+        "escape literal with ''$ (only in indented string)"
+    );
     assert_eq!(fix.edits.len(), 1);
     assert_eq!(fix.edits[0].range.start(), 8);
     assert_eq!(fix.edits[0].range.end(), 15);
@@ -118,7 +124,11 @@ fn undefined_variable_clean_cases() {
     let cfg = LintConfig::default();
     // with-provided name: resolves via the with fallback.
     assert_eq!(
-        run("let pkgs = 1; in with pkgs; hello", &undefined_rules(), cfg.clone()),
+        run(
+            "let pkgs = 1; in with pkgs; hello",
+            &undefined_rules(),
+            cfg.clone()
+        ),
         Vec::<String>::new()
     );
     // a select field is not a reference; builtins is a global.

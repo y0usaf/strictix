@@ -176,7 +176,10 @@ fn unused_lambda_param_skips_overlay_params() {
     let cfg = LintConfig::default();
     // An overlay is a bare-param lambda whose body is a bare-param
     // lambda whose body is a (rec) attrset: neither param is flagged.
-    assert_eq!(run("final: prev: {}", &rules, cfg.clone()), Vec::<String>::new());
+    assert_eq!(
+        run("final: prev: {}", &rules, cfg.clone()),
+        Vec::<String>::new()
+    );
     assert_eq!(
         run("final: prev: rec { x = prev.y; }", &rules, cfg.clone()),
         Vec::<String>::new()

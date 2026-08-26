@@ -93,12 +93,14 @@ fn bare_import_in_list_applies_fix_in_module() {
     let source = "{ imports = [ import ./hw.nix ]; }";
     let diags = fixes(source);
     assert_eq!(diags, [(14, 29, "(import ./hw.nix)".to_string())]);
-    let result =
-        strictix_core::fix::apply_fixes(source, &[strictix_core::fix::TextEdit::new(
+    let result = strictix_core::fix::apply_fixes(
+        source,
+        &[strictix_core::fix::TextEdit::new(
             strictix_syntax::TextRange::new(14, 29),
             "(import ./hw.nix)".to_string(),
-        )])
-        .expect("fix applies");
+        )],
+    )
+    .expect("fix applies");
     assert_eq!(result, "{ imports = [ (import ./hw.nix) ]; }");
 }
 
@@ -112,10 +114,13 @@ fn bare_import_in_list_triggers_and_fixes_bare_list() {
     );
     let diags = fixes(source);
     assert_eq!(diags, [(2, 16, "(import ./a.nix)".to_string())]);
-    let result = strictix_core::fix::apply_fixes(source, &[strictix_core::fix::TextEdit::new(
-        strictix_syntax::TextRange::new(2, 16),
-        "(import ./a.nix)".to_string(),
-    )])
+    let result = strictix_core::fix::apply_fixes(
+        source,
+        &[strictix_core::fix::TextEdit::new(
+            strictix_syntax::TextRange::new(2, 16),
+            "(import ./a.nix)".to_string(),
+        )],
+    )
     .expect("fix applies");
     assert_eq!(result, "[ (import ./a.nix) ]");
 }
@@ -143,7 +148,10 @@ fn bare_import_in_list_clean_when_last_item() {
 #[test]
 fn bare_import_in_list_clean_when_shadowed() {
     assert_eq!(
-        run("let import = x: y; in [ import ./a.nix ]", LintConfig::default()),
+        run(
+            "let import = x: y; in [ import ./a.nix ]",
+            LintConfig::default()
+        ),
         Vec::<String>::new()
     );
 }

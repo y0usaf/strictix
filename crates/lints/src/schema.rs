@@ -130,7 +130,11 @@ fn write_cache(cache: &Path, hash: u64, options: &HashMap<String, String>) {
         out.push_str(key);
         out.push('\t');
         for ch in ty.chars() {
-            out.push(if matches!(ch, '\n' | '\r' | '\t') { ' ' } else { ch });
+            out.push(if matches!(ch, '\n' | '\r' | '\t') {
+                ' '
+            } else {
+                ch
+            });
         }
         out.push('\n');
     }
@@ -489,7 +493,14 @@ fn collect_attrset<'a>(
             joined.extend(segments);
             full = joined;
         }
-        process_value(source, value, &full, root_ctx, path.syntax().content_range(), out);
+        process_value(
+            source,
+            value,
+            &full,
+            root_ctx,
+            path.syntax().content_range(),
+            out,
+        );
     }
 }
 
@@ -932,7 +943,12 @@ impl Rule for OptionTypeMismatch {
                     Diagnostic::new(
                         self.code(),
                         self.severity(),
-                        format!("option '{}' expects {}, got {}", write.path, ty, kind.name()),
+                        format!(
+                            "option '{}' expects {}, got {}",
+                            write.path,
+                            ty,
+                            kind.name()
+                        ),
                         trimmed_range(write.value),
                     )
                     .with_help(format!(
@@ -975,7 +991,10 @@ mod tests {
         assert_eq!(schema.types.get("a.b").map(String::as_str), Some("boolean"));
         assert_eq!(schema.types.get("c.d").map(String::as_str), Some(""));
         assert_eq!(
-            schema.types.get("environment.systemPackages").map(String::as_str),
+            schema
+                .types
+                .get("environment.systemPackages")
+                .map(String::as_str),
             Some("list of package")
         );
         assert!(!schema.types.contains_key("a.c"));
@@ -1061,8 +1080,7 @@ mod tests {
         types.insert("users.users.<name>.home".to_owned(), "path".to_owned());
         types.insert("services.example.enable".to_owned(), "boolean".to_owned());
         let schema = OptionsSchema::new(types);
-        let declared =
-            |path: &str| path_declared(&schema, &[], &segs(path), path);
+        let declared = |path: &str| path_declared(&schema, &[], &segs(path), path);
         // (a) exact, wildcard segment matching any written segment
         assert!(declared("users.users.alice.home"));
         assert!(declared("services.example.enable"));
@@ -1090,14 +1108,24 @@ mod tests {
             "mine.stuff.enable"
         ));
         // prefix and interior writes flow through the same predicate
-        assert!(path_declared(&schema, &locals, &segs("mine.stuff"), "mine.stuff"));
+        assert!(path_declared(
+            &schema,
+            &locals,
+            &segs("mine.stuff"),
+            "mine.stuff"
+        ));
         assert!(path_declared(
             &schema,
             &locals,
             &segs("mine.stuff.enable.deep"),
             "mine.stuff.enable.deep"
         ));
-        assert!(!path_declared(&schema, &locals, &segs("mine.other"), "mine.other"));
+        assert!(!path_declared(
+            &schema,
+            &locals,
+            &segs("mine.other"),
+            "mine.other"
+        ));
     }
 
     #[test]
@@ -1126,11 +1154,17 @@ mod tests {
         assert_eq!(m("signed integer", L::Int), Some(true));
         assert_eq!(m("signed integer", L::Str), Some(false));
         assert_eq!(
-            m("16 bit unsigned integer; between 0 and 65535 (both inclusive)", L::Int),
+            m(
+                "16 bit unsigned integer; between 0 and 65535 (both inclusive)",
+                L::Int
+            ),
             Some(true)
         );
         assert_eq!(
-            m("16 bit unsigned integer; between 0 and 65535 (both inclusive)", L::Str),
+            m(
+                "16 bit unsigned integer; between 0 and 65535 (both inclusive)",
+                L::Str
+            ),
             Some(false)
         );
         // strings, including concatenated phrasing

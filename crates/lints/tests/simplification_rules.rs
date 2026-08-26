@@ -36,7 +36,10 @@ fn fixed(source: &str, rule: Box<dyn Rule>) -> String {
 
 #[test]
 fn boolean_if_literal_branches_reduce_to_condition() {
-    assert_eq!(fixed("if c then true else false", Box::new(BooleanIf {})), "c");
+    assert_eq!(
+        fixed("if c then true else false", Box::new(BooleanIf {})),
+        "c"
+    );
     // A non-atom condition is parenthesized so the spliced text cannot
     // re-associate with surrounding operators.
     assert_eq!(
@@ -47,7 +50,10 @@ fn boolean_if_literal_branches_reduce_to_condition() {
 
 #[test]
 fn boolean_if_flipped_literal_branches_negate_condition() {
-    assert_eq!(fixed("if c then false else true", Box::new(BooleanIf {})), "!c");
+    assert_eq!(
+        fixed("if c then false else true", Box::new(BooleanIf {})),
+        "!c"
+    );
     assert_eq!(
         fixed("if a == b then false else true", Box::new(BooleanIf {})),
         "!(a == b)"
@@ -100,7 +106,11 @@ fn boolean_if_skips_literal_condition_owned_by_constant_if() {
 
 #[test]
 fn boolean_if_flags_identical_atom_branches_without_fix() {
-    for source in ["if c then x else x", "if c then 1 else 1", "if c then true else true"] {
+    for source in [
+        "if c then x else x",
+        "if c then 1 else 1",
+        "if c then true else true",
+    ] {
         let diagnostics = run(source, Box::new(BooleanIf {}));
         assert_eq!(diagnostics.len(), 1, "{source}");
         assert_eq!(diagnostics[0].code, "boolean-if");

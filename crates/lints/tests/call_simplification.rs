@@ -49,7 +49,10 @@ fn manual_hasattr_fires_on_builtins_form_with_bare_key() {
 
 #[test]
 fn manual_hasattr_fires_on_bare_global_form() {
-    assert_eq!(fixed("hasAttr \"a\" x", Box::new(ManualHasattr {})), "x ? a");
+    assert_eq!(
+        fixed("hasAttr \"a\" x", Box::new(ManualHasattr {})),
+        "x ? a"
+    );
 }
 
 #[test]
@@ -142,7 +145,10 @@ fn manual_getattr_is_silent_on_shadow_interpolation_and_partial() {
 
 #[test]
 fn deprecated_is_null_fires_on_both_callee_forms() {
-    assert_eq!(fixed("isNull x", Box::new(DeprecatedIsNull {})), "x == null");
+    assert_eq!(
+        fixed("isNull x", Box::new(DeprecatedIsNull {})),
+        "x == null"
+    );
     assert_eq!(
         fixed("builtins.isNull (f x)", Box::new(DeprecatedIsNull {})),
         "(f x) == null"
@@ -222,7 +228,11 @@ fn manual_optional_parenthesizes_apply_condition_and_unwraps_paren_branches() {
 
 #[test]
 fn manual_optional_is_silent_without_lib_in_scope() {
-    assert!(run("c: x: if c then [ x ] else [ ]", Box::new(ManualOptional {})).is_empty());
+    assert!(run(
+        "c: x: if c then [ x ] else [ ]",
+        Box::new(ManualOptional {})
+    )
+    .is_empty());
 }
 
 #[test]

@@ -303,9 +303,7 @@ fn empty_inherit_fix_removes() {
 fn deprecated_to_path_diag() {
     assert_eq!(
         run("toPath \"abc\""),
-        vec![
-            "[deprecated-to-path] warning 0..12 `toPath` is deprecated; use `/. +` or `./. +`"
-        ],
+        vec!["[deprecated-to-path] warning 0..12 `toPath` is deprecated; use `/. +` or `./. +`"],
     );
 }
 
@@ -324,9 +322,7 @@ fn deprecated_to_path_no_fix() {
 fn useless_has_attr_diag() {
     assert_eq!(
         run("if x ? a then x.a else 0"),
-        vec![
-            "[useless-has-attr] warning 0..24 this if-expression can be simplified with `or`"
-        ],
+        vec!["[useless-has-attr] warning 0..24 this if-expression can be simplified with `or`"],
     );
 }
 
@@ -373,10 +369,7 @@ fn useless_parens_fix_removes_parens() {
 
 #[test]
 fn useless_parens_general_case_preserves_space() {
-    assert_eq!(
-        fix_result("f (x)", "useless-parens"),
-        "f x",
-    );
+    assert_eq!(fix_result("f (x)", "useless-parens"), "f x",);
 }
 
 // --- repeated-keys ---------------------------------------------------
@@ -392,6 +385,26 @@ fn repeated_keys_diag() {
 #[test]
 fn repeated_keys_no_diag_for_two() {
     assert!(run("{ a.b = 1; a.c = 2; }").is_empty());
+}
+
+#[test]
+fn repeated_keys_no_diag_for_nested_prefix_merge() {
+    // Nix merges these bindings into one `finit.tasks."hermes-dirs"` attrset;
+    // repeating the prefix is intentional, not a flat-key style issue.
+    assert!(run(r#"{
+          finit.tasks."hermes-dirs".foo = 1;
+          finit.tasks."hermes-dirs".bar = 2;
+          finit.tasks."hermes-dirs".baz = 3;
+        }"#,)
+    .is_empty());
+}
+
+#[test]
+fn repeated_keys_still_flags_distinct_second_components() {
+    assert_eq!(
+        run("{ a.b = 1; a.c = 2; a.d = 3; }"),
+        vec!["[repeated-keys] warning 2..10 key `a` is repeated 3 times; consider nesting"],
+    );
 }
 
 // --- unquoted-uri ----------------------------------------------------

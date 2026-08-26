@@ -126,11 +126,7 @@ fn duplicate_literal_list_item_flags_repeated_primitives() {
 fn duplicate_literal_list_item_exempts_numeric_vectors() {
     // `position = [ 0 0 ]` and friends: numeric lists are coordinates
     // and dimensions, where repetition is the point.
-    assert!(run(
-        r#"[ 0 0 1.5 1.5 ]"#,
-        Box::new(DuplicateLiteralListItem {}),
-    )
-    .is_empty());
+    assert!(run(r#"[ 0 0 1.5 1.5 ]"#, Box::new(DuplicateLiteralListItem {}),).is_empty());
 }
 
 #[test]

@@ -126,10 +126,7 @@ fn curated_help(name: &str) -> Option<&'static str> {
 /// any link carries an `or` default: `types.foo or bar` is a probe
 /// with a fallback, not a hard member access, so it never fires —
 /// mirroring `UnknownBuiltin`'s `builtins ? attr` silence.
-fn member_segments<'a>(
-    model: &SemanticModel<'a>,
-    ref_range: TextRange,
-) -> Vec<&'a SyntaxToken> {
+fn member_segments<'a>(model: &SemanticModel<'a>, ref_range: TextRange) -> Vec<&'a SyntaxToken> {
     let root = model.root();
     let mut segments = Vec::new();
     let Some(innermost) = root
@@ -229,12 +226,7 @@ impl UnknownLibType {
     /// member list, and — only under `ints`/`numbers` — the second hop
     /// against the nested list. Deeper hops are type internals
     /// (`functor`, `check`, ...) and are not this rule's business.
-    fn check_members(
-        &self,
-        source: &str,
-        segments: &[&SyntaxToken],
-        diags: &mut Vec<Diagnostic>,
-    ) {
+    fn check_members(&self, source: &str, segments: &[&SyntaxToken], diags: &mut Vec<Diagnostic>) {
         let Some(first) = segments.first() else {
             return;
         };
@@ -277,7 +269,10 @@ impl UnknownLibType {
                     format!("'{member}' is not a lib.types.{name} member"),
                     second.range(),
                 )
-                .with_help(format!("valid lib.types.{name} members: {}", nested.join(", "))),
+                .with_help(format!(
+                    "valid lib.types.{name} members: {}",
+                    nested.join(", ")
+                )),
             );
         }
     }

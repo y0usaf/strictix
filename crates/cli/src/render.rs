@@ -13,10 +13,34 @@
 //! an optional help line. The JSON format mirrors the same fields as a
 //! JsonValue document, one entry per file plus a summary.
 
-use strictix_core::diagnostic::Diagnostic;
+use std::fmt::Display;
+use std::io::IsTerminal;
+
+use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
 use strictix_core::json::JsonValue;
 use strictix_syntax::TextRange;
+
+/// Enable ANSI styling only for interactive output, unless NO_COLOR is set.
+#[must_use]
+pub fn color_enabled() -> bool {
+    std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
+}
+
+fn severity_color(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Warning => "33",
+        Severity::Error => "31;1",
+    }
+}
+
+fn paint<T: Display>(enabled: bool, code: &str, value: T) -> String {
+    if enabled {
+        format!("\x1b[{code}m{value}\x1b[0m")
+    } else {
+        value.to_string()
+    }
+}
 
 /// The deterministic one-line rendering shared by CLI and tests:
 /// `[code] severity start..end message`.
@@ -36,22 +60,22 @@ pub fn one_line(diag: &Diagnostic) -> String {
 /// Render one diagnostic in the human format (path, line/col, message,
 /// source excerpt with caret, help) with the source it was found in.
 #[must_use]
-pub fn human(diag: &Diagnostic, path: &str, source: &str) -> String {
+pub fn human(diag: &Diagnostic, path: &str, source: &str, color: bool) -> String {
     let (line, col) = line_col(source, diag.range.start());
-    let mut out = format!(
-        "{path}:{line}:{col}: {}[{}]: {}",
-        diag.severity_str(),
-        diag.code,
-        diag.message
-    );
+    let severity = paint(color, severity_color(diag.severity), diag.severity_str());
+    let code = paint(color, "35", diag.code);
+    let path = paint(color, "36;1", path);
+    let mut out = format!("{path}:{line}:{col}: {severity}[{code}]: {}", diag.message);
     if let Some((text, caret)) = source_excerpt(source, diag.range) {
         out.push('\n');
         out.push_str(text);
         out.push('\n');
-        out.push_str(&caret);
+        out.push_str(&paint(color, severity_color(diag.severity), &caret));
     }
     if let Some(help) = &diag.help {
-        out.push_str("\n  help: ");
+        out.push_str("\n  ");
+        out.push_str(&paint(color, "36", "help:"));
+        out.push(' ');
         out.push_str(help);
     }
     out
@@ -119,9 +143,9 @@ pub fn json(files: &[JsonFile]) -> JsonValue {
                 ("range".to_owned(), range_json(diag.range)),
                 (
                     "help".to_owned(),
-                    diag.help.as_ref().map_or(JsonValue::Null, |h| {
-                        JsonValue::String(h.clone())
-                    }),
+                    diag.help
+                        .as_ref()
+                        .map_or(JsonValue::Null, |h| JsonValue::String(h.clone())),
                 ),
                 (
                     "fix".to_owned(),
@@ -140,7 +164,10 @@ pub fn json(files: &[JsonFile]) -> JsonValue {
             "summary".to_owned(),
             JsonValue::Object(vec![
                 ("files".to_owned(), JsonValue::Number(files.len() as f64)),
-                ("diagnostics".to_owned(), JsonValue::Number(diag_total as f64)),
+                (
+                    "diagnostics".to_owned(),
+                    JsonValue::Number(diag_total as f64),
+                ),
             ]),
         ),
     ])
@@ -184,11 +211,11 @@ pub struct JsonFile {
 /// The human summary line: `N file(s) linted, M diagnostic(s) found`,
 /// with a clean run reading `0 diagnostics found`.
 #[must_use]
-pub fn summary_line(files: usize, diagnostics: usize) -> String {
+pub fn summary_line(files: usize, diagnostics: usize, color: bool) -> String {
     let diag_part = if diagnostics == 0 {
-        "0 diagnostics found".to_owned()
+        paint(color, "32", "0 diagnostics found")
     } else {
-        format!("{diagnostics} diagnostic(s) found")
+        paint(color, "33", format!("{diagnostics} diagnostic(s) found"))
     };
     format!("{files} file(s) linted, {diag_part}")
 }
@@ -198,7 +225,7 @@ pub fn summary_line(files: usize, diagnostics: usize) -> String {
 /// so only the neighborhood of the change is shown. Pure line diff (no
 /// inter-line hunks) — enough to preview a text-splice fix.
 #[must_use]
-pub fn diff(before: &str, after: &str) -> String {
+pub fn diff(before: &str, after: &str, color: bool) -> String {
     let a: Vec<&str> = before.split('\n').collect();
     let b: Vec<&str> = after.split('\n').collect();
 
@@ -216,14 +243,10 @@ pub fn diff(before: &str, after: &str) -> String {
 
     let mut out = String::new();
     for line in &a[start..a_end] {
-        out.push('-');
-        out.push_str(line);
-        out.push('\n');
+        out.push_str(&paint(color, "31", format!("-{}\n", line)));
     }
     for line in &b[start..b_end] {
-        out.push('+');
-        out.push_str(line);
-        out.push('\n');
+        out.push_str(&paint(color, "32", format!("+{}\n", line)));
     }
     out
 }

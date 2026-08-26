@@ -1,8 +1,8 @@
 //! Rule trait, the dispatch loop, and the one registry mechanism.
 //!
 //! A rule is either a *node rule* (fires once per node of one
-//! [SyntaxKind]) or a *file rule* (fires once per file with the lazy
-//! [SemanticModel]). The registry is declared with the `rules!` macro
+//! [`SyntaxKind`]) or a *file rule* (fires once per file with the lazy
+//! [`SemanticModel`]). The registry is declared with the `rules!` macro
 //! — one declaration mechanism, no hand-wired special cases.
 
 use crate::config::LintConfig;
@@ -11,6 +11,41 @@ use crate::diagnostic::{Diagnostic, Severity};
 use crate::fix::{FixError, TextEdit};
 use crate::semantic::SemanticModel;
 use strictix_syntax::{parse, SyntaxKind, SyntaxNode};
+
+const SUPPRESSION_PREFIX: &str = "# strictix: disable-next-line=";
+
+/// Remove diagnostics covered by an immediately preceding suppression comment.
+///
+/// The deliberately narrow syntax is a full-line comment of the form
+/// `# strictix: disable-next-line=rule-code`; malformed directives and codes
+/// that do not match a diagnostic are ignored. Matching is by source line,
+/// never by byte proximity, so a suppression cannot affect its own line.
+fn apply_suppressions(source: &str, diags: &mut Vec<Diagnostic>) {
+    let mut suppressed_lines = std::collections::HashMap::<usize, Vec<&str>>::new();
+    for (line_no, line) in source.lines().enumerate() {
+        let trimmed = line.trim();
+        let Some(code) = trimmed.strip_prefix(SUPPRESSION_PREFIX) else {
+            continue;
+        };
+        if !code.is_empty() && !code.chars().any(char::is_whitespace) {
+            suppressed_lines.entry(line_no + 1).or_default().push(code);
+        }
+    }
+    let mut line_starts = vec![0usize];
+    for (offset, byte) in source.bytes().enumerate() {
+        if byte == b'\n' {
+            line_starts.push(offset + 1);
+        }
+    }
+    diags.retain(|diag| {
+        let line = line_starts
+            .partition_point(|&start| start <= diag.range.start() as usize)
+            .saturating_sub(1);
+        !suppressed_lines
+            .get(&line)
+            .is_some_and(|codes| codes.contains(&diag.code))
+    });
+}
 
 /// A single lint rule.
 ///
@@ -41,13 +76,24 @@ pub trait Rule: Send + Sync {
     /// the semantic model (it is lazy and only file rules build it).
     fn check_node(&self, _node: &SyntaxNode, _source: &str, _diags: &mut Vec<Diagnostic>) {}
 
-    /// Inspect the whole file through the (lazy) semantic model.
     fn check_file(
         &self,
         _model: &SemanticModel,
         _config: &LintConfig,
         _diags: &mut Vec<Diagnostic>,
     ) {
+    }
+
+    /// Inspect a file with optional project-wide static context. The default
+    /// preserves the single-file rule API.
+    fn check_file_project(
+        &self,
+        model: &SemanticModel,
+        config: &LintConfig,
+        _project: Option<&crate::project::ProjectContext>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        self.check_file(model, config, diags);
     }
 }
 
@@ -65,6 +111,35 @@ pub fn run_rules(
     source: &str,
     diags: &mut Vec<Diagnostic>,
 ) {
+    run_rules_project_inner(rules, tree, model, config, source, None, false, diags);
+}
+
+pub fn run_rules_project(
+    rules: &[Box<dyn Rule>],
+    tree: &SyntaxNode,
+    model: &SemanticModel,
+    config: &LintConfig,
+    source: &str,
+    project: Option<&crate::project::ProjectContext>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    run_rules_project_inner(rules, tree, model, config, source, project, true, diags);
+}
+
+#[allow(clippy::too_many_arguments)] // The dispatch seam keeps node/file/project context explicit.
+fn run_rules_project_inner(
+    rules: &[Box<dyn Rule>],
+    tree: &SyntaxNode,
+    model: &SemanticModel,
+    config: &LintConfig,
+    source: &str,
+    project: Option<&crate::project::ProjectContext>,
+    include_syntax: bool,
+    diags: &mut Vec<Diagnostic>,
+) {
+    if include_syntax {
+        syntax_diagnostics(tree, diags);
+    }
     for rule in rules {
         if !config.is_enabled(rule.code()) {
             continue;
@@ -77,8 +152,20 @@ pub fn run_rules(
                     }
                 }
             }
-            None => rule.check_file(model, config, diags),
+            None => rule.check_file_project(model, config, project, diags),
         }
+    }
+    apply_suppressions(source, diags);
+}
+
+fn syntax_diagnostics(tree: &SyntaxNode, diags: &mut Vec<Diagnostic>) {
+    for node in tree.error_nodes() {
+        diags.push(Diagnostic::new(
+            "syntax-error",
+            Severity::Error,
+            "syntax error: malformed syntax",
+            node.content_range(),
+        ));
     }
 }
 
@@ -122,6 +209,17 @@ pub fn lint(
     config: &LintConfig,
     fix: bool,
 ) -> LintRun {
+    lint_project(rules, source, path, config, fix, None)
+}
+
+pub fn lint_project(
+    rules: &[Box<dyn Rule>],
+    source: &str,
+    path: Option<&std::path::Path>,
+    config: &LintConfig,
+    fix: bool,
+    project: Option<&crate::project::ProjectContext>,
+) -> LintRun {
     let mut context = Context::new(source.to_string());
     let mut diagnostics = Vec::new();
     let mut passes = 0usize;
@@ -129,9 +227,17 @@ pub fn lint(
 
     loop {
         let tree = parse(context.source());
-        let model = SemanticModel::new(context.source(), &tree).with_path(path);
         let mut diags = Vec::new();
-        run_rules(rules, &tree, &model, config, context.source(), &mut diags);
+        let model = SemanticModel::new(context.source(), &tree).with_path(path);
+        run_rules_project(
+            rules,
+            &tree,
+            &model,
+            config,
+            context.source(),
+            project,
+            &mut diags,
+        );
 
         let edits: Vec<TextEdit> = if fix {
             diags

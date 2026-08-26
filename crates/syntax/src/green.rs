@@ -177,6 +177,11 @@ impl SyntaxNode {
             Some(node)
         })
     }
+    /// All recovered malformed regions, in source order.
+    pub fn error_nodes(&self) -> impl Iterator<Item = &SyntaxNode> {
+        self.descendants()
+            .filter(|node| node.kind() == SyntaxKind::ErrorNode)
+    }
     /// The source text this node covers.
     #[must_use]
     pub fn text<'a>(&self, source: &'a str) -> &'a str {

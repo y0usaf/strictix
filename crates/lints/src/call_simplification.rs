@@ -237,7 +237,11 @@ fn two_arg_call<'a>(
 
 /// Matches `node` as exactly the one-argument call `name arg` of the
 /// global builtin `name` (bare or `builtins.`-qualified).
-fn one_arg_call<'a>(model: &SemanticModel<'a>, node: &'a SyntaxNode, name: &str) -> Option<Expr<'a>> {
+fn one_arg_call<'a>(
+    model: &SemanticModel<'a>,
+    node: &'a SyntaxNode,
+    name: &str,
+) -> Option<Expr<'a>> {
     let apply = ApplyExpr::cast(node)?;
     let callee = apply.func()?;
     if !is_global_callee(model, callee, name) {
@@ -256,10 +260,7 @@ fn one_arg_call<'a>(model: &SemanticModel<'a>, node: &'a SyntaxNode, name: &str)
 /// contains `\`, which fails [is_bare_key], so escaped keys always
 /// stay quoted verbatim.
 fn plain_string_inner<'s>(string: StringExpr<'_>, source: &'s str) -> Option<&'s str> {
-    if string
-        .parts()
-        .any(|p| matches!(p, StringPart::Interp(_)))
-    {
+    if string.parts().any(|p| matches!(p, StringPart::Interp(_))) {
         return None;
     }
     let range = string.syntax().content_range();
@@ -331,7 +332,9 @@ impl Rule for ManualHasattr {
                     range,
                 )
                 .with_help(format!("write `{replacement}`"))
-                .with_fix(Fix::new("replace hasAttr call with the ? operator").edit(range, replacement)),
+                .with_fix(
+                    Fix::new("replace hasAttr call with the ? operator").edit(range, replacement),
+                ),
             );
         });
     }
@@ -429,16 +432,11 @@ impl Rule for DeprecatedIsNull {
             }
             let range = node.content_range();
             diags.push(
-                Diagnostic::new(
-                    self.code(),
-                    self.severity(),
-                    "isNull is deprecated",
-                    range,
-                )
-                .with_help(format!(
-                    "isNull has been deprecated since Nix 2.0; write `{replacement}` instead"
-                ))
-                .with_fix(Fix::new("replace isNull with == null").edit(range, replacement)),
+                Diagnostic::new(self.code(), self.severity(), "isNull is deprecated", range)
+                    .with_help(format!(
+                        "isNull has been deprecated since Nix 2.0; write `{replacement}` instead"
+                    ))
+                    .with_fix(Fix::new("replace isNull with == null").edit(range, replacement)),
             );
         });
     }
@@ -526,8 +524,7 @@ impl Rule for ManualOptional {
                 }
                 _ => return,
             };
-            let mut replacement =
-                format!("lib.{helper} {} {arg}", argument_text(cond, source));
+            let mut replacement = format!("lib.{helper} {} {arg}", argument_text(cond, source));
             if parent_requires_parens(ancestors) {
                 replacement = format!("({replacement})");
             }

@@ -167,7 +167,9 @@ impl Rule for AccidentalPathDivision {
             // Exactly `digits / digits`: both split halves being all
             // ASCII digits also enforces the single slash and rules
             // out `./`, `../`, `/`, and `~` prefixes.
-            let Some((num, den)) = text.split_once('/') else { continue };
+            let Some((num, den)) = text.split_once('/') else {
+                continue;
+            };
             if num.is_empty()
                 || den.is_empty()
                 || !num.bytes().all(|b| b.is_ascii_digit())
@@ -293,7 +295,9 @@ fn path_exists_arguments<'a>(root: &'a SyntaxNode, source: &'a str) -> Vec<&'a s
         if node.kind() != K::ApplyExpr {
             return;
         }
-        let Some(apply) = ApplyExpr::cast(node) else { return };
+        let Some(apply) = ApplyExpr::cast(node) else {
+            return;
+        };
         let Some(func) = apply.func() else { return };
         // Node ranges flush leading trivia into the node; trim it away
         // before comparing spellings.
@@ -314,8 +318,7 @@ fn path_exists_arguments<'a>(root: &'a SyntaxNode, source: &'a str) -> Vec<&'a s
 /// argument expression.
 fn is_import_target(model: &SemanticModel, tok: &SyntaxToken) -> bool {
     model.import_sites().iter().any(|site| {
-        site.path_range.start() <= tok.range().start()
-            && tok.range().end() <= site.path_range.end()
+        site.path_range.start() <= tok.range().start() && tok.range().end() <= site.path_range.end()
     })
 }
 
