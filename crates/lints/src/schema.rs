@@ -785,6 +785,41 @@ fn literal_matches_type(ty: &str, kind: LitKind) -> Option<bool> {
     Some(expected.contains(&kind))
 }
 
+/// Parse the exact inclusive range suffix used by integer option types.
+/// Returning `None` keeps unfamiliar schema prose and overflowing bounds
+/// out of range checking.
+fn integer_range(ty: &str) -> Option<(i128, i128)> {
+    let phrase = ty.split_once("; ")?.1;
+    let rest = phrase.strip_prefix("between ")?;
+    let rest = rest.strip_suffix(" (both inclusive)")?;
+    let (min, max) = rest.split_once(" and ")?;
+    if min.is_empty()
+        || max.is_empty()
+        || min.chars().any(char::is_whitespace)
+        || max.chars().any(char::is_whitespace)
+    {
+        return None;
+    }
+    Some((min.parse().ok()?, max.parse().ok()?))
+}
+
+/// Parse an integer literal, allowing only unary minus and parentheses.
+/// This deliberately does not evaluate arithmetic or identifiers.
+fn integer_literal(model: &SemanticModel<'_>, value: Expr<'_>) -> Option<i128> {
+    match value {
+        Expr::Int(token) => token.text(model.source()).parse().ok(),
+        Expr::Paren(paren) => integer_literal(model, paren.expr()?),
+        Expr::Unary(unary) => {
+            let minus = unary
+                .syntax()
+                .child_tokens()
+                .any(|token| token.kind() == SyntaxKind::Minus);
+            minus.then(|| integer_literal(model, unary.operand()?)?.checked_neg())?
+        }
+        _ => None,
+    }
+}
+
 // --- rules --------------------------------------------------------------
 
 /// Flags option paths that options.json does not declare, on both
@@ -948,6 +983,30 @@ impl Rule for OptionTypeMismatch {
                             write.path,
                             ty,
                             kind.name()
+                        ),
+                        trimmed_range(write.value),
+                    )
+                    .with_help(format!(
+                        "options.json declares '{}' with type '{}'",
+                        write.path, ty
+                    )),
+                );
+                continue;
+            }
+            let Some((min, max)) = integer_range(ty) else {
+                continue;
+            };
+            let Some(value) = integer_literal(model, write.value) else {
+                continue;
+            };
+            if !(min..=max).contains(&value) {
+                diags.push(
+                    Diagnostic::new(
+                        self.code(),
+                        self.severity(),
+                        format!(
+                            "option '{}' literal {} is out of range; expected between {} and {} (both inclusive)",
+                            write.path, value, min, max
                         ),
                         trimmed_range(write.value),
                     )

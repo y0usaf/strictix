@@ -215,6 +215,62 @@ fn integer_option_rejects_string_literal() {
 }
 
 #[test]
+fn integer_literal_out_of_range_is_rejected() {
+    let src = "{ pkgs, ... }: { services.example.port = 65536; }";
+    assert_eq!(
+        run(src),
+        [format!(
+            "[option-type-mismatch] error {} option 'services.example.port' literal 65536 is out of range; expected between 0 and 65535 (both inclusive)",
+            span(src, "65536")
+        )]
+    );
+}
+
+#[test]
+fn integer_range_accepts_boundaries_and_parenthesized_negative_literals() {
+    assert_eq!(
+        run("{ pkgs, ... }: { services.example.port = (0); }"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        run("{ pkgs, ... }: { services.example.port = (65535); }"),
+        Vec::<String>::new()
+    );
+    let src = "{ pkgs, ... }: { services.example.port = (-1); }";
+    assert_eq!(
+        run(src),
+        [format!(
+            "[option-type-mismatch] error {} option 'services.example.port' literal -1 is out of range; expected between 0 and 65535 (both inclusive)",
+            span(src, "-1")
+        )]
+    );
+}
+
+#[test]
+fn non_literal_integer_expressions_stay_silent() {
+    for value in [
+        "65535 + 1",
+        "port",
+        "999999999999999999999999999999999999999999999999999999999999999999",
+    ] {
+        let src = format!("{{ pkgs, ... }}: {{ services.example.port = {value}; }}");
+        assert_eq!(run(&src), Vec::<String>::new(), "value: {value}");
+    }
+}
+
+#[test]
+fn float_integer_values_keep_the_existing_type_mismatch() {
+    let src = "{ pkgs, ... }: { services.example.port = 1.0; }";
+    assert_eq!(
+        run(src),
+        [format!(
+            "[option-type-mismatch] error {} option 'services.example.port' expects 16 bit unsigned integer; between 0 and 65535 (both inclusive), got float",
+            span(src, "1.0")
+        )]
+    );
+}
+
+#[test]
 fn string_option_rejects_integer_literal() {
     let src = "{ pkgs, ... }: { services.example.name = 42; }";
     assert_eq!(
