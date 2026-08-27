@@ -15,8 +15,8 @@ use strictix_core::fix::Fix;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::{BindingKind, ScopeId, SemanticModel};
 use strictix_syntax::{
-    AstNode, AttrItem, AttrName, BinExpr, Binding, Expr, Formals, InheritStmt, LambdaExpr,
-    LambdaParam, SelectExpr, SyntaxKind, SyntaxNode, TextRange, WithExpr,
+    AstNode, AttrItem, AttrName, BinExpr, Binding, Expr, Formals, LambdaExpr, LambdaParam,
+    LetExpr, RecAttrsetExpr, SelectExpr, SyntaxKind, SyntaxNode, TextRange, WithExpr,
 };
 /// The innermost [Binding] node whose range contains `name_range`, if
 /// any. Bindings nest when a value contains a `let` or attrset, so a
@@ -286,9 +286,11 @@ impl Rule for UnusedLambdaParam {
 /// so only `_`-prefixed names are exempt otherwise.
 pub struct UnusedFormal;
 
-/// Flags inherited names that are never referenced by the surrounding
-/// recursive scope. In a plain attrset, the inherited field is the value
-/// produced by that attrset, so the binding has no local use to inspect.
+/// Flags inherited names that are never referenced by the scope that can
+/// still see them. A plain attrset's inherit defines one of the attrset's
+/// own output fields — the attribute definition is the use, and the field
+/// is consumed outside this scope — so a dead inherit can only live in a
+/// `rec` attrset or a let-binding block, where the name stays in scope.
 pub struct UnusedInherit;
 
 impl Rule for UnusedInherit {
@@ -299,7 +301,7 @@ impl Rule for UnusedInherit {
         "Unused inherit"
     }
     fn description(&self) -> &'static str {
-        "Flags inherited names that are never used by the recursive scope that contains them."
+        "Flags inherited names in rec attrsets and let bindings that are never used in that scope."
     }
     fn severity(&self) -> Severity {
         Severity::Warning
@@ -307,38 +309,62 @@ impl Rule for UnusedInherit {
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         for node in model.root().descendants() {
-            let Some(inherit) = InheritStmt::cast(node) else {
+            match node.kind() {
+                SyntaxKind::LetExpr => {
+                    if let Some(let_expr) = LetExpr::cast(node) {
+                        if let Some(bindings) = let_expr.bindings() {
+                            check_inherit_scope(bindings.items(), model, diags);
+                        }
+                    }
+                }
+                SyntaxKind::RecAttrsetExpr => {
+                    if let Some(attrset) = RecAttrsetExpr::cast(node).and_then(|r| r.attrset()) {
+                        check_inherit_scope(attrset.items(), model, diags);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Checks the inherits of one scope: a let-binding block or a `rec`
+/// attrset body. The inherited name is dead when nothing else in the scope
+/// references it; the name token itself is not a reference.
+fn check_inherit_scope<'a>(
+    items: impl Iterator<Item = AttrItem<'a>>,
+    model: &SemanticModel,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for item in items {
+        let AttrItem::Inherit(inherit) = item else {
+            continue;
+        };
+        for name_token in inherit.names() {
+            let Some(binding) = model
+                .bindings()
+                .iter()
+                .find(|binding| binding.name.range() == name_token.range())
+            else {
                 continue;
             };
-            for name_token in inherit.names() {
-                let Some(binding) = model
-                    .bindings()
-                    .iter()
-                    .find(|binding| binding.name.range() == name_token.range())
-                else {
-                    continue;
-                };
-                // A sourceless inherit in a recursive attrset resolves its
-                // own name while building the output field. That is not a
-                // use of the inherited value.
-                let used_elsewhere = binding
-                    .references
-                    .iter()
-                    .any(|range| *range != name_token.range());
-                if used_elsewhere {
-                    continue;
-                }
-                let name = name_token.text(model.source());
-                if name.starts_with('_') {
-                    continue;
-                }
-                diags.push(Diagnostic::new(
-                    self.code(),
-                    self.severity(),
-                    format!("inherited name '{name}' is never used"),
-                    name_token.range(),
-                ));
+            let used_elsewhere = binding
+                .references
+                .iter()
+                .any(|range| *range != name_token.range());
+            if used_elsewhere {
+                continue;
             }
+            let name = name_token.text(model.source());
+            if name.starts_with('_') {
+                continue;
+            }
+            diags.push(Diagnostic::new(
+                "unused-inherit",
+                Severity::Warning,
+                format!("inherited name '{name}' is never used"),
+                name_token.range(),
+            ));
         }
     }
 }
