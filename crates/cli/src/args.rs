@@ -58,6 +58,7 @@ pub struct Args {
     pub format: Format,
     pub ignore_file: Option<PathBuf>,
     pub disabled: Vec<String>,
+    pub enabled: Vec<String>,
     pub schema: Option<PathBuf>,
     pub dry_run: bool,
     pub help: bool,
@@ -77,6 +78,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut format = Format::Human;
     let mut ignore_file = None;
     let mut disabled = Vec::new();
+    let mut enabled = Vec::new();
     let mut schema = None;
     let mut dry_run = false;
     let mut help = false;
@@ -111,6 +113,9 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                     let value = next_value(args, &mut i, "--disable")?;
                     disabled.push(value);
                 }
+                "--enable" => {
+                    enabled.push(next_value(args, &mut i, "--enable")?);
+                }
                 "--schema" => {
                     let value = next_value(args, &mut i, "--schema")?;
                     schema = Some(PathBuf::from(value));
@@ -138,6 +143,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         format,
         ignore_file,
         disabled,
+        enabled,
         schema,
         dry_run,
         help,
@@ -186,6 +192,7 @@ OPTIONS:
     --format FORMAT       Output format: human or json (default: human)
     --ignore-file FILE    Ignore patterns (default: ./.strictixignore if present)
     --disable CODE        Skip a rule by code (repeatable)
+    --enable CODE         Enable an opt-in rule (repeatable; --disable wins)
     --schema FILE         options.json path, enabling the unknown-option rule
     --dry-run             (fix) show what would change without writing
 "

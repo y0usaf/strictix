@@ -7,36 +7,50 @@
 
 pub mod advanced_rules;
 pub mod bare_import_in_list;
+pub mod builtin_argument_type;
 pub mod call_simplification;
+pub mod cognitive_complexity;
 pub mod duplicate_attr;
 pub mod duplicate_formal;
 pub mod duplicate_inherit;
+pub mod duplicate_list_to_attrs_name;
 pub mod file_rules;
 pub mod ill_typed_binop;
 pub mod ill_typed_unary_op;
 pub mod interpolation_rules;
+pub mod invalid_list_access;
+mod lib_helpers;
 pub mod lib_type_rules;
+pub mod missing_attribute;
+pub mod missing_function_argument;
 pub mod node_rules;
 pub mod non_boolean_condition;
 pub mod non_callable_application;
 pub mod path_rules;
 pub mod reference_rules;
 pub mod schema;
+pub mod shallow_merge_overwrite;
 pub mod simplification_rules;
+pub mod singleton_optionals;
+mod static_binding;
 pub mod style_rules;
 pub mod suggested_rules;
+pub mod unexpected_function_argument;
 
 use advanced_rules::{
     BuiltinArity, DuplicateFunctionArgument, DynamicImport, SuspiciousImportArgument,
     SuspiciousRecursion, UnreachableBranch, UnsafeWithShadowing,
 };
 use bare_import_in_list::BareImportInList;
+use builtin_argument_type::BuiltinArgumentType;
 use call_simplification::{
     DeprecatedIsNull, ManualGetattr, ManualHasattr, ManualOptional, OptionalListArgument,
 };
+use cognitive_complexity::CognitiveComplexity;
 use duplicate_attr::DuplicateAttribute;
 use duplicate_formal::DuplicateFormal;
 use duplicate_inherit::DuplicateInherit;
+use duplicate_list_to_attrs_name::DuplicateListToAttrsName;
 use file_rules::{
     CircularLet, CyclomaticComplexity, ImportCycle, MissingImport, ReboundConstant, RedundantWith,
     SelfReferentialLet, ShadowedBinding, ShadowedFormal, UnnecessaryOr, UnusedFormal,
@@ -45,17 +59,22 @@ use file_rules::{
 use ill_typed_binop::IllTypedBinop;
 use ill_typed_unary_op::IllTypedUnaryOp;
 use interpolation_rules::{CoercedInterpolation, RedundantInterpolation};
+use invalid_list_access::InvalidListAccess;
 use lib_type_rules::UnknownLibType;
+use missing_attribute::MissingAttribute;
+use missing_function_argument::MissingFunctionArgument;
 use node_rules::{AssertTrue, ConstantIf, ConstantIfBranches, Tautology};
 use non_boolean_condition::NonBooleanCondition;
 use non_callable_application::NonCallableApplication;
 use path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
 use reference_rules::{UndefinedVariable, UnknownBuiltin};
 use schema::{OptionTypeMismatch, UnknownOption};
+use shallow_merge_overwrite::ShallowMergeOverwrite;
 use simplification_rules::{
     BooleanIf, ConstantBooleanBinop, ConstantBooleanNot, EmptyAttrsetMerge, IdentityLambda,
     NegationSimplification, TrivialLet,
 };
+use singleton_optionals::SingletonOptionals;
 use strictix_core::rules::Rule;
 use style_rules::{
     CollapsibleLetIn, DeprecatedToPath, EmptyInherit, EmptyLetIn, EmptyListConcat, EmptyPattern,
@@ -66,6 +85,7 @@ use suggested_rules::{
     AssertFalse, DuplicateLiteralListItem, LiteralDivisionByZero, RedundantBooleanComparison,
     UnnecessaryRec, UnusedRecBinding,
 };
+use unexpected_function_argument::UnexpectedFunctionArgument;
 
 /// The full builtin registry, in declaration order.
 ///
@@ -75,6 +95,13 @@ use suggested_rules::{
 #[must_use]
 pub fn all_rules() -> Vec<Box<dyn Rule>> {
     strictix_core::rules! {
+        MissingAttribute,
+        DuplicateListToAttrsName,
+        ShallowMergeOverwrite,
+        BuiltinArgumentType,
+        InvalidListAccess,
+        MissingFunctionArgument,
+        UnexpectedFunctionArgument,
         BuiltinArity,
         DuplicateFunctionArgument,
         DynamicImport,
@@ -131,6 +158,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         DuplicateLiteralListItem,
         CircularLet,
         CyclomaticComplexity,
+        CognitiveComplexity,
         ReboundConstant,
         CoercedInterpolation,
         RedundantInterpolation,
@@ -151,5 +179,6 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         DeprecatedIsNull,
         ManualOptional,
         OptionalListArgument,
+        SingletonOptionals,
     }
 }

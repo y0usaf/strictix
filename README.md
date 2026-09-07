@@ -39,15 +39,28 @@ $ strictix fix slop.nix
 
 ## Rules
 
-75 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
+85 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
 | Dead code | unused-let-binding, unused-lambda-param, unused-formal, unused-inherit, unused-rec-binding, redundant-with, unnecessary-rec |
-| Certain evaluation errors | self-referential-let, circular-let, undefined-variable, non-boolean-condition, ill-typed-binop, ill-typed-unary-op, non-callable-application, literal-division-by-zero, coerced-interpolation, assert-false, duplicate-attribute, duplicate-formal, dangling-path, missing-import, import-cycle |
+| Certain evaluation errors | self-referential-let, circular-let, undefined-variable, non-boolean-condition, ill-typed-binop, ill-typed-unary-op, non-callable-application, literal-division-by-zero, coerced-interpolation, assert-false, duplicate-attribute, duplicate-formal, dangling-path, missing-import, import-cycle, missing-function-argument, unexpected-function-argument, missing-attribute, builtin-argument-type, invalid-list-access |
 | Hallucination checks | unknown-option, option-type-mismatch, unknown-builtin, unknown-lib-type |
-| Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or |
-| Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, deprecated-is-null, deprecated-to-path |
+| Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, shallow-merge-overwrite (opt-in) |
+| Maintainability | cyclomatic-complexity, cognitive-complexity |
+| Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, deprecated-is-null, deprecated-to-path |
+
+`cognitive-complexity` warns when a lambda scores above **5**. It counts
+control-flow nesting, conditional helpers (`lib.mkIf`, `lib.optional*`),
+and boolean operator sequences, measuring nested lambdas separately. Ordinary
+attribute-set nesting adds no cost. It has no automatic fix. See [scoring and default calibration](docs/cognitive-complexity.md) for the
+Nix-specific algorithm and measurements from `~/finix`.
+
+`singleton-optionals` simplifies `lib.optionals condition [value]` to
+`lib.optional condition value`. Qualified calls have an automatic fix that
+preserves comments and expression grouping. Inherited or aliased calls are
+reported without a fix because `optional` may not be in scope. Empty lists,
+multi-item lists, and explicit nested-list elements are left alone.
 
 `strictix explain <code>` prints a rule's full description:
 
@@ -60,6 +73,23 @@ kind: node
 description: Flags a let with exactly one binding whose body is exactly
 that binding's name: `let x = e; in x` is just `e`.
 ```
+
+The semantic checks conservatively inspect literal values and known local
+bindings; dynamic values remain unknown. The new argument, attribute, builtin-type, list-access, duplicate-name, and
+merge checks report diagnostics without automatic fixes.
+
+`shallow-merge-overwrite` is opt-in because replacing a nested attribute set
+with `//` can be intentional. Enable it with
+`strictix check . --enable shallow-merge-overwrite`, or in `strictix.toml`:
+
+```toml
+[lint]
+enabled = ["shallow-merge-overwrite"]
+```
+
+`--enable` is repeatable. `disabled` / `--disable` takes precedence over explicit
+enabling. `strictix list` marks opt-in rules; `strictix explain` shows whether a
+rule runs by default.
 
 Config (strictix.toml) toggles rules; .strictixignore prunes paths.
 For a one-off finding, put a full-line `# strictix: disable-next-line=CODE`

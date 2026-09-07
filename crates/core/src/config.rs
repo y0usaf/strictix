@@ -11,6 +11,8 @@ use std::path::PathBuf;
 /// whether the options schema rule is active.
 #[derive(Debug, Clone, Default)]
 pub struct LintConfig {
+    /// Opt-in rule codes explicitly enabled. `disabled` takes precedence.
+    pub enabled: Vec<String>,
     /// Rule codes to skip. A rule whose code appears here never fires.
     pub disabled: Vec<String>,
     /// options.json path (M8); `None` = schema rule off.
@@ -18,6 +20,12 @@ pub struct LintConfig {
 }
 
 impl LintConfig {
+    /// Builder: replace the list of explicitly enabled rules.
+    pub fn with_enabled(mut self, codes: impl IntoIterator<Item = String>) -> Self {
+        self.enabled = codes.into_iter().collect();
+        self
+    }
+
     /// Whether the rule with `code` should run: true unless `disabled`
     /// contains `code`.
     #[must_use]

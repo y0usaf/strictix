@@ -11,7 +11,7 @@
 //! ```
 //!
 //! Supported: `#` comments (full line), blank lines, the `[lint]`
-//! section, `disabled` (array of strings), `schema` (string). Unknown
+//! section, `disabled` and `enabled` (arrays of strings), `schema` (string). Unknown
 //! keys and unknown sections are ignored; missing keys are fine.
 //!
 //! ponytail: no trailing comments, no multiline arrays, no other TOML
@@ -42,33 +42,30 @@ pub fn load_config(
     flags: &[String],
     schema_flag: Option<&Path>,
 ) -> Result<LintConfig, String> {
-    let (mut disabled, schema) = match config_path {
+    let mut config = match config_path {
         Some(path) => {
             let text = std::fs::read_to_string(path)
                 .map_err(|e| format!("cannot read config file {}: {e}", path.display()))?;
             parse_config(&text)
                 .map_err(|e| format!("cannot parse config file {}: {e}", path.display()))?
         }
-        None => (Vec::new(), None),
+        None => LintConfig::default(),
     };
 
     for code in flags {
-        if !disabled.contains(code) {
-            disabled.push(code.clone());
+        if !config.disabled.contains(code) {
+            config.disabled.push(code.clone());
         }
     }
 
-    let schema = schema_flag
-        .map(PathBuf::from)
-        .or_else(|| schema.map(PathBuf::from));
+    config.schema = schema_flag.map(PathBuf::from).or(config.schema);
 
-    Ok(LintConfig { disabled, schema })
+    Ok(config)
 }
 
-/// Parse the strictix.toml subset into (disabled, schema).
-fn parse_config(text: &str) -> Result<(Vec<String>, Option<String>), String> {
-    let mut disabled = Vec::new();
-    let mut schema = None;
+/// Parse the strictix.toml subset.
+fn parse_config(text: &str) -> Result<LintConfig, String> {
+    let mut config = LintConfig::default();
     let mut in_lint = false;
 
     for (line_no, raw) in text.lines().enumerate() {
@@ -91,19 +88,23 @@ fn parse_config(text: &str) -> Result<(Vec<String>, Option<String>), String> {
         let value = value.trim();
         match key {
             "disabled" => {
-                disabled =
+                config.disabled =
+                    parse_string_array(value).map_err(|e| format!("line {}: {e}", line_no + 1))?;
+            }
+            "enabled" => {
+                config.enabled =
                     parse_string_array(value).map_err(|e| format!("line {}: {e}", line_no + 1))?;
             }
             "schema" => {
-                schema = Some(
+                config.schema = Some(PathBuf::from(
                     parse_toml_string(value).map_err(|e| format!("line {}: {e}", line_no + 1))?,
-                );
+                ));
             }
             _ => {} // unknown key ignored
         }
     }
 
-    Ok((disabled, schema))
+    Ok(config)
 }
 
 /// Parse a TOML array of strings: `["a", "b"]`.

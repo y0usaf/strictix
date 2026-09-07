@@ -15,8 +15,8 @@ use strictix_core::fix::Fix;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::{BindingKind, ScopeId, SemanticModel};
 use strictix_syntax::{
-    AstNode, AttrItem, AttrName, BinExpr, Binding, Expr, Formals, LambdaExpr, LambdaParam,
-    LetExpr, RecAttrsetExpr, SelectExpr, SyntaxKind, SyntaxNode, TextRange, WithExpr,
+    AstNode, AttrItem, AttrName, BinExpr, Binding, Expr, Formals, LambdaExpr, LambdaParam, LetExpr,
+    RecAttrsetExpr, SelectExpr, SyntaxKind, SyntaxNode, TextRange, WithExpr,
 };
 /// The innermost [Binding] node whose range contains `name_range`, if
 /// any. Bindings nest when a value contains a `let` or attrset, so a

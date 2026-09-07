@@ -65,6 +65,11 @@ pub trait Rule: Send + Sync {
     /// Severity of the diagnostics this rule emits.
     fn severity(&self) -> Severity;
 
+    /// Whether this rule runs without an explicit configuration opt-in.
+    fn default_enabled(&self) -> bool {
+        true
+    }
+
     /// `Some(kind)` makes this a node rule: [Self::check_node] fires
     /// once per node of that kind. `None` makes it a file rule:
     /// [Self::check_file] fires once per file.
@@ -141,7 +146,9 @@ fn run_rules_project_inner(
         syntax_diagnostics(tree, diags);
     }
     for rule in rules {
-        if !config.is_enabled(rule.code()) {
+        if !config.is_enabled(rule.code())
+            || (!rule.default_enabled() && !config.enabled.iter().any(|code| code == rule.code()))
+        {
             continue;
         }
         match rule.node_kind() {

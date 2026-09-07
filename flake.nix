@@ -26,11 +26,11 @@
 
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
-          packages = with pkgs; [
-            cargo
-            rustc
-            rustfmt
-            clippy
+          packages = [
+            pkgs.cargo
+            pkgs.rustc
+            pkgs.rustfmt
+            pkgs.clippy
           ];
         };
       });

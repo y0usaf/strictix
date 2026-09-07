@@ -74,11 +74,16 @@ fn run_list() -> ExitCode {
             "file"
         };
         println!(
-            "{:<24} {:<28} {:<8} {}",
+            "{:<24} {:<28} {:<8} {}{}",
             rule.code(),
             rule.name(),
             severity_str(rule.severity()),
-            kind
+            kind,
+            if rule.default_enabled() {
+                ""
+            } else {
+                " (opt-in)"
+            }
         );
     }
     ExitCode::SUCCESS
@@ -105,6 +110,7 @@ fn run_explain(args: &Args) -> ExitCode {
     println!("name: {}", rule.name());
     println!("severity: {}", severity_str(rule.severity()));
     println!("kind: {kind}");
+    println!("default-enabled: {}", rule.default_enabled());
     println!("description: {}", rule.description());
     ExitCode::SUCCESS
 }
@@ -272,7 +278,9 @@ fn resolve_config(args: &Args) -> Result<LintConfig, String> {
             }
         }
     };
-    config::load_config(config_path, &args.disabled, args.schema.as_deref())
+    let mut config = config::load_config(config_path, &args.disabled, args.schema.as_deref())?;
+    config.enabled.extend(args.enabled.iter().cloned());
+    Ok(config)
 }
 
 /// Resolve the ignore file: --ignore-file if given, else the default

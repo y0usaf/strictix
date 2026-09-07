@@ -292,3 +292,41 @@ fn missing_path_is_an_error() {
         "stderr carries error: prefix"
     );
 }
+
+#[test]
+fn shallow_merge_requires_opt_in_and_disable_wins() {
+    let dir = std::env::temp_dir().join(format!("strictix-opt-in-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("input.nix"), "{ a.x = 1; } // { a.y = 2; }").unwrap();
+    let has_warning = |out: Output| {
+        assert!(matches!(out.status.code(), Some(0 | 1)));
+        String::from_utf8_lossy(&out.stdout).contains("shallow-merge-overwrite")
+    };
+    assert!(!has_warning(run_in(&dir, &["check", "input.nix"])));
+    assert!(has_warning(run_in(
+        &dir,
+        &["check", "input.nix", "--enable", "shallow-merge-overwrite"]
+    )));
+    std::fs::write(
+        dir.join("strictix.toml"),
+        "[lint]\nenabled = [\"shallow-merge-overwrite\"]\n",
+    )
+    .unwrap();
+    assert!(has_warning(run_in(&dir, &["check", "input.nix"])));
+    assert!(!has_warning(run_in(
+        &dir,
+        &["check", "input.nix", "--disable", "shallow-merge-overwrite"]
+    )));
+    assert!(!has_warning(run_in(
+        &dir,
+        &[
+            "check",
+            "input.nix",
+            "--enable",
+            "shallow-merge-overwrite",
+            "--disable",
+            "shallow-merge-overwrite"
+        ]
+    )));
+    std::fs::remove_dir_all(dir).unwrap();
+}

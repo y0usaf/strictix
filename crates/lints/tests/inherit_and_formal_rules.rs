@@ -71,10 +71,7 @@ fn unused_inherit_flags_only_unused_names() {
 #[test]
 fn unused_inherit_flags_unused_let_inherit() {
     assert_eq!(
-        run(
-            "let inherit (pkgs) a; in 1",
-            vec![Box::new(UnusedInherit)],
-        ),
+        run("let inherit (pkgs) a; in 1", vec![Box::new(UnusedInherit)],),
         ["[unused-inherit] warning 19..20 inherited name 'a' is never used"]
     );
 }
@@ -84,10 +81,7 @@ fn unused_inherit_spares_plain_attrset_fields() {
     // The inherited name defines an output field; its callers consume it
     // outside the attrset, so there is no local use to expect.
     assert_eq!(
-        run(
-            "f = a: b: { inherit a b; };",
-            vec![Box::new(UnusedInherit)],
-        ),
+        run("f = a: b: { inherit a b; };", vec![Box::new(UnusedInherit)],),
         Vec::<String>::new()
     );
 }
@@ -95,10 +89,7 @@ fn unused_inherit_spares_plain_attrset_fields() {
 #[test]
 fn unused_inherit_spares_used_let_inherit() {
     assert_eq!(
-        run(
-            "let inherit a; in a + 1",
-            vec![Box::new(UnusedInherit)],
-        ),
+        run("let inherit a; in a + 1", vec![Box::new(UnusedInherit)],),
         Vec::<String>::new()
     );
 }

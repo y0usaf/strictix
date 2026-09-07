@@ -1,0 +1,4 @@
+# Test inputs include intentional lint errors and unresolved example paths.
+crates/cli/tests/fixtures/
+crates/lints/tests/fixtures/
+crates/syntax/tests/corpus/

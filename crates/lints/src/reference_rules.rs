@@ -109,6 +109,7 @@ const VALID_BUILTINS: &[&str] = &[
     "listToAttrs",
     "map",
     "mapAttrs",
+    "match",
     "path",
     "pathExists",
     "placeholder",

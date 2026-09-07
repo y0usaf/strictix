@@ -188,6 +188,7 @@ fn unknown_builtin_clean_for_real_builtins() {
         "builtins.elem 1 [1]",
         "builtins.concatStringsSep \": \" [\"a\"]",
         "builtins.head [1]",
+        "builtins.match \"([0-9]+)px\" \"24px\"",
         "builtins.fromJSON \"{}\"",
         "builtins.removeAttrs { a = 1; } [\"a\"]",
         "builtins.intersectAttrs {} {}",
