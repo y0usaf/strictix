@@ -8,6 +8,7 @@
 pub mod advanced_rules;
 pub mod bare_import_in_list;
 pub mod builtin_argument_type;
+pub mod builtin_value_rules;
 pub mod call_simplification;
 pub mod cognitive_complexity;
 pub mod duplicate_attr;
@@ -23,6 +24,7 @@ mod lib_helpers;
 pub mod lib_type_rules;
 pub mod missing_attribute;
 pub mod missing_function_argument;
+pub mod module_rules;
 pub mod node_rules;
 pub mod non_boolean_condition;
 pub mod non_callable_application;
@@ -43,6 +45,9 @@ use advanced_rules::{
 };
 use bare_import_in_list::BareImportInList;
 use builtin_argument_type::BuiltinArgumentType;
+use builtin_value_rules::{
+    InvalidBuiltinRange, InvalidListToAttrsEntry, ReplaceStringsLengthMismatch,
+};
 use call_simplification::{
     DeprecatedIsNull, ManualGetattr, ManualHasattr, ManualOptional, OptionalListArgument,
 };
@@ -63,6 +68,7 @@ use invalid_list_access::InvalidListAccess;
 use lib_type_rules::UnknownLibType;
 use missing_attribute::MissingAttribute;
 use missing_function_argument::MissingFunctionArgument;
+use module_rules::{ConfigDependentImports, MixedModuleSyntax};
 use node_rules::{AssertTrue, ConstantIf, ConstantIfBranches, Tautology};
 use non_boolean_condition::NonBooleanCondition;
 use non_callable_application::NonCallableApplication;
@@ -99,6 +105,11 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         DuplicateListToAttrsName,
         ShallowMergeOverwrite,
         BuiltinArgumentType,
+        InvalidListToAttrsEntry,
+        ReplaceStringsLengthMismatch,
+        InvalidBuiltinRange,
+        MixedModuleSyntax,
+        ConfigDependentImports,
         InvalidListAccess,
         MissingFunctionArgument,
         UnexpectedFunctionArgument,

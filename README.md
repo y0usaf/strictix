@@ -39,14 +39,15 @@ $ strictix fix slop.nix
 
 ## Rules
 
-85 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
+90 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
-| Dead code | unused-let-binding, unused-lambda-param, unused-formal, unused-inherit, unused-rec-binding, redundant-with, unnecessary-rec |
-| Certain evaluation errors | self-referential-let, circular-let, undefined-variable, non-boolean-condition, ill-typed-binop, ill-typed-unary-op, non-callable-application, literal-division-by-zero, coerced-interpolation, assert-false, duplicate-attribute, duplicate-formal, dangling-path, missing-import, import-cycle, missing-function-argument, unexpected-function-argument, missing-attribute, builtin-argument-type, invalid-list-access |
+| Dead code | unused-let-binding, unused-lambda-param, unused-formal, unused-inherit, unused-rec-binding, redundant-with, unnecessary-rec, unreachable-branch |
+| Certain evaluation errors | self-referential-let, circular-let, undefined-variable, non-boolean-condition, ill-typed-binop, ill-typed-unary-op, non-callable-application, literal-division-by-zero, coerced-interpolation, assert-false, duplicate-attribute, duplicate-formal, dangling-path, missing-import, import-cycle, missing-function-argument, unexpected-function-argument, missing-attribute, builtin-argument-type, builtin-arity, invalid-list-access, invalid-list-to-attrs-entry, replace-strings-length-mismatch, invalid-builtin-range |
 | Hallucination checks | unknown-option, option-type-mismatch, unknown-builtin, unknown-lib-type |
-| Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, shallow-merge-overwrite (opt-in) |
+| Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, duplicate-function-argument, dynamic-import, suspicious-import-argument, suspicious-recursion, unsafe-with-shadowing, shallow-merge-overwrite (opt-in) |
+| Modules | mixed-module-syntax, config-dependent-imports |
 | Maintainability | cyclomatic-complexity, cognitive-complexity |
 | Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, deprecated-is-null, deprecated-to-path |
 
@@ -77,6 +78,23 @@ that binding's name: `let x = e; in x` is just `e`.
 The semantic checks conservatively inspect literal values and known local
 bindings; dynamic values remain unknown. The new argument, attribute, builtin-type, list-access, duplicate-name, and
 merge checks report diagnostics without automatic fixes.
+
+`invalid-list-to-attrs-entry` checks literal entries for required `name` and
+`value` fields and string names, respecting entries ignored because an earlier
+name wins. `replace-strings-length-mismatch` compares literal replacement-list
+lengths. `invalid-builtin-range` rejects negative `genList` lengths and
+`substring` start positions; negative substring lengths remain valid.
+These checks report errors without automatic fixes and leave dynamic values
+unknown. `builtin-arity` accepts partial applications and calls through
+builtins that can return functions, such as `head`, `elemAt`, and `getAttr`.
+
+The module checks require a recognizable module body and no options schema.
+`mixed-module-syntax` reports ordinary definitions beside an explicit `config`
+or `options` section; module metadata is allowed. `config-dependent-imports`
+warns when choosing imports requires reading the module's `config`. Import
+modules unconditionally and put the condition on definitions with `lib.mkIf`.
+Deferred configuration inside imported module bodies is left alone. Neither
+rule has an automatic fix.
 
 `shallow-merge-overwrite` is opt-in because replacing a nested attribute set
 with `//` can be intentional. Enable it with
