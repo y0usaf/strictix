@@ -57,6 +57,9 @@ fn library_value(model: &SemanticModel<'_>, expr: Expr<'_>, fuel: usize) -> Opti
         Expr::Ident(token) => {
             let name = token.text(model.source());
             if let Some(binding) = model.resolve(token) {
+                if !crate::static_binding::resolves_to(token, binding.name, model) {
+                    return None;
+                }
                 if binding.kind == BindingKind::LambdaParam && name == "lib" {
                     return Some(LibraryValue::Library);
                 }

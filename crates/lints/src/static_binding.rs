@@ -1,60 +1,96 @@
 //! Conservative access to the syntax value of a resolved local binding.
 use strictix_core::semantic::{BindingKind, SemanticModel};
 use strictix_syntax::{
-    AstNode, AttrItem, AttrName, Binding, Expr, LambdaExpr, LambdaParam, LetExpr, SyntaxToken,
+    AstNode, AttrItem, AttrName, Binding, Expr, LambdaExpr, LambdaParam, LetExpr, RecAttrsetExpr,
+    SyntaxToken,
 };
+
+fn may_bind(item: AttrItem<'_>, name: &str, source: &str) -> bool {
+    match item {
+        AttrItem::Binding(binding) => binding
+            .attrpath()
+            .and_then(|path| path.elements().next())
+            .is_none_or(|attr| match attr {
+                AttrName::Ident(token) => token.text(source) == name,
+                // The semantic model does not resolve quoted/dynamic names.
+                _ => true,
+            }),
+        AttrItem::Inherit(inherit) => inherit.names().any(|token| token.text(source) == name),
+    }
+}
+
+/// Whether an enclosing scope can shadow the named binding. A declaration's
+/// own scope is excluded when checking references to a known local binding.
+fn shadowed(
+    token: &SyntaxToken,
+    expected: Option<&SyntaxToken>,
+    model: &SemanticModel<'_>,
+) -> bool {
+    let name = token.text(model.source());
+    for node in model
+        .root()
+        .descendants()
+        .filter(|node| node.range().contains(token.range().start()))
+    {
+        if expected.is_some_and(|binding| node.range().contains(binding.range().start())) {
+            continue;
+        }
+        if let Some(expr) = LetExpr::cast(node) {
+            if expr.bindings().is_none_or(|bindings| {
+                bindings
+                    .items()
+                    .any(|item| may_bind(item, name, model.source()))
+            }) {
+                return true;
+            }
+        }
+        if let Some(expr) = RecAttrsetExpr::cast(node) {
+            if expr.attrset().is_none_or(|bindings| {
+                bindings
+                    .items()
+                    .any(|item| may_bind(item, name, model.source()))
+            }) {
+                return true;
+            }
+        }
+        if let Some(lambda) = LambdaExpr::cast(node) {
+            let binds = match lambda.param() {
+                LambdaParam::Ident(token) => token.text(model.source()) == name,
+                LambdaParam::Formals(formals, at_name) => {
+                    at_name.is_some_and(|token| token.text(model.source()) == name)
+                        || formals
+                            .params()
+                            .any(|param| param.name.text(model.source()) == name)
+                }
+            };
+            if binds {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Verify resolution without overlooking forward or quoted local declarations.
+pub(crate) fn resolves_to(
+    token: &SyntaxToken,
+    expected: &SyntaxToken,
+    model: &SemanticModel<'_>,
+) -> bool {
+    model
+        .resolve(token)
+        .is_some_and(|binding| binding.name.range() == expected.range())
+        && !shadowed(token, Some(expected), model)
+}
 
 pub(crate) fn value<'a>(token: &SyntaxToken, model: &SemanticModel<'a>) -> Option<Expr<'a>> {
     let resolved = model.resolve(token)?;
     if !matches!(
         resolved.kind,
         BindingKind::LetBinding | BindingKind::RecAttr
-    ) {
-        return None;
-    }
-    // The semantic model currently has sequential visibility for let bindings
-    // and formal defaults. Do not follow an outer binding through a forward
-    // declaration that actually shadows it under Nix's recursive semantics.
-    for node in model
-        .root()
-        .descendants()
-        .filter(|node| node.range().contains(token.range().start()))
+    ) || !resolves_to(token, resolved.name, model)
     {
-        if node.range().contains(resolved.name.range().start()) {
-            continue;
-        }
-        if let Some(expr) = LetExpr::cast(node) {
-            for item in expr.bindings()?.items() {
-                let names: Vec<_> = match item {
-                    AttrItem::Binding(b) => b
-                        .attrpath()?
-                        .elements()
-                        .take(1)
-                        .filter_map(|n| match n {
-                            AttrName::Ident(t) => Some(t),
-                            _ => None,
-                        })
-                        .collect(),
-                    AttrItem::Inherit(i) => i.names().collect(),
-                };
-                if names.iter().any(|name| {
-                    name.text(model.source()) == token.text(model.source())
-                        && name.range() != resolved.name.range()
-                }) {
-                    return None;
-                }
-            }
-        }
-        if let Some(lambda) = LambdaExpr::cast(node) {
-            if let LambdaParam::Formals(formals, _) = lambda.param() {
-                if formals
-                    .params()
-                    .any(|param| param.name.text(model.source()) == token.text(model.source()))
-                {
-                    return None;
-                }
-            }
-        }
+        return None;
     }
     model.root().descendants().find_map(|node| {
         let binding = Binding::cast(node)?;
@@ -72,55 +108,9 @@ pub(crate) fn value<'a>(token: &SyntaxToken, model: &SemanticModel<'a>) -> Optio
 
 /// Check a global name without overlooking a forward local declaration.
 pub(crate) fn is_unshadowed(token: &SyntaxToken, model: &SemanticModel<'_>) -> bool {
-    if model.resolve(token).is_some()
-        || model.references().iter().any(|reference| {
+    model.resolve(token).is_none()
+        && !model.references().iter().any(|reference| {
             reference.name.range() == token.range() && reference.via_with.is_some()
         })
-    {
-        return false;
-    }
-    let name = token.text(model.source());
-    for node in model
-        .root()
-        .descendants()
-        .filter(|node| node.range().contains(token.range().start()))
-    {
-        if let Some(expr) = LetExpr::cast(node) {
-            let Some(bindings) = expr.bindings() else {
-                return false;
-            };
-            for item in bindings.items() {
-                match item {
-                    AttrItem::Binding(binding) => {
-                        if binding
-                            .attrpath()
-                            .and_then(|path| path.elements().next())
-                            .is_some_and(|attr| match attr {
-                                AttrName::Ident(t) => t.text(model.source()) == name,
-                                _ => true,
-                            })
-                        {
-                            return false;
-                        }
-                    }
-                    AttrItem::Inherit(inherit) => {
-                        if inherit.names().any(|t| t.text(model.source()) == name) {
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(lambda) = LambdaExpr::cast(node) {
-            if let LambdaParam::Formals(formals, _) = lambda.param() {
-                if formals
-                    .params()
-                    .any(|param| param.name.text(model.source()) == name)
-                {
-                    return false;
-                }
-            }
-        }
-    }
-    true
+        && !shadowed(token, None, model)
 }

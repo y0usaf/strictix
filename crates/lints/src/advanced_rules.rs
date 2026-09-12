@@ -230,7 +230,7 @@ impl Rule for BuiltinArity {
         "Builtin arity"
     }
     fn description(&self) -> &'static str {
-        "Flags too few or too many arguments passed to fixed-arity builtins. Bare builtin values remain valid partial functions."
+        "Flags extra arguments passed to builtins whose results cannot be functions. Partial applications remain valid."
     }
     fn severity(&self) -> Severity {
         Severity::Error
@@ -239,25 +239,26 @@ impl Rule for BuiltinArity {
         let source = m.source();
         let apply_nodes: Vec<_> = nodes(m.root(), SyntaxKind::ApplyExpr).collect();
         for n in apply_nodes.iter().copied() {
-            // A chained call has one ApplyExpr per argument. Check only the
-            // outermost node, because inner nodes are valid partial functions.
-            let range = n.range();
+            // Skip only function-side chain nodes, not independent calls in
+            // another call's arguments. Parentheses do not end a call chain.
             if apply_nodes.iter().any(|candidate| {
-                let candidate_range = candidate.range();
-                candidate_range != range
-                    && candidate_range.start() <= range.start()
-                    && candidate_range.end() >= range.end()
+                ApplyExpr::cast(candidate)
+                    .and_then(|a| a.func())
+                    .and_then(crate::lib_helpers::unparen)
+                    .is_some_and(
+                        |expr| matches!(expr, Expr::Apply(inner) if inner.range() == n.range()),
+                    )
             }) {
                 continue;
             }
             let Some(apply) = ApplyExpr::cast(n) else {
                 continue;
             };
-            let mut callee = apply.func();
+            let mut callee = apply.func().and_then(crate::lib_helpers::unparen);
             let mut args = 1;
             while let Some(Expr::Apply(inner)) = callee {
                 args += 1;
-                callee = inner.func();
+                callee = inner.func().and_then(crate::lib_helpers::unparen);
             }
             let Some(Expr::Select(select)) = callee else {
                 continue;
@@ -266,35 +267,32 @@ impl Rule for BuiltinArity {
                 continue;
             };
             if base.text(source) != "builtins"
-                || m.resolve(base).is_some()
-                || m.references().iter().any(|reference| {
-                    reference.name.range() == base.range() && reference.via_with.is_some()
-                })
+                || !crate::static_binding::is_unshadowed(base, m)
+                || select.default().is_some()
             {
                 continue;
             }
             let Some(path) = select.attrpath() else {
                 continue;
             };
-            let Some(strictix_syntax::AttrName::Ident(function)) = path.elements().next() else {
+            let mut elements = path.elements();
+            let Some(strictix_syntax::AttrName::Ident(function)) = elements.next() else {
                 continue;
             };
+            if elements.next().is_some() {
+                continue;
+            }
             let name = function.text(source);
             let Some(required) = builtin_arity(name) else {
                 continue;
             };
-            if args == required {
+            if args <= required {
                 continue;
             }
-            let message = if args < required {
-                format!("builtin '{name}' receives too few arguments")
-            } else {
-                format!("builtin '{name}' receives too many arguments")
-            };
             d.push(Diagnostic::new(
                 self.code(),
                 self.severity(),
-                message,
+                format!("builtin '{name}' receives too many arguments"),
                 apply
                     .arg()
                     .map(|arg| arg.content_range())
@@ -305,12 +303,13 @@ impl Rule for BuiltinArity {
 }
 
 fn builtin_arity(name: &str) -> Option<usize> {
+    // head, elemAt and getAttr may return functions; attribute-set helpers
+    // may preserve __functor. Only known non-callable results belong here.
     Some(match name {
-        "length" | "head" | "tail" | "isNull" | "isAttrs" | "isBool" | "isInt" | "isList"
-        | "isString" | "isFunction" => 1,
-        "add" | "sub" | "mul" | "div" | "mod" | "concatStringsSep" | "elem" | "elemAt"
-        | "getAttr" | "hasAttr" | "removeAttrs" | "intersectAttrs" | "genList" | "map"
-        | "filter" | "all" | "any" | "compareVersions" | "match" | "split" => 2,
+        "length" | "tail" | "isNull" | "isAttrs" | "isBool" | "isInt" | "isList" | "isString"
+        | "isFunction" => 1,
+        "add" | "sub" | "mul" | "div" | "mod" | "concatStringsSep" | "elem" | "hasAttr"
+        | "genList" | "map" | "filter" | "all" | "any" | "compareVersions" | "match" | "split" => 2,
         "replaceStrings" | "substring" => 3,
         _ => return None,
     })

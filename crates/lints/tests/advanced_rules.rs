@@ -81,15 +81,14 @@ fn import_in_list_fires_for_direct_import_items() {
 }
 
 #[test]
-fn builtin_arity_checks_missing_and_extra_arguments() {
+fn builtin_arity_checks_extra_arguments_and_accepts_partial_applications() {
     assert_eq!(
         codes("builtins.length xs extra", one(BuiltinArity)),
         vec!["builtin-arity"]
     );
-    assert_eq!(
-        codes("builtins.elem x", one(BuiltinArity)),
-        vec!["builtin-arity"]
-    );
+    assert!(codes("builtins.elem x", one(BuiltinArity)).is_empty());
+    assert!(codes("builtins.map (x: x)", one(BuiltinArity)).is_empty());
+    assert!(codes("builtins.replaceStrings [\"a\"] [\"b\"]", one(BuiltinArity)).is_empty());
     assert!(codes("builtins.length xs", one(BuiltinArity)).is_empty());
     assert!(codes("builtins.elem", one(BuiltinArity)).is_empty());
 
@@ -110,6 +109,35 @@ fn builtin_arity_checks_missing_and_extra_arguments() {
 }
 
 #[test]
+fn builtin_arity_accepts_applying_callable_results() {
+    for source in [
+        "builtins.head [(x: x)] 1",
+        "builtins.elemAt [(x: x)] 0 1",
+        "builtins.getAttr \"f\" { f = x: x; } 1",
+        "builtins.removeAttrs { __functor = self: x: x; } [] 1",
+        "builtins.intersectAttrs { __functor = null; } { __functor = self: x: x; } 1",
+    ] {
+        assert!(codes(source, one(BuiltinArity)).is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn builtin_arity_checks_nested_calls_and_parenthesized_chains() {
+    for source in [
+        "f (builtins.length [] 1)",
+        "(builtins.length []) 1",
+        "((builtins.length) []) 1",
+    ] {
+        assert_eq!(
+            codes(source, one(BuiltinArity)),
+            ["builtin-arity"],
+            "{source}"
+        );
+    }
+    assert!(codes("(builtins.map (x: x)) [1]", one(BuiltinArity)).is_empty());
+}
+
+#[test]
 fn builtin_arity_skips_shadowed_and_with_provided_builtins() {
     assert!(codes(
         "let builtins = { length = x: x; }; in builtins.length",
@@ -121,6 +149,16 @@ fn builtin_arity_skips_shadowed_and_with_provided_builtins() {
         one(BuiltinArity)
     )
     .is_empty());
+    for source in [
+        "let value = builtins.length [] 1; builtins = { length = a: b: b; }; in value",
+        "builtins.length.custom [] 1",
+        "(builtins.length or (x: y: y)) [] 1",
+        "(rec { \"builtins\" = { length = _: _: 1; }; result = builtins.length [] 1; }).result",
+        "(builtins@{ x ? builtins.length [] 1, ... }: x) { length = _: _: 1; }",
+        "({ x ? builtins.length [] 1, ... }@builtins: x) { length = _: _: 1; }",
+    ] {
+        assert!(codes(source, one(BuiltinArity)).is_empty(), "{source}");
+    }
 }
 
 #[test]
