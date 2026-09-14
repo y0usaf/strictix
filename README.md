@@ -121,3 +121,9 @@ plus literal/type mismatches); `--format json` selects machine output.
 
 See [docs/architecture.md](./docs/architecture.md) for locked
 decisions, the module map, and the milestone roadmap.
+
+## License
+
+AGPL-3.0-only. See [LICENSE](./LICENSE).
+
+Copyright (C) 2026 y0usaf
