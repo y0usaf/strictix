@@ -142,8 +142,9 @@ fn run_rules_project_inner(
     include_syntax: bool,
     diags: &mut Vec<Diagnostic>,
 ) {
-    if include_syntax {
-        syntax_diagnostics(tree, diags);
+    if include_syntax && syntax_diagnostics(tree, diags) {
+        apply_suppressions(source, diags);
+        return;
     }
     for rule in rules {
         if !config.is_enabled(rule.code())
@@ -165,8 +166,10 @@ fn run_rules_project_inner(
     apply_suppressions(source, diags);
 }
 
-fn syntax_diagnostics(tree: &SyntaxNode, diags: &mut Vec<Diagnostic>) {
+fn syntax_diagnostics(tree: &SyntaxNode, diags: &mut Vec<Diagnostic>) -> bool {
+    let mut fatal = false;
     for node in tree.error_nodes() {
+        fatal = true;
         diags.push(Diagnostic::new(
             "syntax-error",
             Severity::Error,
@@ -174,6 +177,7 @@ fn syntax_diagnostics(tree: &SyntaxNode, diags: &mut Vec<Diagnostic>) {
             node.content_range(),
         ));
     }
+    fatal
 }
 
 /// Cap on fix passes. A rule whose fix re-triggers itself (a rule bug)

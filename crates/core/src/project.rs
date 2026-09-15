@@ -25,12 +25,14 @@ impl ProjectContext {
             let path = normalize(&file.path);
             all.insert(path.clone());
             let tree = parse(&file.source);
-            let model = SemanticModel::new(&file.source, &tree).with_path(Some(&path));
             let mut edges = Vec::new();
-            for site in model.import_sites() {
-                if let Some(raw) = literal_import(&file.source, &tree, site.path_range) {
-                    let target = normalize(&path.parent().unwrap_or(Path::new(".")).join(raw));
-                    edges.push((target, site.call_range.start()));
+            if tree.error_nodes().next().is_none() {
+                let model = SemanticModel::new(&file.source, &tree).with_path(Some(&path));
+                for site in model.import_sites() {
+                    if let Some(raw) = literal_import(&file.source, &tree, site.path_range) {
+                        let target = normalize(&path.parent().unwrap_or(Path::new(".")).join(raw));
+                        edges.push((target, site.call_range.start()));
+                    }
                 }
             }
             imports.insert(path, edges);
