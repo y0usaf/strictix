@@ -341,31 +341,107 @@ impl Rule for UnknownLibType {
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        for (_, members) in lib_type_members(model) {
+            self.check_members(model.source(), &members, diags);
+        }
+    }
+}
+
+/// Every provable `lib.types` member access in the file: the reference
+/// token the access starts at (`lib` or `types`) and the member hops
+/// after `types`. Shared by [UnknownLibType] and [DiscouragedLibType].
+fn lib_type_members<'a>(model: &SemanticModel<'a>) -> Vec<(&'a SyntaxToken, Vec<&'a SyntaxToken>)> {
+    let source = model.source();
+    let mut out = Vec::new();
+    for reference in model.references() {
+        let name = reference.name.text(source);
+        if name == "lib" {
+            // Only a formal or lexically-unbound `lib` provably
+            // means nixpkgs lib; a let/rec/inherit binding could
+            // be a custom lib, so it stays silent.
+            match reference.resolved.map(|i| &model.bindings()[i]) {
+                Some(binding) if !is_formal(binding) => continue,
+                _ => {}
+            }
+            let segments = member_segments(model, reference.name.range());
+            let Some((first, members)) = segments.split_first() else {
+                continue;
+            };
+            if first.text(source) != "types" {
+                continue;
+            }
+            out.push((reference.name, members.to_vec()));
+        } else if name == "types" {
+            if !UnknownLibType.types_is_lib_types(model, reference) {
+                continue;
+            }
+            out.push((
+                reference.name,
+                member_segments(model, reference.name.range()),
+            ));
+        }
+    }
+    out
+}
+
+/// Flags `lib.types` members that exist but lose definitions:
+/// `types.attrs` merges shallowly (later definitions silently replace
+/// earlier nested keys, and `mkIf`/`mkDefault` inside are not
+/// discharged) and `types.unspecified` has no real merge semantics.
+pub struct DiscouragedLibType;
+
+impl Rule for DiscouragedLibType {
+    fn code(&self) -> &'static str {
+        "discouraged-lib-type"
+    }
+
+    fn name(&self) -> &'static str {
+        "Discouraged lib.types member"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags `types.attrs` and `types.unspecified`. `attrs` merges definitions shallowly and does not discharge `mkIf`/`mkDefault` inside them; nixpkgs recommends `types.attrsOf types.anything`. `unspecified` has no real merge semantics; prefer `types.anything` or a precise type."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         let source = model.source();
-        for reference in model.references() {
-            let name = reference.name.text(source);
-            if name == "lib" {
-                // Only a formal or lexically-unbound `lib` provably
-                // means nixpkgs lib; a let/rec/inherit binding could
-                // be a custom lib, so it stays silent.
-                match reference.resolved.map(|i| &model.bindings()[i]) {
-                    Some(binding) if !is_formal(binding) => continue,
-                    _ => {}
+        for (start, members) in lib_type_members(model) {
+            let [member] = members.as_slice() else {
+                continue; // deeper hops are type internals, not uses of the type
+            };
+            match member.text(source) {
+                "attrs" => {
+                    let range = TextRange::new(start.range().start(), member.range().end());
+                    let text = &source[range.start() as usize..range.end() as usize];
+                    let prefix = text.strip_suffix("attrs").unwrap_or(text);
+                    diags.push(
+                        Diagnostic::new(
+                            self.code(),
+                            self.severity(),
+                            "types.attrs merges definitions shallowly",
+                            range,
+                        )
+                        .with_help("use types.attrsOf types.anything")
+                        .with_fix(
+                            Fix::new("replace with attrsOf anything")
+                                .edit(range, format!("({prefix}attrsOf {prefix}anything)")),
+                        ),
+                    );
                 }
-                let segments = member_segments(model, reference.name.range());
-                let Some((first, members)) = segments.split_first() else {
-                    continue;
-                };
-                if first.text(source) != "types" {
-                    continue;
-                }
-                self.check_members(source, members, diags);
-            } else if name == "types" {
-                if !self.types_is_lib_types(model, reference) {
-                    continue;
-                }
-                let segments = member_segments(model, reference.name.range());
-                self.check_members(source, &segments, diags);
+                "unspecified" => diags.push(
+                    Diagnostic::new(
+                        self.code(),
+                        self.severity(),
+                        "types.unspecified has no real merge semantics",
+                        member.range(),
+                    )
+                    .with_help("use types.anything or a precise type"),
+                ),
+                _ => {}
             }
         }
     }

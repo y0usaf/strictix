@@ -8,11 +8,17 @@
 //! [lint]
 //! disabled = ["tautology"]
 //! schema = "options.json"
+//!
+//! [schemas]
+//! "modules/phone" = "phone-options.json"
+//! "modules/flake" = ""
 //! ```
 //!
 //! Supported: `#` comments (full line), blank lines, the `[lint]`
-//! section, `disabled` and `enabled` (arrays of strings), `schema` (string). Unknown
-//! keys and unknown sections are ignored; missing keys are fine.
+//! section, `disabled` and `enabled` (arrays of strings), `schema` (string),
+//! and the `[schemas]` section of `"path prefix" = "options.json"` pairs
+//! (`""` turns the schema rules off under that prefix). Unknown keys in
+//! `[lint]` and unknown sections are ignored; missing keys are fine.
 //!
 //! ponytail: no trailing comments, no multiline arrays, no other TOML
 //! features — the config never uses them; add them only if a real
@@ -66,7 +72,7 @@ pub fn load_config(
 /// Parse the strictix.toml subset.
 fn parse_config(text: &str) -> Result<LintConfig, String> {
     let mut config = LintConfig::default();
-    let mut in_lint = false;
+    let mut section = String::new();
 
     for (line_no, raw) in text.lines().enumerate() {
         let line = raw.trim();
@@ -74,11 +80,14 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
             continue;
         }
         if line.starts_with('[') {
-            let section = line.trim_start_matches('[').trim_end_matches(']').trim();
-            in_lint = section == "lint";
+            section = line
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .trim()
+                .to_owned();
             continue;
         }
-        if !in_lint {
+        if section != "lint" && section != "schemas" {
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
@@ -86,6 +95,20 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
         };
         let key = key.trim();
         let value = value.trim();
+        if section == "schemas" {
+            let err = |e: String| format!("line {}: {e}", line_no + 1);
+            let prefix = if key.starts_with('"') {
+                parse_toml_string(key).map_err(err)?
+            } else {
+                key.to_owned()
+            };
+            let schema = parse_toml_string(value).map_err(err)?;
+            config.schemas.push((
+                PathBuf::from(prefix),
+                (!schema.is_empty()).then(|| PathBuf::from(schema)),
+            ));
+            continue;
+        }
         match key {
             "disabled" => {
                 config.disabled =

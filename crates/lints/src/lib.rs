@@ -38,6 +38,7 @@ mod static_binding;
 pub mod style_rules;
 pub mod suggested_rules;
 pub mod unexpected_function_argument;
+pub mod unused_option;
 
 use advanced_rules::{
     BuiltinArity, DuplicateFunctionArgument, DynamicImport, SuspiciousImportArgument,
@@ -49,7 +50,8 @@ use builtin_value_rules::{
     InvalidBuiltinRange, InvalidListToAttrsEntry, ReplaceStringsLengthMismatch,
 };
 use call_simplification::{
-    DeprecatedIsNull, ManualGetattr, ManualHasattr, ManualOptional, OptionalListArgument,
+    DeprecatedIsNull, ManualGenAttrs, ManualGetattr, ManualHasattr, ManualOptional,
+    OptionalListArgument,
 };
 use cognitive_complexity::CognitiveComplexity;
 use duplicate_attr::DuplicateAttribute;
@@ -65,7 +67,7 @@ use ill_typed_binop::IllTypedBinop;
 use ill_typed_unary_op::IllTypedUnaryOp;
 use interpolation_rules::{CoercedInterpolation, RedundantInterpolation};
 use invalid_list_access::InvalidListAccess;
-use lib_type_rules::UnknownLibType;
+use lib_type_rules::{DiscouragedLibType, UnknownLibType};
 use missing_attribute::MissingAttribute;
 use missing_function_argument::MissingFunctionArgument;
 use module_rules::{ConfigDependentImports, MixedModuleSyntax};
@@ -92,6 +94,7 @@ use suggested_rules::{
     UnnecessaryRec, UnusedRecBinding,
 };
 use unexpected_function_argument::UnexpectedFunctionArgument;
+use unused_option::UnusedOption;
 
 /// The full builtin registry, in declaration order.
 ///
@@ -136,6 +139,9 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         UndefinedVariable,
         UnknownBuiltin,
         UnknownOption,
+        UnusedOption,
+        DiscouragedLibType,
+        ManualGenAttrs,
         EmptyLetIn,
         ManualInherit,
         ManualInheritFrom,

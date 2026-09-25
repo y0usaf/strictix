@@ -1,6 +1,8 @@
 //! Static project context for cross-file import diagnostics.
-use std::collections::{BTreeMap, BTreeSet};
+use std::any::{Any, TypeId};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use crate::semantic::SemanticModel;
 use strictix_syntax::{parse, Expr, StringPart, SyntaxNode};
@@ -15,13 +17,17 @@ pub struct ProjectFile {
 pub struct ProjectContext {
     files: BTreeSet<PathBuf>,
     imports: BTreeMap<PathBuf, Vec<(PathBuf, u32)>>,
+    sources: Vec<ProjectFile>,
+    /// Per-type project indexes built on first use by [Self::memo].
+    memo: Mutex<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
 }
 
 impl ProjectContext {
     pub fn new(files: impl IntoIterator<Item = ProjectFile>) -> Self {
         let mut all = BTreeSet::new();
         let mut imports = BTreeMap::new();
-        for file in files {
+        let sources: Vec<ProjectFile> = files.into_iter().collect();
+        for file in &sources {
             let path = normalize(&file.path);
             all.insert(path.clone());
             let tree = parse(&file.source);
@@ -40,7 +46,27 @@ impl ProjectContext {
         Self {
             files: all,
             imports,
+            sources,
+            memo: Mutex::default(),
         }
+    }
+
+    /// Every supplied file with its source, in input order.
+    pub fn sources(&self) -> &[ProjectFile] {
+        &self.sources
+    }
+
+    /// Build a project-wide index of type `T` once and share it across
+    /// every file (and worker thread) of the run. `build` must not call
+    /// `memo` itself: the lock is held while it runs.
+    pub fn memo<T: Any + Send + Sync>(&self, build: impl FnOnce(&Self) -> T) -> Arc<T> {
+        let mut memo = self.memo.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = memo
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Arc::new(build(self)));
+        Arc::clone(entry)
+            .downcast::<T>()
+            .expect("memo entry keyed by its own TypeId")
     }
 
     pub fn contains(&self, path: &Path) -> bool {

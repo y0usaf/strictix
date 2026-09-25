@@ -5,7 +5,7 @@
 //! M8 `unknown-option` rule; `None` means that
 //! rule is off for this run.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Configuration for one lint run: which rule codes are skipped and
 /// whether the options schema rule is active.
@@ -17,6 +17,10 @@ pub struct LintConfig {
     pub disabled: Vec<String>,
     /// options.json path (M8); `None` = schema rule off.
     pub schema: Option<PathBuf>,
+    /// Per-path schema overrides as `(path prefix, schema)`; a `None`
+    /// schema turns the schema rules off under that prefix. The longest
+    /// matching prefix wins over [Self::schema].
+    pub schemas: Vec<(PathBuf, Option<PathBuf>)>,
 }
 
 impl LintConfig {
@@ -37,6 +41,22 @@ impl LintConfig {
     pub fn with_disabled(mut self, codes: impl IntoIterator<Item = String>) -> Self {
         self.disabled = codes.into_iter().collect();
         self
+    }
+
+    /// The options.json that applies to `file`: the longest matching
+    /// [Self::schemas] prefix, else [Self::schema]. A leading `./` on
+    /// either side is ignored.
+    #[must_use]
+    pub fn schema_for(&self, file: Option<&Path>) -> Option<&Path> {
+        let bare = |p: &'_ Path| p.strip_prefix(".").unwrap_or(p).to_path_buf();
+        file.map(bare)
+            .and_then(|file| {
+                self.schemas
+                    .iter()
+                    .filter(|(prefix, _)| file.starts_with(bare(prefix)))
+                    .max_by_key(|(prefix, _)| bare(prefix).components().count())
+            })
+            .map_or(self.schema.as_deref(), |(_, schema)| schema.as_deref())
     }
 
     /// Builder: set the schema path, enabling the schema rule.

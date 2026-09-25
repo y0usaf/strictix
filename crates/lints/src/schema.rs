@@ -35,7 +35,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
@@ -97,13 +97,23 @@ fn split_option_path(key: &str) -> Vec<String> {
 /// per process and shared by [UnknownOption] and [OptionTypeMismatch].
 type Schema = Result<OptionsSchema, String>;
 
-static OPTIONS_SCHEMA: OnceLock<Schema> = OnceLock::new();
+/// Every schema loaded this process, by path; each is parsed once and
+/// lives for the rest of the run.
+static SCHEMAS: OnceLock<Mutex<HashMap<PathBuf, &'static Schema>>> = OnceLock::new();
 
-/// The process-wide schema for this run: `None` when no schema path is
-/// configured (both rules off), otherwise the shared load result.
-fn schema_for(config: &LintConfig) -> Option<&'static Schema> {
-    let path = config.schema.as_ref()?;
-    Some(OPTIONS_SCHEMA.get_or_init(|| load_schema(path)))
+/// The schema that applies to `file`: `None` when no schema path is
+/// configured for it (both rules off), otherwise the shared load result.
+fn schema_for(config: &LintConfig, file: Option<&Path>) -> Option<&'static Schema> {
+    let path = config.schema_for(file)?;
+    let mut schemas = SCHEMAS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    Some(
+        schemas
+            .entry(path.to_path_buf())
+            .or_insert_with(|| Box::leak(Box::new(load_schema(path)))),
+    )
 }
 
 /// FNV-1a 64-bit hash of `bytes` — a dependency-free content fingerprint
@@ -340,7 +350,7 @@ const MODULE_FORMALS: [&str; 4] = ["config", "lib", "pkgs", "options"];
 const RESERVED_HEADS: [&str; 5] = ["imports", "options", "_module", "disabledModules", "key"];
 
 /// Peel parentheses off an expression.
-fn unwrap_parens(expr: Expr<'_>) -> Expr<'_> {
+pub(crate) fn unwrap_parens(expr: Expr<'_>) -> Expr<'_> {
     let mut current = expr;
     while let Expr::Paren(paren) = current {
         match paren.expr() {
@@ -355,7 +365,7 @@ fn unwrap_parens(expr: Expr<'_>) -> Expr<'_> {
 /// strings by their literal content. `None` when any segment is dynamic
 /// (`${...}`) or carries escapes — the written path cannot be proven
 /// then, so callers skip that subtree silently.
-fn static_segments(path: Attrpath<'_>, source: &str) -> Option<Vec<String>> {
+pub(crate) fn static_segments(path: Attrpath<'_>, source: &str) -> Option<Vec<String>> {
     let mut segments = Vec::new();
     for element in path.elements() {
         match element {
@@ -383,7 +393,7 @@ fn static_segments(path: Attrpath<'_>, source: &str) -> Option<Vec<String>> {
 /// `lib.mkIf`. The base of a select is deliberately ignored — the
 /// `mk*` names are unambiguous in module context regardless of how
 /// `lib` is reached.
-fn callee_name<'s>(expr: Expr<'_>, source: &'s str) -> Option<&'s str> {
+pub(crate) fn callee_name<'s>(expr: Expr<'_>, source: &'s str) -> Option<&'s str> {
     match expr {
         Expr::Ident(token) => Some(token.text(source)),
         Expr::Select(select) => {
@@ -401,19 +411,21 @@ fn callee_name<'s>(expr: Expr<'_>, source: &'s str) -> Option<&'s str> {
 }
 
 /// The module body attrset of this file, when the file provably has
-/// module shape: the top-level expression (lambdas and parens unwrapped)
+/// module shape: the top-level expression (lambdas, parens, `let` and `with` unwrapped)
 /// is an attrset that either carries a module key (`imports`, `options`,
 /// `config`) or sits under a lambda whose formals name a module argument
 /// (`config`, `lib`, `pkgs`, `options`) or use `...`. Anything else —
 /// packages, overlays, plain data — returns `None` and the write side
 /// never runs.
-fn module_attrset<'a>(model: &SemanticModel<'a>) -> Option<AttrsetExpr<'a>> {
+pub(crate) fn module_attrset<'a>(model: &SemanticModel<'a>) -> Option<AttrsetExpr<'a>> {
     let source = model.source();
     let mut expr = Root::cast(model.root())?.expr()?;
     let mut is_module = false;
     loop {
         match expr {
             Expr::Paren(paren) => expr = paren.expr()?,
+            Expr::Let(let_expr) => expr = let_expr.body()?,
+            Expr::With(with) => expr = with.body()?,
             Expr::Lambda(lambda) => {
                 if let LambdaParam::Formals(formals, _) = lambda.param() {
                     if formals.has_ellipsis()
@@ -872,7 +884,7 @@ impl Rule for UnknownOption {
     }
 
     fn check_file(&self, model: &SemanticModel, config: &LintConfig, diags: &mut Vec<Diagnostic>) {
-        let Some(schema) = schema_for(config) else {
+        let Some(schema) = schema_for(config, model.path()) else {
             return; // schema rule off for this run
         };
         let options = match schema {
@@ -983,7 +995,7 @@ impl Rule for OptionTypeMismatch {
     }
 
     fn check_file(&self, model: &SemanticModel, config: &LintConfig, diags: &mut Vec<Diagnostic>) {
-        let Some(schema) = schema_for(config) else {
+        let Some(schema) = schema_for(config, model.path()) else {
             return; // schema rules off for this run
         };
         let Ok(options) = schema else {

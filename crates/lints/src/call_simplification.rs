@@ -15,8 +15,8 @@ use strictix_core::{
     semantic::{BindingKind, SemanticModel},
 };
 use strictix_syntax::{
-    ApplyExpr, AstNode, AttrName, Expr, IfExpr, StringExpr, StringPart, SyntaxKind, SyntaxNode,
-    TextRange,
+    ApplyExpr, AstNode, AttrItem, AttrName, Expr, IfExpr, LambdaParam, StringExpr, StringPart,
+    SyntaxKind, SyntaxNode, TextRange,
 };
 
 use SyntaxKind as K;
@@ -663,5 +663,121 @@ impl Rule for OptionalListArgument {
                 .with_fix(Fix::new("call lib.optionals instead").edit(callee_token, "optionals")),
             );
         }
+    }
+}
+
+/// The generated value of a `listToAttrs` entry lambda `x: { name = x;
+/// value = e; }` or `x: nameValuePair x e`: `(param, e)` when the entry
+/// name is exactly the lambda parameter, else `None`.
+fn gen_attrs_entry<'a>(model: &SemanticModel<'a>, func: Expr<'a>) -> Option<(&'a str, Expr<'a>)> {
+    let source = model.source();
+    let Expr::Lambda(lambda) = unwrap_paren(func) else {
+        return None;
+    };
+    let LambdaParam::Ident(param) = lambda.param() else {
+        return None;
+    };
+    let param = param.text(source);
+    let is_param = |e: Expr<'_>| matches!(e, Expr::Ident(t) if t.text(source) == param);
+    match unwrap_paren(lambda.body()?) {
+        Expr::Attrset(set) => {
+            let mut name = None;
+            let mut value = None;
+            for item in set.items() {
+                let AttrItem::Binding(binding) = item else {
+                    return None;
+                };
+                let mut path = binding.attrpath()?.elements();
+                let (Some(AttrName::Ident(key)), None) = (path.next(), path.next()) else {
+                    return None;
+                };
+                let slot = match key.text(source) {
+                    "name" => &mut name,
+                    "value" => &mut value,
+                    _ => return None,
+                };
+                if slot.replace(binding.value()?).is_some() {
+                    return None;
+                }
+            }
+            is_param(name?).then_some((param, value?))
+        }
+        Expr::Apply(outer) => {
+            let Expr::Apply(inner) = outer.func()? else {
+                return None;
+            };
+            let callee = match inner.func()? {
+                Expr::Ident(t) => t.text(source),
+                Expr::Select(s) => match s.attrpath()?.elements().last()? {
+                    AttrName::Ident(t) => t.text(source),
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            (callee == "nameValuePair" && is_param(inner.arg()?)).then_some((param, outer.arg()?))
+        }
+        _ => None,
+    }
+}
+
+/// Flags `listToAttrs (map (x: { name = x; value = e; }) xs)` — and the
+/// `nameValuePair x e` spelling — which is `lib.genAttrs xs (x: e)`.
+pub struct ManualGenAttrs;
+
+impl Rule for ManualGenAttrs {
+    fn code(&self) -> &'static str {
+        "manual-gen-attrs"
+    }
+
+    fn name(&self) -> &'static str {
+        "Manual genAttrs"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags `listToAttrs (map (x: { name = x; value = e; }) xs)` when `lib` is in scope; when every name is the list element itself, `lib.genAttrs xs (x: e)` says the same thing."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let source = model.source();
+        let mut ancestors: Vec<&SyntaxNode> = Vec::new();
+        walk(model.root(), &mut ancestors, &mut |node, ancestors| {
+            let Some(arg) = one_arg_call(model, node, "listToAttrs") else {
+                return;
+            };
+            let Expr::Apply(mapped) = unwrap_paren(arg) else {
+                return;
+            };
+            let Some((func, list)) = two_arg_call(model, mapped.syntax(), "map") else {
+                return;
+            };
+            let Some((param, value)) = gen_attrs_entry(model, func) else {
+                return;
+            };
+            if !model.is_bound("lib", node.content_range().start()) {
+                return;
+            }
+            let mut replacement = format!(
+                "lib.genAttrs {} ({param}: {})",
+                argument_text(list, source),
+                trimmed_text(value, source)
+            );
+            if parent_requires_parens(ancestors) {
+                replacement = format!("({replacement})");
+            }
+            let range = node.content_range();
+            diags.push(
+                Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    "this listToAttrs is lib.genAttrs",
+                    range,
+                )
+                .with_fix(Fix::new("rewrite with lib.genAttrs").edit(range, replacement)),
+            );
+        });
     }
 }
