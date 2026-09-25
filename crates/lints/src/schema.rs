@@ -62,13 +62,35 @@ pub(crate) struct OptionsSchema {
 impl OptionsSchema {
     /// Build the matching view once, at load time, so per-path checks
     /// touch pre-split segments only.
-    fn new(types: HashMap<String, String>) -> Self {
-        let segmented = types
-            .keys()
-            .map(|key| key.split('.').map(str::to_owned).collect())
-            .collect();
+    fn new(raw: HashMap<String, String>) -> Self {
+        let mut types = HashMap::with_capacity(raw.len());
+        let mut segmented = Vec::with_capacity(raw.len());
+        for (key, ty) in raw {
+            let segments = split_option_path(&key);
+            types.insert(segments.join("."), ty);
+            segmented.push(segments);
+        }
         Self { types, segmented }
     }
+}
+
+/// Split an options.json key into segments. Nix's `showOption` quotes
+/// segments that are not plain identifiers (`user.tools."7z".enable`),
+/// so dots inside quotes do not split and the quotes are dropped to
+/// match the literal content of a written segment.
+fn split_option_path(key: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    for c in key.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            '.' if !quoted => segments.push(std::mem::take(&mut current)),
+            _ => current.push(c),
+        }
+    }
+    segments.push(current);
+    segments
 }
 
 /// The loaded schema, or the reason loading/parsing failed. Loaded once
@@ -878,7 +900,8 @@ impl Rule for UnknownOption {
                 continue;
             }
             let chain = select_chain(model, reference.name.range());
-            if chain.is_empty() {
+            // `config.a.b or fallback` tolerates an undeclared path on purpose.
+            if chain.is_empty() || chain.iter().any(|s| s.default().is_some()) {
                 continue;
             }
             // Collect the path segments innermost-out, skipping chains
