@@ -18,7 +18,7 @@ fn err(input: &str) -> JsonError {
 }
 
 #[test]
-#[allow(clippy::approx_constant)] // 3.14 is the literal under test, not PI
+#[allow(clippy::approx_constant)]
 fn scalar_values() {
     assert_eq!(JsonValue::parse("null"), Ok(JsonValue::Null));
     assert_eq!(JsonValue::parse("true"), Ok(JsonValue::Bool(true)));
@@ -29,7 +29,6 @@ fn scalar_values() {
     assert_eq!(JsonValue::parse("-2.5e3"), Ok(JsonValue::Number(-2500.0)));
     assert_eq!(JsonValue::parse("1e10"), Ok(JsonValue::Number(1e10)));
     assert_eq!(JsonValue::parse("0.5"), Ok(JsonValue::Number(0.5)));
-    // Accessors on scalars.
     assert_eq!(ok("true").as_bool(), Some(true));
     assert_eq!(ok("false").as_bool(), Some(false));
     assert_eq!(ok("3").as_bool(), None);
@@ -83,12 +82,10 @@ fn string_unicode() {
         JsonValue::parse(r#""\u00e9""#),
         Ok(JsonValue::String("\u{e9}".to_owned()))
     );
-    // Surrogate pair U+D83D U+DE00 -> U+1F600 (grinning face).
     assert_eq!(
         JsonValue::parse(r#""\ud83d\ude00""#),
         Ok(JsonValue::String("\u{1f600}".to_owned()))
     );
-    // Raw multi-byte UTF-8 passes through unchanged.
     assert_eq!(
         JsonValue::parse("\"h\u{e9}llo\""),
         Ok(JsonValue::String("h\u{e9}llo".to_owned()))
@@ -120,12 +117,10 @@ fn object_lookup_and_order() {
     let v = ok(r#"{"b": 1, "a": 2, "c": 3}"#);
     let obj = v.as_object().expect("object");
     let keys: Vec<&str> = obj.iter().map(|(k, _)| k.as_str()).collect();
-    // Insertion order is preserved.
     assert_eq!(keys, vec!["b", "a", "c"]);
     assert_eq!(v.get("a"), Some(&JsonValue::Number(2.0)));
     assert_eq!(v.get("c"), Some(&JsonValue::Number(3.0)));
     assert_eq!(v.get("missing"), None);
-    // get on a non-object returns None.
     assert_eq!(JsonValue::Null.get("x"), None);
 }
 
@@ -134,7 +129,6 @@ fn duplicate_keys_kept() {
     let v = ok(r#"{"a": 1, "a": 2}"#);
     let obj = v.as_object().expect("object");
     assert_eq!(obj.len(), 2);
-    // get() returns the first entry.
     assert_eq!(v.get("a"), Some(&JsonValue::Number(1.0)));
 }
 
@@ -171,7 +165,6 @@ fn numbers_in_strings_stay_strings() {
 
 #[test]
 fn errors() {
-    // Trailing junk after a value.
     assert_eq!(
         err("1 x"),
         JsonError {
@@ -179,7 +172,6 @@ fn errors() {
             offset: 2
         }
     );
-    // Unclosed structures.
     assert_eq!(
         err("{"),
         JsonError {
@@ -208,7 +200,6 @@ fn errors() {
             offset: 5
         }
     );
-    // Unclosed string.
     assert_eq!(
         err("\"abc"),
         JsonError {
@@ -216,7 +207,6 @@ fn errors() {
             offset: 4
         }
     );
-    // Bad escape.
     assert_eq!(
         err(r#""a\q""#),
         JsonError {
@@ -224,7 +214,6 @@ fn errors() {
             offset: 3
         }
     );
-    // Invalid numbers.
     assert_eq!(
         err("01"),
         JsonError {
@@ -260,7 +249,6 @@ fn errors() {
             offset: 5
         }
     );
-    // Bare NaN / Infinity are not JSON numbers.
     assert_eq!(
         err("NaN"),
         JsonError {
@@ -275,7 +263,6 @@ fn errors() {
             offset: 0
         }
     );
-    // Unpaired surrogates.
     assert_eq!(
         err(r#""\ud800""#),
         JsonError {
@@ -290,7 +277,6 @@ fn errors() {
             offset: 7
         }
     );
-    // Missing colon / comma.
     assert_eq!(
         err(r#"{"a" 1}"#),
         JsonError {
@@ -312,7 +298,6 @@ fn errors() {
             offset: 3
         }
     );
-    // Empty and whitespace-only input.
     assert_eq!(
         err(""),
         JsonError {
@@ -358,7 +343,6 @@ fn options_json_shape() {
 
 #[test]
 fn large_document() {
-    // Generate a 100-key object programmatically and parse it back.
     let mut body = String::from("{");
     for i in 0..100 {
         if i > 0 {

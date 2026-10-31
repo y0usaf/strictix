@@ -68,8 +68,6 @@ fn run_rules_only(source: &str, rules: Vec<Box<dyn Rule>>) -> Vec<Diagnostic> {
     diags
 }
 
-// --- constant-if ----------------------------------------------------
-
 #[test]
 fn constant_if_true() {
     assert_eq!(
@@ -111,8 +109,6 @@ fn constant_if_fix_false_replaces_with_else_branch() {
     assert_eq!(result, "2");
 }
 
-// --- constant-if-branches ------------------------------------------
-
 #[test]
 fn constant_if_branches_flags_same_literal_without_fix() {
     let source = "if condition then 1.5 else 1.5";
@@ -139,8 +135,6 @@ fn constant_if_branches_skips_non_literals_and_different_literals() {
     }
 }
 
-// --- assert-true ----------------------------------------------------
-
 #[test]
 fn assert_true_diag() {
     assert_eq!(
@@ -156,10 +150,6 @@ fn assert_no_diag_for_variable_cond() {
 
 #[test]
 fn assert_true_fix_removes_prefix() {
-    // The fix removes `assert true;` (assert-start through the
-    // semicolon), leaving the body preceded by the one space that
-    // separated it from the semicolon — " 42". Deterministic and
-    // accepted: the fix never destroys formatting around the edit.
     let source = "assert true; 42";
     let diags = run_rules_only(source, vec![Box::new(AssertTrue {})]);
     let fix = diags[0].fix.as_ref().expect("assert-true carries a fix");
@@ -167,8 +157,6 @@ fn assert_true_fix_removes_prefix() {
     let result = apply_fixes(source, &fix.edits).expect("fix applies");
     assert_eq!(result, " 42");
 }
-
-// --- tautology ------------------------------------------------------
 
 #[test]
 fn tautology_eq() {
@@ -192,9 +180,6 @@ fn tautology_andand() {
         run("x && x"),
         vec!["[tautology] warning 0..6 tautological comparison"],
     );
-    // `&&`/`||` carry no fix: folding to the bare operand would change
-    // the result type (an inline forces the operand to boolean, the
-    // operand may not be boolean). Verify no fix is attached.
     let diags = run_rules_only("x && x", vec![Box::new(Tautology {})]);
     assert!(diags[0].fix.is_none(), "&& tautology has no fix");
 }
@@ -214,7 +199,6 @@ fn tautology_no_diag_distinct_names() {
 
 #[test]
 fn tautology_no_diag_int_vs_float() {
-    // 1 == 1.0 compares different kinds (Int vs Float); not flagged.
     assert!(run("1 == 1.0").is_empty());
 }
 
@@ -228,16 +212,11 @@ fn tautology_int_vs_int_is_flagged() {
 
 #[test]
 fn tautology_flagged_inside_let_body() {
-    // Tautology compares source text, not semantics: the let-bound x
-    // and the x in the body are different bindings, but the comparison
-    // is still textually x == x, so it is flagged — intended.
     assert_eq!(
         run("let x = 1; in x == x"),
         vec!["[tautology] warning 14..20 tautological comparison"],
     );
 }
-
-// --- tautology fixes ------------------------------------------------
 
 #[test]
 fn tautology_eq_fix_folds_to_true() {
@@ -269,12 +248,8 @@ fn tautology_int_eq_fix_folds_to_true() {
     assert_eq!(result, "true");
 }
 
-// --- multi-rule -----------------------------------------------------
-
 #[test]
 fn multi_rule_two_diagnostics_in_source_order() {
-    // AssertExpr (0..34) wraps the whole file; the IfExpr (12..34) is
-    // its body. Both fire, sorted into source order by the helper.
     assert_eq!(
         run("assert true; if true then a else b"),
         vec![

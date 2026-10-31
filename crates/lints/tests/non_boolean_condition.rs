@@ -53,8 +53,6 @@ fn rule() -> Box<dyn Rule> {
     Box::new(NonBooleanCondition {})
 }
 
-// --- trigger cases --------------------------------------------------
-
 #[test]
 fn flags_int_condition() {
     assert_eq!(
@@ -81,7 +79,6 @@ fn flags_empty_list_condition() {
 
 #[test]
 fn flags_path_condition() {
-    // ./foo lexes as a Path token, distinct from a division.
     assert_eq!(
         run("if ./foo then a else b", rule()),
         ["[non-boolean-condition] error 3..8 if-condition has non-boolean type: `./foo`"]
@@ -98,36 +95,29 @@ fn flags_attrset_condition() {
 
 #[test]
 fn flags_paren_unwrapped_int_condition() {
-    // The paren is unwrapped, so the condition is the inner `0`.
     assert_eq!(
         run("if (0) then a else b", rule()),
         ["[non-boolean-condition] error 4..5 if-condition has non-boolean type: `0`"]
     );
 }
 
-// --- clean near-misses ---------------------------------------------
-
 #[test]
 fn clean_ident_condition() {
-    // An ident may be a boolean variable; not provable, so no diag.
     assert_eq!(run("if x then a else b", rule()), Vec::<String>::new());
 }
 
 #[test]
 fn clean_comparison_condition() {
-    // A comparison evaluates to a boolean; not a literal.
     assert_eq!(run("if x == 1 then a else b", rule()), Vec::<String>::new());
 }
 
 #[test]
 fn clean_true_condition() {
-    // true is an Ident and owned by constant-if; never fire here.
     assert_eq!(run("if true then a else b", rule()), Vec::<String>::new());
 }
 
 #[test]
 fn clean_paren_ident_condition() {
-    // (x) unwraps to an ident variable; not provable.
     assert_eq!(run("if (x) then a else b", rule()), Vec::<String>::new());
 }
 

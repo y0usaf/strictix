@@ -8,8 +8,6 @@ use strictix_syntax::{
 
 use SyntaxKind as K;
 
-// --- every node kind has a wrapper ---
-
 /// Cast any node to its wrapper; panics if the kind has none.
 fn assert_any_kind_wraps(node: &SyntaxNode) {
     match node.kind() {
@@ -54,8 +52,6 @@ fn corpus_every_node_kind_wraps() {
     }
 }
 
-// --- corpus: module.nix ---
-
 #[test]
 fn corpus_module_shape() {
     let src = std::fs::read_to_string(concat!(
@@ -66,7 +62,6 @@ fn corpus_module_shape() {
     let tree = parse(&src);
     let root = Root::cast(&tree).expect("root");
 
-    // Top: { config, lib, pkgs, ... }:
     let Expr::Lambda(top) = root.expr().expect("top-level lambda") else {
         panic!("module.nix is a lambda");
     };
@@ -80,7 +75,6 @@ fn corpus_module_shape() {
     assert_eq!(names, ["config", "lib", "pkgs"]);
     assert!(formals.has_ellipsis());
 
-    // Body: let ... in { ... }
     let Expr::Let(let_expr) = top.body().expect("lambda body") else {
         panic!("lambda body is a let");
     };
@@ -107,7 +101,6 @@ fn corpus_module_shape() {
         panic!("port = int")
     };
 
-    // Body of the let: the module attrset.
     let Expr::Attrset(module) = let_expr.body().expect("let body") else {
         panic!("let body is an attrset");
     };
@@ -125,8 +118,6 @@ fn corpus_module_shape() {
         panic!()
     };
     assert_eq!(attrpath_text(&config.attrpath().unwrap(), &src), "config");
-    // config = mkIf config.services.example.enable { ... }
-    // mkIf a b = Apply(Apply(mkIf, a), b)
     let Expr::Apply(app1) = config.value().unwrap() else {
         panic!("config value is apply")
     };
@@ -149,7 +140,6 @@ fn corpus_module_shape() {
         panic!()
     };
 
-    // environment.etc."example/config.json".text = builtins.toJSON { ... }
     let items: Vec<_> = config_body.items().collect();
     let AttrItem::Binding(etc) = items[0] else {
         panic!()
@@ -184,8 +174,6 @@ fn attrpath_text(path: &Attrpath<'_>, src: &str) -> String {
         .join(".")
 }
 
-// --- corpus: overlay.nix ---
-
 #[test]
 fn corpus_overlay_shape() {
     let src = std::fs::read_to_string(concat!(
@@ -196,7 +184,6 @@ fn corpus_overlay_shape() {
     let tree = parse(&src);
     let root = Root::cast(&tree).expect("root");
 
-    // final: prev: { ... }
     let Expr::Lambda(l1) = root.expr().unwrap() else {
         panic!("overlay is lambda")
     };
@@ -215,7 +202,6 @@ fn corpus_overlay_shape() {
         panic!()
     };
 
-    // example = prev.callPackage ./pkgs/example { ... }
     let items: Vec<_> = attrset.items().collect();
     assert_eq!(items.len(), 4);
     let AttrItem::Binding(example) = items[0] else {
@@ -240,7 +226,6 @@ fn corpus_overlay_shape() {
         panic!()
     };
 
-    // inherit (prev) lib stdenv;
     let arg_items: Vec<_> = arg.items().collect();
     let AttrItem::Inherit(inh) = arg_items[0] else {
         panic!()
@@ -252,7 +237,6 @@ fn corpus_overlay_shape() {
     let names: Vec<_> = inh.names().map(|t| t.text(&src)).collect();
     assert_eq!(names, ["lib", "stdenv"]);
 
-    // patched = prev.hello.overrideAttrs (old: { patches = (old.patches or [ ]) ++ [...]; });
     let AttrItem::Binding(patched) = items[1] else {
         panic!()
     };
@@ -302,7 +286,6 @@ fn corpus_overlay_shape() {
     };
     assert!(matches!(rhs.items().next(), Some(Expr::Path(_))));
 
-    // uri = "https://example.com/\${final.example.version}/release";
     let AttrItem::Binding(uri) = items[2] else {
         panic!()
     };
@@ -331,11 +314,8 @@ fn corpus_overlay_shape() {
     assert_eq!(c2.text(&src), "/release");
 }
 
-// --- inline fixtures per wrapper ---
-
 #[test]
 fn binop_nests_lhs_inside() {
-    // '1 + 2 * 3' is BinExpr(1, +, BinExpr(2, *, 3)): lhs is a child.
     let src = "1 + 2 * 3";
     let tree = parse(src);
     let root = Root::cast(&tree).unwrap();
@@ -377,7 +357,6 @@ fn apply_nests_func_inside() {
 
 #[test]
 fn apply_chain_left_assoc() {
-    // f g x = Apply(Apply(f, g), x)
     let src = "f g x";
     let tree = parse(src);
     let root = Root::cast(&tree).unwrap();
@@ -593,7 +572,6 @@ fn expr_range_and_text() {
 
 #[test]
 fn attrpath_unquoted_interp_segment() {
-    // Nix accepts a.${b}.c — the ${b} is a dynamic segment.
     let src = r#"let b = "x"; in cfg.folders.${b}.id"#;
     let tree = parse(src);
     let root = Root::cast(&tree).expect("root");

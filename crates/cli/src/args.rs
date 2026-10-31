@@ -126,8 +126,6 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             i += 1;
             continue;
         }
-        // Positional: the first one is the command, the rest are paths
-        // (or the explain code).
         if command.is_none() {
             command = Some(parse_command(arg)?);
         } else {

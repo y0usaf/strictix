@@ -77,8 +77,6 @@ ast_node!(IndStringExpr, IndStringExpr);
 ast_node!(InterpExpr, InterpExpr);
 ast_node!(ParenExpr, ParenExpr);
 
-// --- expressions ----------------------------------------------------
-
 /// A Nix expression: an atom token or a compound node.
 ///
 /// Atoms (idents, literals, paths, uris) are tokens in the CST, not
@@ -245,8 +243,6 @@ fn last_expr<'a>(node: &'a SyntaxNode) -> Option<Expr<'a>> {
     node.children().iter().rev().find_map(expr_of)
 }
 
-// --- binding blocks (let / attrset) ---------------------------------
-
 /// One entry in a binding block: a binding or an inherit statement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttrItem<'a> {
@@ -350,11 +346,6 @@ impl<'a> InheritStmt<'a> {
     /// The inherited names, source expression excluded.
     pub fn names(&self) -> impl Iterator<Item = &'a SyntaxToken> + 'a {
         let node = self.syntax();
-        // For `inherit (from) a b;` the names come after the RParen;
-        // otherwise they come after the leading `inherit` keyword. The
-        // keyword is located explicitly: unlike an RParen, it does not
-        // delimit the names, but the node may begin with leading trivia,
-        // so its index cannot be assumed to be 1.
         let start = if let Some(rp) = node.children().iter().position(|c| c.kind() == K::RParen) {
             rp + 1
         } else {
@@ -443,7 +434,6 @@ impl<'a> Formals<'a> {
         let mut pending: Option<&'a SyntaxToken> = None;
         let mut expect_default = false;
         self.syntax().children().iter().filter_map(move |c| {
-            // flush a pending plain param at a separator
             let sep = matches!(c.kind(), K::Comma | K::Ellipsis | K::RBrace);
             if sep && !expect_default {
                 let out = pending.map(|name| FormalParam {
@@ -464,9 +454,8 @@ impl<'a> Formals<'a> {
                             default: Some(default),
                         })
                     } else if t.kind().is_trivia() {
-                        None // whitespace inside the default expr
+                        None
                     } else {
-                        // stray significant token: drop the incomplete param
                         expect_default = false;
                         pending = None;
                         None
@@ -523,7 +512,6 @@ impl<'a> LambdaExpr<'a> {
         let node = self.syntax();
         match node.child_node(K::Formals) {
             Some(f) => {
-                // The at-name, when present, is the ident beside the at.
                 let name = node
                     .children()
                     .iter()

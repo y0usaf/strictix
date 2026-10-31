@@ -60,8 +60,6 @@ impl Rule for ConstantIfBranches {
         else {
             return;
         };
-        // BooleanIf owns identical identifiers and integers. Excluding those
-        // shapes keeps one source node from receiving two findings.
         if matches!(
             (then_branch, else_branch),
             (Expr::Ident(_), Expr::Ident(_)) | (Expr::Int(_), Expr::Int(_))
@@ -106,10 +104,6 @@ impl Rule for ConstantIf {
             return;
         };
         let Some(cond) = if_expr.cond() else { return };
-        // In Nix, true/false lex as Ident tokens. A *binding* named true
-        // is legal ({ true = 1; }), but in expression position these
-        // texts are always the literals — match on the exact text, which
-        // is the only way to tell the two apart.
         let is_true = matches!(cond, Expr::Ident(t) if t.text(source) == "true");
         let is_false = matches!(cond, Expr::Ident(t) if t.text(source) == "false");
         if !is_true && !is_false {
@@ -174,8 +168,6 @@ impl Rule for AssertTrue {
         let Some(cond) = assert_expr.cond() else {
             return;
         };
-        // Same exact-text check as constant-if: true is an Ident token,
-        // and in expression position that text is always the literal.
         let is_true = matches!(cond, Expr::Ident(t) if t.text(source) == "true");
         if !is_true {
             return;
@@ -186,10 +178,6 @@ impl Rule for AssertTrue {
             "assert true is always satisfied",
             node.content_range(),
         );
-        // The AssertExpr node's range runs through the body, so the fix
-        // targets assert-start .. the semicolon that ends the condition.
-        // Only direct-child semicolons qualify — a semicolon inside the
-        // body belongs to a child node and is never the terminator here.
         if let Some(semi) = node.child_tokens().find(|t| t.kind() == K::Semicolon) {
             let range = TextRange::new(node.range().start(), semi.range().end());
             let fix = Fix::new("remove assert true").edit(range, "");
@@ -239,8 +227,6 @@ impl Rule for Tautology {
         let (Some(lhs), Some(rhs)) = (bin_expr.lhs(), bin_expr.rhs()) else {
             return;
         };
-        // Same kind AND identical text: Ident vs Ident, Int vs Int. A
-        // float is a different kind, so 1 == 1.0 never matches.
         let same_kind = matches!(
             (lhs, rhs),
             (Expr::Ident(_), Expr::Ident(_)) | (Expr::Int(_), Expr::Int(_))
@@ -249,16 +235,10 @@ impl Rule for Tautology {
             .zip(atom_text(rhs, source))
             .is_some_and(|(l, r)| l == r);
         if same_kind && same_text {
-            // Nix equality is pure, total, and reflexive, so a same-
-            // operand comparison folds to a constant exactly. (`&&`/`||`
-            // are NOT folded: they force the operand to a boolean, so
-            // for a non-boolean operand an inline adds a forced-eval
-            // error that "replace with the operand" would silently
-            // remove — too risky for an automated fix.)
             let fix = match op {
                 K::EqEq => Some(Fix::new("replace with true").edit(node.content_range(), "true")),
                 K::Neq => Some(Fix::new("replace with false").edit(node.content_range(), "false")),
-                _ => None, // && / || carry no fix
+                _ => None,
             };
             let mut diag = Diagnostic::new(
                 "tautology",

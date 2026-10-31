@@ -2,8 +2,6 @@
 use strictix_core::semantic::{BindingKind, SemanticModel};
 use strictix_syntax::{AstNode, AttrName, Expr, InheritStmt, WithExpr};
 
-// Resolve only the conventional module `lib` and direct aliases. This is a
-// maintainability heuristic, not evaluation of arbitrary imported libraries.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LibraryValue {
     Library,
@@ -66,8 +64,6 @@ fn library_value(model: &SemanticModel<'_>, expr: Expr<'_>, fuel: usize) -> Opti
                 if let Some(value) = crate::static_binding::value(token, model) {
                     return library_value(model, value, fuel);
                 }
-                // Let inherits are registered as LetBinding; rec inherits use
-                // RecAttr. Locate the defining syntax rather than relying on kind.
                 let inherit = model
                     .root()
                     .descendants()

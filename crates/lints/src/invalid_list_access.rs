@@ -133,8 +133,6 @@ fn call_parts<'a>(apply: ApplyExpr<'a>) -> Option<(Expr<'a>, Vec<Expr<'a>>)> {
 fn global_builtin<'a>(model: &SemanticModel<'a>, callee: Expr<'a>) -> Option<&'static str> {
     let source = model.source();
     match callee {
-        // These functions are members of the `builtins` set. Bare names are
-        // ordinary variables and may be supplied by a surrounding `with`.
         Expr::Ident(_) => None,
         Expr::Paren(paren) => paren.expr().and_then(|expr| global_builtin(model, expr)),
         Expr::Select(select) => {

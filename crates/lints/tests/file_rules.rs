@@ -74,8 +74,6 @@ fn schema_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/options.json")
 }
 
-// --- cyclomatic-complexity ------------------------------------------
-
 #[test]
 fn cyclomatic_complexity_flags_more_than_five_paths() {
     let source = "x: if a then if b then if c then if d then if e then if f then if g then if h then if i then if j then if k then 1 else 2 else 3 else 4 else 5 else 6 else 7 else 8 else 9 else 10 else 11";
@@ -113,8 +111,6 @@ fn cyclomatic_complexity_allows_five_paths() {
     )
     .is_empty());
 }
-
-// --- unused-let-binding ---------------------------------------------
 
 #[test]
 fn unused_let_binding_flags_unused() {
@@ -162,8 +158,6 @@ fn unused_let_binding_offers_removal_fix() {
     assert_eq!(fix.edits[0].range.end(), 10);
 }
 
-// --- unused-lambda-param --------------------------------------------
-
 #[test]
 fn unused_lambda_param_flags_unused() {
     let rules = one(Box::new(UnusedLambdaParam {}));
@@ -203,7 +197,6 @@ fn unused_lambda_param_clean_cases() {
     let cfg = LintConfig::default();
     assert_eq!(run("_x: 1", &rules, cfg.clone()), Vec::<String>::new());
     assert_eq!(run("x: x", &rules, cfg.clone()), Vec::<String>::new());
-    // Only the inner y is unused; the outer x is referenced.
     assert_eq!(
         run("x: y: x", &rules, cfg),
         ["[unused-lambda-param] warning 3..4 parameter 'y' is never used"]
@@ -214,8 +207,6 @@ fn unused_lambda_param_clean_cases() {
 fn unused_lambda_param_skips_overlay_params() {
     let rules = one(Box::new(UnusedLambdaParam {}));
     let cfg = LintConfig::default();
-    // An overlay is a bare-param lambda whose body is a bare-param
-    // lambda whose body is a (rec) attrset: neither param is flagged.
     assert_eq!(
         run("final: prev: {}", &rules, cfg.clone()),
         Vec::<String>::new()
@@ -224,14 +215,11 @@ fn unused_lambda_param_skips_overlay_params() {
         run("final: prev: rec { x = prev.y; }", &rules, cfg.clone()),
         Vec::<String>::new()
     );
-    // A non-overlay (body is not an attrset) still flags the unused param.
     assert_eq!(
         run("final: prev: prev", &rules, cfg),
         ["[unused-lambda-param] warning 0..5 parameter 'final' is never used"]
     );
 }
-
-// --- unused-formal ---------------------------------------------------
 
 #[test]
 fn unused_formal_flags_unused() {
@@ -270,21 +258,16 @@ fn unused_formal_offers_rename_fix() {
 fn unused_formal_clean_cases() {
     let rules = one(Box::new(UnusedFormal {}));
     let cfg = LintConfig::default();
-    // Ellipsis means the extra formals are an open interface.
     assert_eq!(
         run("{ a, b, ... }: b", &rules, cfg.clone()),
         Vec::<String>::new()
     );
-    // Underscore names opt out.
     assert_eq!(
         run("{ _a, b }: b", &rules, cfg.clone()),
         Vec::<String>::new()
     );
-    // Used formals are fine.
     assert_eq!(run("{ a }: a", &rules, cfg), Vec::<String>::new());
 }
-
-// --- shadowed-binding ------------------------------------------------
 
 #[test]
 fn shadowed_binding_flags_inner() {
@@ -304,17 +287,13 @@ fn shadowed_binding_clean_cases() {
         run("let a = 1; in let b = 2; in a + b", &rules, cfg.clone()),
         Vec::<String>::new()
     );
-    // A rec attr sees its own name at its position: not a shadow.
     assert_eq!(run("rec { a = 1; }", &rules, cfg), Vec::<String>::new());
 }
-
-// --- redundant-with --------------------------------------------------
 
 #[test]
 fn redundant_with_flags_when_body_is_lexical() {
     let rules = one(Box::new(RedundantWith {}));
     let cfg = LintConfig::default();
-    // pkgs resolves lexically (to the let binding), so the with is dead.
     assert_eq!(
         run("let pkgs = 1; in with pkgs; pkgs.hello", &rules, cfg),
         ["[redundant-with] warning 16..38 with-scope is never used"]
@@ -325,7 +304,6 @@ fn redundant_with_flags_when_body_is_lexical() {
 fn redundant_with_flags_let_body() {
     let rules = one(Box::new(RedundantWith {}));
     let cfg = LintConfig::default();
-    // x resolves to the let binding; the with attrset is never consulted.
     assert_eq!(
         run("let x = 1; in with { y = 2; }; x", &rules, cfg),
         ["[redundant-with] warning 13..32 with-scope is never used"]
@@ -336,12 +314,10 @@ fn redundant_with_flags_let_body() {
 fn redundant_with_clean_when_with_is_needed() {
     let rules = one(Box::new(RedundantWith {}));
     let cfg = LintConfig::default();
-    // map/f/xs are unbound — the with scope is a real fallback.
     assert_eq!(
         run("with lib; map f xs", &rules, cfg.clone()),
         Vec::<String>::new()
     );
-    // A single unbound reference needs the with too.
     assert_eq!(run("with lib; f", &rules, cfg), Vec::<String>::new());
 }
 
@@ -362,8 +338,6 @@ fn redundant_with_offers_removal_fix() {
     let fix = diags[0].fix.as_ref().expect("redundant with gets a fix");
     assert_eq!(fix.label, "remove with scope");
     assert_eq!(fix.edits.len(), 1);
-    // Deletes from the scope start (the `with` key) through the body
-    // start, leaving exactly the body.
     assert_eq!(fix.edits[0].replacement, "");
     assert_eq!(fix.edits[0].range.start(), 16);
     assert_eq!(fix.edits[0].range.end(), 27);
@@ -390,8 +364,6 @@ fn redundant_with_fix_removes_let_body_with() {
     assert_eq!(result, "let x = 1; in x");
 }
 
-// --- unnecessary-or --------------------------------------------------
-
 #[test]
 fn unnecessary_or_flags_present_literal_attribute() {
     let rules = one(Box::new(UnnecessaryOr {}));
@@ -407,8 +379,6 @@ fn unnecessary_or_skips_missing_and_dynamic_attributes() {
     assert!(run("{ a = 1; }.b or 2", &rules, LintConfig::default()).is_empty());
     assert!(run("attrs.a or 2", &rules, LintConfig::default()).is_empty());
 }
-
-// --- self-referential-let -------------------------------------------
 
 #[test]
 fn self_referential_let_flags_infinite_recursion() {
@@ -432,11 +402,8 @@ fn self_referential_let_clean_cases() {
         run("let x = 1; in x", &rules, cfg.clone()),
         Vec::<String>::new()
     );
-    // y is a different name — not self-reference.
     assert_eq!(run("let x = y; in x", &rules, cfg), Vec::<String>::new());
 }
-
-// --- unknown-option (schema rule) ------------------------------------
 
 #[test]
 fn unknown_option_flags_hallucinated_path() {
@@ -460,14 +427,13 @@ fn unknown_option_clean_for_valid_module() {
 #[test]
 fn unknown_option_off_without_schema() {
     let rules = all_file_rules();
-    let cfg = LintConfig::default(); // schema None
+    let cfg = LintConfig::default();
     let bad = fixture("module_bad.nix");
     assert_eq!(run(&bad, &rules, cfg), Vec::<String>::new());
 }
 
 #[test]
 fn self_referential_let_lambda_guard_not_flagged() {
-    // Recursion behind a lambda body is normal Nix, not this bug.
     let src = "let f = n: if n == 0 then 0 else f (n - 1); in f 3";
     assert_eq!(
         run(
@@ -481,7 +447,6 @@ fn self_referential_let_lambda_guard_not_flagged() {
 
 #[test]
 fn self_referential_let_attrset_guard_not_flagged() {
-    // Lazy attrset value: self-reference is fine until forced.
     let src = "let x = { a = x; }; in x";
     assert_eq!(
         run(
@@ -492,8 +457,6 @@ fn self_referential_let_attrset_guard_not_flagged() {
         Vec::<String>::new()
     );
 }
-
-// --- circular-let ------------------------------------------------------
 
 #[test]
 fn circular_let_flags_two_node_cycle() {
@@ -524,7 +487,6 @@ fn circular_let_flags_rec_attrset_cycle() {
 
 #[test]
 fn circular_let_clean_acyclic_reference() {
-    // a -> b is a plain edge, not a cycle.
     let rules = one(Box::new(CircularLet {}));
     assert_eq!(
         run("let a = b; b = 1; in a", &rules, LintConfig::default()),
@@ -534,8 +496,6 @@ fn circular_let_clean_acyclic_reference() {
 
 #[test]
 fn circular_let_clean_lazy_carrier() {
-    // Attrset values are lazy: the mutual references are ordinary
-    // recursive data, never forced by forcing a or b themselves.
     let rules = one(Box::new(CircularLet {}));
     assert_eq!(
         run(
@@ -549,15 +509,12 @@ fn circular_let_clean_lazy_carrier() {
 
 #[test]
 fn circular_let_ignores_self_reference() {
-    // Length-1 cycles are self-referential-let's finding, not ours.
     let rules = one(Box::new(CircularLet {}));
     assert_eq!(
         run("let x = x; in x", &rules, LintConfig::default()),
         Vec::<String>::new()
     );
 }
-
-// --- rebound-constant --------------------------------------------------
 
 #[test]
 fn rebound_constant_flags_let_binding() {
@@ -579,8 +536,6 @@ fn rebound_constant_flags_lambda_param() {
 
 #[test]
 fn rebound_constant_clean_attrset_key() {
-    // A plain attrset key is data, not a scope binding: the model
-    // records nothing for it, so the rule stays silent by construction.
     let rules = one(Box::new(ReboundConstant {}));
     assert_eq!(
         run("{ true = 1; }", &rules, LintConfig::default()),

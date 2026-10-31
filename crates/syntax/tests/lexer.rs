@@ -22,7 +22,6 @@ fn assert_round_trip(src: &str) {
         rebuilt.push_str(token.text(src));
     }
     assert_eq!(rebuilt, src, "round trip failed");
-    // Tokens must tile the source with no gaps or overlaps.
     let mut offset = 0;
     for token in &tokens {
         assert_eq!(token.start as usize, offset);
@@ -64,7 +63,6 @@ fn keywords_and_lookalikes() {
             K::KwOr
         ]
     );
-    // Idents that merely start with keywords stay idents.
     assert_eq!(
         kinds("inheritance oracle letter"),
         [K::Ident, K::Ident, K::Ident]
@@ -77,9 +75,7 @@ fn numbers() {
     assert_eq!(kinds("1.5"), [K::Float]);
     assert_eq!(kinds("2.0e3"), [K::Float]);
     assert_eq!(kinds("1.5e-3"), [K::Float]);
-    // No digits after the dot: Int then Dot.
     assert_eq!(kinds("1."), [K::Int, K::Dot]);
-    // Nix floats require a decimal point: `1e3` is Int + Ident.
     assert_eq!(kinds("1e3"), [K::Int, K::Ident]);
 }
 
@@ -96,7 +92,6 @@ fn paths() {
 
 #[test]
 fn division_needs_spaces() {
-    // `a/b` is a path; `a / b` is division; `a // b` is attrset merge.
     assert_eq!(kinds("a/b"), [K::Path]);
     assert_eq!(kinds("a / b"), [K::Ident, K::Slash, K::Ident]);
     assert_eq!(kinds("a // b"), [K::Ident, K::SlashSlash, K::Ident]);
@@ -146,7 +141,6 @@ fn comments() {
 
 #[test]
 fn uri_quirk() {
-    // `x: body` is a lambda; `x:1` is a URI (longest match wins).
     assert_eq!(kinds("x: body"), [K::Ident, K::Colon, K::Ident]);
     assert_eq!(kinds("http://example.com/x"), [K::Uri]);
     assert_eq!(kinds("x:1"), [K::Uri]);
@@ -191,7 +185,6 @@ fn string_escaped_interpolation_is_content() {
 
 #[test]
 fn nested_interpolation() {
-    // Interpolation inside an attrset inside a string inside an interp.
     let src = "\"${ { a = \"x${y}z\"; }.a }\"";
     assert_eq!(
         kinds(src),
@@ -237,10 +230,6 @@ fn indented_string() {
 
 #[test]
 fn indented_string_escapes() {
-    // `'''` is a literal quote, `''$` a literal dollar, `''\n` an
-    // escape: none of them end the string or start interpolation.
-    // Verified against real Nix: `''a'''b''${c}''\n d''` evaluates to
-    // `a''b${c}\n d` with no interpolation.
     let src = "''a'''b''${c}''\\n d''";
     assert_eq!(
         kinds(src),
@@ -272,7 +261,6 @@ fn unterminated_block_comment_is_comment_to_eof() {
 
 #[test]
 fn interpolation_brace_tracking() {
-    // Braces inside the interpolated attrset must not close the interp.
     let src = "\"${{ a = 1; }.a}\"";
     assert_eq!(
         kinds(src),

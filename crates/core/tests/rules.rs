@@ -17,8 +17,6 @@ use strictix_core::rules::{run_rules, Rule};
 use strictix_core::semantic::SemanticModel;
 use strictix_syntax::{parse, SyntaxKind, SyntaxNode};
 
-// --- dummy rules -----------------------------------------------------
-
 /// Node rule: records every check_node call plus the node's range, and
 /// records any check_file call (there should be none — node rules must
 /// never touch the semantic model).
@@ -120,8 +118,6 @@ impl Rule for CountingFileRule {
     }
 }
 
-// --- dispatch tests --------------------------------------------------
-
 #[test]
 fn node_rule_fires_once_per_matching_node_in_tree_order() {
     let source = "if true then 1 else 2\nif false then 3 else 4";
@@ -138,7 +134,6 @@ fn node_rule_fires_once_per_matching_node_in_tree_order() {
     let mut diags = Vec::new();
     run_rules(&rules, &tree, &model, &config, source, &mut diags);
 
-    // 2 IfExpr nodes -> exactly 2 calls, in ascending source order.
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     let ranges = ranges.lock().unwrap();
     let starts: Vec<u32> = ranges.iter().map(|(s, _)| *s).collect();
@@ -146,7 +141,6 @@ fn node_rule_fires_once_per_matching_node_in_tree_order() {
         starts.windows(2).all(|w| w[0] < w[1]),
         "node rules must fire in tree (source) order"
     );
-    // check_file must NOT be called for a node rule.
     assert_eq!(file_calls.load(Ordering::SeqCst), 0);
     assert!(diags.is_empty());
 }
@@ -158,7 +152,7 @@ fn node_rule_does_not_fire_for_other_kinds() {
     let model = SemanticModel::new(source, &tree);
     let config = LintConfig::default();
 
-    let rule = CountingNodeRule::new(SyntaxKind::IfExpr); // no IfExpr in source
+    let rule = CountingNodeRule::new(SyntaxKind::IfExpr);
     let calls = rule.calls.clone();
     let rules: Vec<Box<dyn Rule>> = vec![Box::new(rule)];
 
@@ -185,10 +179,8 @@ fn file_rule_fires_exactly_once_per_run() {
     run_rules(&rules, &tree, &model, &config, source, &mut diags);
     run_rules(&rules, &tree, &model, &config, source, &mut diags);
 
-    // Exactly once per run_rules call: two calls -> two invocations.
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(seen.lock().unwrap().len(), 2);
-    // check_node must NOT be called for a file rule.
     assert_eq!(node_calls.load(Ordering::SeqCst), 0);
 }
 
@@ -199,7 +191,6 @@ fn disabled_rule_does_not_fire() {
     let model = SemanticModel::new(source, &tree);
     let mut diags = Vec::new();
 
-    // Disabled node rule.
     let config = LintConfig::default().with_disabled(vec!["test-node-rule".to_string()]);
     let rule = CountingNodeRule::new(SyntaxKind::IfExpr);
     let calls = rule.calls.clone();
@@ -209,7 +200,6 @@ fn disabled_rule_does_not_fire() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(file_calls.load(Ordering::SeqCst), 0);
 
-    // Disabled file rule.
     let config = LintConfig::default().with_disabled(vec!["test-file-rule".to_string()]);
     let rule = CountingFileRule::new();
     let calls = rule.calls.clone();
@@ -254,15 +244,12 @@ fn lint_config_builders_and_is_enabled() {
     let cfg = cfg.with_schema("options.json");
     assert_eq!(cfg.schema.as_deref(), Some(Path::new("options.json")));
 
-    // with_disabled replaces the list; it does not accumulate.
     let cfg = LintConfig::default()
         .with_disabled(vec!["a".to_string()])
         .with_disabled(vec!["b".to_string()]);
     assert!(cfg.is_enabled("a"));
     assert!(!cfg.is_enabled("b"));
 }
-
-// --- rules! macro ----------------------------------------------------
 
 struct MacroRuleA;
 struct MacroRuleB;
@@ -303,13 +290,10 @@ fn rules_macro_expands_to_boxed_registry() {
     let codes: Vec<&str> = registry.iter().map(|r| r.code()).collect();
     assert_eq!(codes, ["macro-rule-a", "macro-rule-b"]);
 
-    // A trailing comma is accepted.
     let registry: Vec<Box<dyn Rule>> = strictix_core::rules! { MacroRuleA, };
     assert_eq!(registry.len(), 1);
     assert_eq!(registry[0].code(), "macro-rule-a");
 }
-
-// --- multiple node rules ---------------------------------------------
 
 #[test]
 fn multiple_node_rules_of_different_kinds_fire_on_same_tree() {
@@ -327,7 +311,6 @@ fn multiple_node_rules_of_different_kinds_fire_on_same_tree() {
     let mut diags = Vec::new();
     run_rules(&rules, &tree, &model, &config, source, &mut diags);
 
-    // One IfExpr, two ListExpr nodes; both rules fire on the same tree.
     assert_eq!(if_calls.load(Ordering::SeqCst), 1);
     assert_eq!(list_calls.load(Ordering::SeqCst), 2);
 }

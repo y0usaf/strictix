@@ -244,8 +244,6 @@ impl Rule for UnusedLambdaParam {
                 continue;
             }
             let range = binding.name.range();
-            // Formal parameters belong to UnusedFormal; this rule only
-            // covers the bare `x: body` form.
             if inside_formals(model.root(), range) {
                 continue;
             }
@@ -259,11 +257,6 @@ impl Rule for UnusedLambdaParam {
             if name.starts_with('_') {
                 continue;
             }
-            // Fix: rename to the leading-underscore form. The parameter
-            // has zero references, so renaming just its token cannot
-            // break a use; the `_` prefix is this rule's own documented
-            // opt-out, so the fix makes the intent explicit instead of
-            // deleting an interface.
             let range = binding.name.range();
             let fix = Fix::new("rename to _-prefixed").edit(range, format!("_{name}"));
             diags.push(
@@ -431,7 +424,7 @@ impl Rule for UnusedFormal {
             }
             let range = binding.name.range();
             let Some(formals) = containing_formals(model.root(), range) else {
-                continue; // bare ident param — UnusedLambdaParam's job
+                continue;
             };
             if formals.has_ellipsis() {
                 continue;
@@ -443,9 +436,6 @@ impl Rule for UnusedFormal {
             if name.starts_with('_') {
                 continue;
             }
-            // Same rename-to-_-prefixed fix as UnusedLambdaParam: the
-            // formal is never referenced, so renaming just its token is
-            // safe and aligns the name with the rule's opt-out.
             let range = binding.name.range();
             let fix = Fix::new("rename to _-prefixed").edit(range, format!("_{name}"));
             diags.push(
@@ -487,9 +477,6 @@ impl Rule for ShadowedBinding {
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         for binding in model.bindings() {
-            // InheritName binds only as a field of a fresh (non-rec) attrset;
-            // it never hides anything, so it cannot shadow. Formal parameters
-            // have their own diagnostic owner in ShadowedFormal.
             if binding.kind == BindingKind::InheritName
                 || (binding.kind == BindingKind::LambdaParam
                     && inside_formals(model.root(), binding.name.range()))
@@ -497,13 +484,9 @@ impl Rule for ShadowedBinding {
                 continue;
             }
             let name = binding.name.text(model.source());
-            // Names starting with `_` are idiomatically shadowed
-            // (nested lambdas, ignored params) — skip.
             if name.starts_with('_') {
                 continue;
             }
-            // outer_shadow resolves from the enclosing scope outward, so a
-            // recursive `let` binding does not count itself.
             if model.outer_shadow(binding).is_some() {
                 diags.push(Diagnostic::new(
                     self.code(),
@@ -619,18 +602,6 @@ impl Rule for RedundantWith {
                 .iter()
                 .all(|r| r.resolved.is_some() && r.via_with.is_none());
             if all_lexical {
-                // Safe to remove: the rule only fires when every body
-                // reference resolves lexically (no `via_with`), so the
-                // `with` scope is never consulted and deleting it cannot
-                // break a reference. The deletion spans from the scope
-                // start through the semicolon that terminates it.
-                //
-                // The terminator is found as a direct child token of the
-                // WithExpr node: nested semicolons (inside an attrset or
-                // let on the right) live in child nodes, so `child_tokens`
-                // yields exactly the scope's own `;`. If it cannot be
-                // found, no fix is offered rather than risk a corrupting
-                // edit.
                 let with_expr = model.root().descendants().find_map(|node| {
                     WithExpr::cast(node).filter(|w| w.range() == site.scope_range)
                 });
@@ -689,7 +660,6 @@ impl Rule for SelfReferentialLet {
             if binding.kind != BindingKind::LetBinding {
                 continue;
             }
-            // An inherit name has no value expression: skip it.
             let name_range = binding.name.range();
             let is_inherit = model.root().descendants().any(|n| {
                 n.kind() == strictix_syntax::SyntaxKind::InheritStmt
@@ -706,10 +676,6 @@ impl Rule for SelfReferentialLet {
             };
             let value_range = value.range();
             let name = binding.name.text(source);
-            // A self-reference is only a bug when the value's EAGER
-            // evaluation forces it: direct, arithmetic, select base,
-            // string interpolation, condition. Behind a lambda body, a
-            // list item, or an attrset value it is guarded by laziness.
             let forced = model.references().iter().any(|r| {
                 let range = r.name.range();
                 r.name.text(source) == name
@@ -801,7 +767,6 @@ fn eager_contains(expr: strictix_syntax::Expr<'_>, range: TextRange) -> bool {
             StringPart::Interp(i) => i.expr().is_some_and(|x| eager_contains(x, range)),
         }),
         Expr::Paren(p) => p.expr().is_some_and(|i| eager_contains(i, range)),
-        // Barriers: lambda body, list items, attrset/rec values.
         Expr::Lambda(_) | Expr::List(_) | Expr::Attrset(_) | Expr::RecAttrset(_) => false,
         Expr::Int(_) | Expr::Float(_) | Expr::Path(_) | Expr::SearchPath(_) | Expr::Uri(_) => false,
     }
@@ -840,17 +805,11 @@ impl Rule for CircularLet {
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         let source = model.source();
         let bindings = model.bindings();
-        // Sibling groups: every let and every rec attrset owns exactly
-        // one ScopeId, so grouping by scope id recovers the sibling
-        // sets. Declaration order is preserved, which makes "first in
-        // source order" the smallest local index within a group.
         let mut groups: Vec<(ScopeId, Vec<usize>)> = Vec::new();
         for (idx, binding) in bindings.iter().enumerate() {
             if !matches!(binding.kind, BindingKind::LetBinding | BindingKind::RecAttr) {
                 continue;
             }
-            // Inherit names register as let bindings but have no value
-            // expression of their own: skip them.
             let name_range = binding.name.range();
             let is_inherit = model.root().descendants().any(|n| {
                 n.kind() == SyntaxKind::InheritStmt && n.range().contains(name_range.start())
@@ -867,11 +826,6 @@ impl Rule for CircularLet {
             if members.len() < 2 {
                 continue;
             }
-            // Edge i -> j (local indices) when member i's value eagerly
-            // forces a reference that model-resolves to member j.
-            // References inside the value that resolve elsewhere (inner
-            // shadows, outer bindings) never match a sibling index, so
-            // nested scopes are handled by resolution itself.
             let mut adj: Vec<Vec<usize>> = vec![Vec::new(); members.len()];
             for (local, &idx) in members.iter().enumerate() {
                 let Some(binding_node) =
@@ -908,10 +862,6 @@ impl Rule for CircularLet {
                     cycle_dfs(start, &adj, &mut color, &mut stack, &mut cycles);
                 }
             }
-            // One report per distinct cycle: the same member set can be
-            // reached through several back-edges, so dedupe on the
-            // sorted member set, then rotate the recorded edge order so
-            // the first-in-source member leads.
             let mut seen: HashSet<Vec<usize>> = HashSet::new();
             for cycle in cycles {
                 let mut key = cycle.clone();

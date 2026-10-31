@@ -20,7 +20,6 @@ fn helper_call<'a>(
     let Expr::Apply(condition) = unparen(call.func()?)? else {
         return None;
     };
-    // Require both arguments, and recognize the saturated inner call only once.
     if call.arg()?.range() == call.func()?.range()
         || condition.arg()?.range() == condition.func()?.range()
     {
@@ -66,8 +65,6 @@ fn logical_op(node: &SyntaxNode) -> Option<SyntaxKind> {
     })
 }
 
-// Traverse operators in source order, so a && b || c && d has three runs,
-// even though precedence makes the two && nodes siblings in the syntax tree.
 fn logical_sequence(
     model: &SemanticModel<'_>,
     node: &SyntaxNode,
@@ -108,7 +105,6 @@ fn conditional(
 ) -> usize {
     let mut score = 1 + if else_if { 0 } else { nesting };
     let else_range = expr.else_branch().map(|branch| branch.range());
-    // A final else costs one even when its body is an atomic token.
     let chained = expr
         .syntax()
         .child_nodes()

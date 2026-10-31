@@ -68,12 +68,6 @@ fn fixes(source: &str) -> Vec<(u32, u32, String)> {
         .collect()
 }
 
-// `{ imports = [ import ./hw.nix ]; }`
-//
-// Layout (0-based):
-//   0  {       14..20  import     21..29 ./hw.nix
-//   13 [        30 ]
-// The bare `import` is a separate element from the path → one finding.
 #[test]
 fn bare_import_in_list_triggers_once_with_exact_offsets() {
     let source = "{ imports = [ import ./hw.nix ]; }";
@@ -81,13 +75,10 @@ fn bare_import_in_list_triggers_once_with_exact_offsets() {
         run(source, LintConfig::default()),
         ["[bare-import-in-list] warning 14..20 'import' in a list applies only to the next item; wrap the imported expression in parens: (import …)"]
     );
-    // The fix lifts the path into a paren frame spanning import..path:
     let fix = fixes(source);
     assert_eq!(fix, [(14, 29, "(import ./hw.nix)".to_string())]);
 }
 
-// The same source, expressed as rendered diagnostics (contract format),
-// and the applied fix yields the parenthesized form.
 #[test]
 fn bare_import_in_list_applies_fix_in_module() {
     let source = "{ imports = [ import ./hw.nix ]; }";
@@ -104,7 +95,6 @@ fn bare_import_in_list_applies_fix_in_module() {
     assert_eq!(result, "{ imports = [ (import ./hw.nix) ]; }");
 }
 
-// `[ import ./a.nix ]` — one finding, fix yields the parenthesized form.
 #[test]
 fn bare_import_in_list_triggers_and_fixes_bare_list() {
     let source = "[ import ./a.nix ]";
@@ -125,7 +115,6 @@ fn bare_import_in_list_triggers_and_fixes_bare_list() {
     assert_eq!(result, "[ (import ./a.nix) ]");
 }
 
-// Already parenthesized → the item is a Paren, not a bare import ident.
 #[test]
 fn bare_import_in_list_clean_when_parenthesized() {
     assert_eq!(
@@ -134,7 +123,6 @@ fn bare_import_in_list_clean_when_parenthesized() {
     );
 }
 
-// Bare `import` as the LAST element has nothing to import — no finding.
 #[test]
 fn bare_import_in_list_clean_when_last_item() {
     assert_eq!(
@@ -143,8 +131,6 @@ fn bare_import_in_list_clean_when_last_item() {
     );
 }
 
-// A shadowed `import` (local binding) is the user's own function, not the
-// builtin — this is exactly why the rule is a FILE rule.
 #[test]
 fn bare_import_in_list_clean_when_shadowed() {
     assert_eq!(
@@ -156,8 +142,6 @@ fn bare_import_in_list_clean_when_shadowed() {
     );
 }
 
-// Two paths after one bare `import`: both elements would be caught if the
-// author meant a single import; the rule fires exactly once at the import.
 #[test]
 fn bare_import_in_list_fires_once_with_extra_path() {
     let source = "[ import ./a ./b ]";
@@ -165,11 +149,9 @@ fn bare_import_in_list_fires_once_with_extra_path() {
         run(source, LintConfig::default()),
         ["[bare-import-in-list] warning 2..8 'import' in a list applies only to the next item; wrap the imported expression in parens: (import …)"]
     );
-    // Fix still targets just the first following path.
     assert_eq!(fixes(source), [(2, 12, "(import ./a)".to_string())]);
 }
 
-// Interpolated strings are not touchable → diagnostic but no auto-fix.
 #[test]
 fn bare_import_in_list_no_fix_on_interpolated_string() {
     let source = r#"[ import "../../${name}/x" ]"#;

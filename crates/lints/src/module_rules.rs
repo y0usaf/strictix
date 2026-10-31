@@ -226,10 +226,6 @@ fn literal_bool(expr: Expr<'_>, model: &SemanticModel<'_>) -> Option<bool> {
     }
 }
 
-// Inspect only syntax known to demand a value. List elements are demanded when
-// collecting imports, but remain lazy inside conditions and other values.
-// Attrsets/lambdas are module payloads: descending into them would flag valid
-// inline modules whose option definitions refer to the outer configuration.
 fn demanded_config(
     expr: Expr<'_>,
     demand: Demand,
@@ -286,7 +282,6 @@ fn demanded_config(
                 Demand::Value
             };
             visit(expr.lhs()?, child_demand).or_else(|| {
-                // The right side of boolean operators is conditional.
                 if matches!(
                     op,
                     SyntaxKind::AndAnd | SyntaxKind::OrOr | SyntaxKind::Arrow
@@ -321,8 +316,6 @@ fn demanded_config(
                     });
                 }
             }
-            // A function value is forced, but arbitrary functions need not
-            // force their arguments. In particular mkIf defers its condition.
             visit(func, Demand::Value)
         }
         _ => None,

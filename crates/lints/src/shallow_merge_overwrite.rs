@@ -59,8 +59,6 @@ impl Rule for ShallowMergeOverwrite {
             return;
         };
 
-        // A top-level right-hand key replaces the whole left-hand value.
-        // Compare immediate child keys only: deeper values may be unknown.
         let lost = left.iter().any(|(root, left_keys)| {
             left_keys.as_ref().is_some_and(|left_keys| {
                 right

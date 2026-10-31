@@ -118,14 +118,11 @@ impl<'a> Lexer<'a> {
             debug_assert!(self.pos > before, "lexer made no progress");
         }
         if self.mode() != Mode::Normal {
-            // Unterminated string: flush what we have, flag the error.
             self.flush_content();
             self.emit(SyntaxKind::Error, self.pos);
         }
         self.emit(SyntaxKind::Eof, self.pos);
     }
-
-    // --- low-level helpers ---
 
     fn at_eof(&self) -> bool {
         self.pos >= self.src.len()
@@ -169,8 +166,6 @@ impl<'a> Lexer<'a> {
             self.emit(SyntaxKind::StringContent, start);
         }
     }
-
-    // --- normal mode ---
 
     fn normal(&mut self) {
         let c = self.peek();
@@ -270,8 +265,6 @@ impl<'a> Lexer<'a> {
             b'@' => self.emit_len(SyntaxKind::At, 1),
             b':' => self.emit_len(SyntaxKind::Colon, 1),
             b'$' if self.peek_at(1) == b'{' => {
-                // Unquoted interpolation: valid in attrpaths (dynamic
-                // segment) and in string-literal positions outside strings.
                 self.emit_len(SyntaxKind::InterpStart, 2);
                 self.modes.push(Mode::Normal);
                 self.braces.push(0);
@@ -299,7 +292,7 @@ impl<'a> Lexer<'a> {
 
     fn block_comment(&mut self) {
         let start = self.pos;
-        self.bump(2); // /*
+        self.bump(2);
         while !self.at_eof() {
             if self.peek() == b'*' && self.peek_at(1) == b'/' {
                 self.bump(2);
@@ -315,8 +308,6 @@ impl<'a> Lexer<'a> {
         while self.peek().is_ascii_digit() {
             self.bump(1);
         }
-        // Nix floats require digits on both sides of the dot; an
-        // exponent is only valid in float form. `1e3` is Int + Ident.
         let mut is_float = false;
         if self.peek() == b'.' && self.peek_at(1).is_ascii_digit() {
             self.bump(1);
@@ -354,9 +345,6 @@ impl<'a> Lexer<'a> {
         while is_ident_char(self.peek()) {
             self.bump(1);
         }
-        // Nix quirk: `scheme:rest` with no space is a URI, so `x:1`
-        // is a URI token, not a lambda. Lambda needs a space (or a
-        // non-URI char) after the colon.
         if self.peek() == b':' && is_uri_char(self.peek_at(1)) {
             self.bump(1);
             while is_uri_char(self.peek()) {
@@ -365,7 +353,6 @@ impl<'a> Lexer<'a> {
             self.emit(SyntaxKind::Uri, start);
             return;
         }
-        // Path continuation: `foo/bar`. Division requires spaces.
         if self.peek() == b'/' && is_path_char(self.peek_at(1)) {
             self.path_tail(start);
             return;
@@ -392,7 +379,6 @@ impl<'a> Lexer<'a> {
             return;
         }
         if is_ident_start(self.peek_at(1)) {
-            // Try `<name>` or `<name/sub/path>`.
             let mut i = self.pos + 1;
             while i < self.src.len()
                 && (is_ident_char(self.src[i]) || matches!(self.src[i], b'/' | b'.' | b'+'))
@@ -413,7 +399,6 @@ impl<'a> Lexer<'a> {
         if self.peek_at(1) == b'/' {
             self.emit_len(SyntaxKind::SlashSlash, 2);
         } else if is_path_char(self.peek_at(1)) {
-            // Absolute path literal `/foo/bar`.
             self.path();
         } else {
             self.emit_len(SyntaxKind::Slash, 1);
@@ -434,8 +419,6 @@ impl<'a> Lexer<'a> {
     /// `~/` prefixes).
     fn path(&mut self) {
         let start = self.pos;
-        // The `~/` prefix consists of no path chars, so consume it
-        // before the generic segment walker.
         if self.peek() == b'~' && self.peek_at(1) == b'/' {
             self.bump(2);
         }
@@ -445,8 +428,6 @@ impl<'a> Lexer<'a> {
     /// Continue a path from `start` (already consumed prefix), then
     /// emit a single Path token covering `start..pos`.
     fn path_tail(&mut self, start: usize) {
-        // Consume the prefix characters (`./`, `../`, `~/`, `/`, or the
-        // slash after an ident) and then path segments.
         loop {
             while is_path_char(self.peek()) {
                 self.bump(1);
@@ -466,18 +447,14 @@ impl<'a> Lexer<'a> {
             *depth -= 1;
             self.emit_len(SyntaxKind::RBrace, 1);
         } else if self.modes.len() > 1 {
-            // This `}` closes an interpolation.
             self.emit_len(SyntaxKind::InterpEnd, 1);
             self.modes.pop();
             self.braces.pop();
             self.content_start = self.pos;
         } else {
-            // Top level: unmatched, but emit and let the parser report.
             self.emit_len(SyntaxKind::RBrace, 1);
         }
     }
-
-    // --- string modes ---
 
     fn string(&mut self) {
         loop {
@@ -533,23 +510,18 @@ impl<'a> Lexer<'a> {
     /// quotes, or the closing `''`. Returns `true` if the string ended.
     fn ind_quote(&mut self) -> bool {
         if self.peek_at(1) != b'\'' {
-            // A lone `'` is literal content.
             self.bump(1);
             return false;
         }
         match self.peek_at(2) {
-            // `'''` escapes a literal `''`.
             b'\'' => self.bump(3),
-            // `''$` escapes a literal `$`.
             b'$' => self.bump(3),
-            // `''\n` style escapes.
             b'\\' => {
                 self.bump(3);
                 if !self.at_eof() {
                     self.bump(1);
                 }
             }
-            // Otherwise `''` closes the string.
             _ => {
                 self.flush_content();
                 self.emit_len(SyntaxKind::IndStringEnd, 2);

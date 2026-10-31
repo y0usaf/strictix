@@ -32,8 +32,6 @@ impl Rule for IllTypedUnaryOp {
         let Some(operand) = unary.operand() else {
             return;
         };
-        // The parser currently represents `!` as UnaryExpr. Future prefix
-        // operators can use the same rule once represented by the AST.
         let Some(kind) = node.child_tokens().find_map(|token| match token.kind() {
             SyntaxKind::Bang => Some(UnaryOp::Not),
             SyntaxKind::Minus => Some(UnaryOp::Neg),

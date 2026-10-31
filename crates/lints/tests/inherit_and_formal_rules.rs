@@ -78,8 +78,6 @@ fn unused_inherit_flags_unused_let_inherit() {
 
 #[test]
 fn unused_inherit_spares_plain_attrset_fields() {
-    // The inherited name defines an output field; its callers consume it
-    // outside the attrset, so there is no local use to expect.
     assert_eq!(
         run("f = a: b: { inherit a b; };", vec![Box::new(UnusedInherit)],),
         Vec::<String>::new()

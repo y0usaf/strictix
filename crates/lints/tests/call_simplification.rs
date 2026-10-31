@@ -34,8 +34,6 @@ fn fixed(source: &str, rule: Box<dyn Rule>) -> String {
     apply_fixes(source, &fix.edits).expect("fix applies")
 }
 
-// --- manual-hasattr ---------------------------------------------------
-
 #[test]
 fn manual_hasattr_fires_on_builtins_form_with_bare_key() {
     let diagnostics = run("builtins.hasAttr \"a\" x", Box::new(ManualHasattr {}));
@@ -107,8 +105,6 @@ fn manual_hasattr_is_silent_on_interpolated_name_and_partial_application() {
     assert!(run("hasAttr \"a\"", Box::new(ManualHasattr {})).is_empty());
 }
 
-// --- manual-getattr ---------------------------------------------------
-
 #[test]
 fn manual_getattr_fires_on_both_callee_forms() {
     assert_eq!(
@@ -141,8 +137,6 @@ fn manual_getattr_is_silent_on_shadow_interpolation_and_partial() {
     assert!(run("getAttr \"a\"", Box::new(ManualGetattr {})).is_empty());
 }
 
-// --- deprecated-is-null -----------------------------------------------
-
 #[test]
 fn deprecated_is_null_fires_on_both_callee_forms() {
     assert_eq!(
@@ -172,8 +166,6 @@ fn deprecated_is_null_is_silent_when_shadowed_or_with_covered() {
     .is_empty());
     assert!(run("with lib; isNull x", Box::new(DeprecatedIsNull {})).is_empty());
 }
-
-// --- manual-optional --------------------------------------------------
 
 #[test]
 fn manual_optional_rewrites_single_item_list() {
@@ -251,33 +243,27 @@ fn manual_optional_leaves_literal_conditions_to_constant_if() {
 
 #[test]
 fn manual_optional_is_silent_on_non_matching_shapes() {
-    // reversed polarity
     assert!(run(
         "lib: c: x: if c then [ ] else [ x ]",
         Box::new(ManualOptional {})
     )
     .is_empty());
-    // non-empty else branch
     assert!(run(
         "lib: c: if c then [ 1 ] else [ 2 ]",
         Box::new(ManualOptional {})
     )
     .is_empty());
-    // rec attrset then-branch
     assert!(run(
         "lib: c: if c then rec { a = 1; } else { }",
         Box::new(ManualOptional {})
     )
     .is_empty());
-    // empty then-list: nothing to lift
     assert!(run(
         "lib: c: if c then [ ] else [ ]",
         Box::new(ManualOptional {})
     )
     .is_empty());
 }
-
-// --- optional-list-argument --------------------------------------------
 
 #[test]
 fn optional_list_argument_fires_on_lib_select_with_literal_list() {
@@ -304,19 +290,16 @@ fn optional_list_argument_fires_on_bare_form_under_with() {
 
 #[test]
 fn optional_list_argument_is_silent_for_lexically_bound_callees() {
-    // a let-bound bare `optional` is the user's own function
     assert!(run(
         "let optional = c: v: v; in optional c [ 1 ]",
         Box::new(OptionalListArgument {})
     )
     .is_empty());
-    // a let-bound `lib` is not provably nixpkgs lib
     assert!(run(
         "let lib = x; in lib.optional c [ 1 ]",
         Box::new(OptionalListArgument {})
     )
     .is_empty());
-    // bare `optional` with neither binding nor with is undefined-variable's finding
     assert!(run("optional c [ 1 ]", Box::new(OptionalListArgument {})).is_empty());
 }
 

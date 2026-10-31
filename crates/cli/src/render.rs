@@ -70,7 +70,7 @@ fn paint<T: Display>(enabled: bool, code: &str, value: T) -> String {
 /// The deterministic one-line rendering shared by CLI and tests:
 /// `[code] severity start..end message`.
 #[must_use]
-#[allow(dead_code)] // contract rendering kept for core/lints snapshot tests
+#[allow(dead_code)]
 pub fn one_line(diag: &Diagnostic) -> String {
     format!(
         "[{}] {} {}..{} {}",
@@ -131,9 +131,7 @@ fn source_excerpt(source: &str, range: TextRange) -> Option<(&str, String)> {
     if start > source.len() {
         return None;
     }
-    // Line start: after the last newline before start (or 0).
     let line_start = source[..start].rfind('\n').map_or(0, |i| i + 1);
-    // Line end: the next newline after start, or EOF.
     let line_end = source[start..]
         .find('\n')
         .map_or(source.len(), |i| start + i);
@@ -258,7 +256,6 @@ pub fn diff(before: &str, after: &str, color: bool) -> String {
     let a: Vec<&str> = before.split('\n').collect();
     let b: Vec<&str> = after.split('\n').collect();
 
-    // Trim the common prefix and suffix so small edits show a small hunk.
     let mut start = 0usize;
     while start < a.len() && start < b.len() && a[start] == b[start] {
         start += 1;

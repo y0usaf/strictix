@@ -88,9 +88,6 @@ pub enum FixError {
 /// - `Overlap` if two edits' ranges intersect.
 pub fn apply_fixes(source: &str, edits: &[TextEdit]) -> Result<String, FixError> {
     let mut sorted: Vec<&TextEdit> = edits.iter().collect();
-    // Descending by start: the edit closest to the end of the file
-    // first. That ordering makes the overlap rule a single comparison
-    // between neighbours (see below).
     sorted.sort_by_key(|b| std::cmp::Reverse(b.range.start()));
 
     let src_len = source.len() as u32;
@@ -100,9 +97,6 @@ pub fn apply_fixes(source: &str, edits: &[TextEdit]) -> Result<String, FixError>
         }
     }
 
-    // Non-overlap in descending order means each later edit's start sits
-    // at or after the previous (earlier) edit's end. Equal starts that
-    // are non-empty fail here, which is right: they intersect.
     for pair in sorted.windows(2) {
         let later = pair[0];
         let earlier = pair[1];
@@ -111,10 +105,6 @@ pub fn apply_fixes(source: &str, edits: &[TextEdit]) -> Result<String, FixError>
         }
     }
 
-    // Splicing walks the source once, left to right (reverse of the
-    // validation order), pushing the untouched gap, the replacement, and
-    // advancing past each edit's end. Validation guarantees every slice
-    // index stays in bounds and no edit is skipped.
     let mut out = String::with_capacity(source.len());
     let mut pos: u32 = 0;
     for edit in sorted.iter().rev() {

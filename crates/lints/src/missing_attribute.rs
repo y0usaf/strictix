@@ -69,7 +69,6 @@ fn lookup<'a>(
                 if p.len() == wanted.len() {
                     return Presence::Present;
                 }
-                // A dotted binding creates its leading namespaces too.
                 if wanted.len() < p.len() {
                     return Presence::Present;
                 }

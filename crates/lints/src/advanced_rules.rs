@@ -239,8 +239,6 @@ impl Rule for BuiltinArity {
         let source = m.source();
         let apply_nodes: Vec<_> = nodes(m.root(), SyntaxKind::ApplyExpr).collect();
         for n in apply_nodes.iter().copied() {
-            // Skip only function-side chain nodes, not independent calls in
-            // another call's arguments. Parentheses do not end a call chain.
             if apply_nodes.iter().any(|candidate| {
                 ApplyExpr::cast(candidate)
                     .and_then(|a| a.func())
@@ -303,8 +301,6 @@ impl Rule for BuiltinArity {
 }
 
 fn builtin_arity(name: &str) -> Option<usize> {
-    // head, elemAt and getAttr may return functions; attribute-set helpers
-    // may preserve __functor. Only known non-callable results belong here.
     Some(match name {
         "length" | "tail" | "isNull" | "isAttrs" | "isBool" | "isInt" | "isList" | "isString"
         | "isFunction" => 1,

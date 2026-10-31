@@ -39,8 +39,6 @@ fn count_kind(tree: &SyntaxNode, want: K) -> usize {
     node_kinds(tree).into_iter().filter(|k| *k == want).count()
 }
 
-// --- corpus: parse both files with zero panics and lossless round-trip ---
-
 #[test]
 fn corpus_parses() {
     for entry in
@@ -52,8 +50,6 @@ fn corpus_parses() {
         assert!(!has_error(&tree), "parse error nodes in {}", path.display());
     }
 }
-
-// --- inline fixtures: round-trip + structure ---
 
 #[test]
 fn parses_let_in() {
@@ -104,8 +100,6 @@ fn parses_select_with_or_default() {
 
 #[test]
 fn parses_nested_select_attrpath() {
-    // Nix's `expr_select '.' attrpath` selects a multi-segment path in
-    // one Select node: `e.a.b.c` is `Select(e, [a, b, c])`.
     let tree = parse_rt("config.services.example.enable");
     assert_eq!(count_kind(&tree, K::SelectExpr), 1);
     assert_eq!(count_kind(&tree, K::Attrpath), 1);
@@ -128,25 +122,20 @@ fn parses_with_and_assert() {
 
 #[test]
 fn parses_inherit_forms() {
-    // `inherit` is only valid inside bindings (attrset or let).
     let tree = parse_rt("{ inherit a b c; }");
     assert!(node_kinds(&tree).contains(&K::InheritStmt));
     assert!(node_kinds(&tree).contains(&K::AttrsetExpr));
     let tree = parse_rt("{ inherit (lib) mkIf; }");
     assert!(node_kinds(&tree).contains(&K::InheritStmt));
-    // The `(lib)` source expression is parsed (LParen/RParen tokens).
     assert_eq!(count_kind(&tree, K::InheritStmt), 1);
 }
 
 #[test]
 fn parses_operator_precedence() {
-    // `*` binds tighter than `+`: tree is `1 + (2 * 3)`.
     let tree = parse_rt("1 + 2 * 3");
     assert_eq!(count_kind(&tree, K::BinExpr), 2);
-    // `//` binds looser than `+`: tree is `(1 + 2) // 3`.
     let tree = parse_rt("1 + 2 // 3");
     assert_eq!(count_kind(&tree, K::BinExpr), 2);
-    // `->` is right-associative: `a -> b -> c` nests to the right.
     let tree = parse_rt("a -> b -> c");
     assert!(node_kinds(&tree).contains(&K::BinExpr));
 }
@@ -156,7 +145,6 @@ fn parses_negative_and_unary() {
     let tree = parse_rt("!true && false");
     assert!(node_kinds(&tree).contains(&K::UnaryExpr));
     assert!(node_kinds(&tree).contains(&K::BinExpr));
-    // `! a ? b` groups as `!(a ? b)` (verified against Nix).
     let tree = parse_rt("!a ? b");
     assert!(node_kinds(&tree).contains(&K::HasAttrExpr));
     assert!(node_kinds(&tree).contains(&K::UnaryExpr));
@@ -170,12 +158,8 @@ fn parses_uri_and_path() {
     assert!(node_kinds(&tree).contains(&K::Binding));
 }
 
-// --- error recovery ---
-
 #[test]
 fn error_recovery_missing_semicolon() {
-    // Missing `;` after the binding: the parser should recover and
-    // still produce the following expression as a sibling.
     let tree = parse_rt("let a = 1 in a;");
     assert!(has_error(&tree));
     assert!(node_kinds(&tree).contains(&K::LetExpr));
@@ -191,11 +175,8 @@ fn error_recovery_missing_then() {
 
 #[test]
 fn error_recovery_unexpected_token() {
-    // Garbage between two valid expressions: error node, then a
-    // recovered sibling.
     let tree = parse_rt("1 $ % 2");
     assert!(has_error(&tree));
-    // The trailing `2` should still parse as an Int token.
     assert!(tree.reassemble("1 $ % 2") == "1 $ % 2");
 }
 
@@ -222,11 +203,9 @@ fn error_recovery_empty_input() {
 
 #[test]
 fn error_recovery_recovers_at_in() {
-    // Broken binding then a valid `in` expression: the body must survive.
     let tree = parse_rt("let a = ; in 42");
     assert!(has_error(&tree));
     assert!(count_kind(&tree, K::Binding) >= 1);
-    // The `42` after `in` should be present.
     assert!(tree.reassemble("let a = ; in 42") == "let a = ; in 42");
 }
 
@@ -254,7 +233,6 @@ fn valid_input_has_no_error_nodes() {
 
 #[test]
 fn error_recovery_sibling_after_error() {
-    // `x = !;` is broken; the next binding should still parse.
     let src = "{ a = !; b = 2; }";
     let tree = parse_rt(src);
     assert!(has_error(&tree));
@@ -263,8 +241,6 @@ fn error_recovery_sibling_after_error() {
 
 #[test]
 fn never_panics_on_broken_input() {
-    // A grab-bag of broken inputs must never panic and must always
-    // round-trip (losslessness holds even for garbage).
     let broken = [
         "let",
         "let in",
@@ -294,8 +270,6 @@ fn never_panics_on_broken_input() {
         assert_eq!(tree.reassemble(src), src, "round trip failed for {src:?}");
     }
 }
-
-// --- round-trip across a realistic module ---
 
 #[test]
 fn round_trip_realistic_module() {

@@ -85,8 +85,6 @@ impl Rule for InvalidListToAttrsEntry {
                     Expr::String(string) => literal_string(string, model.source()),
                     _ => None,
                 });
-                // Nix checks `value` only for the first entry with a given
-                // name. An earlier unknown name may make this entry a duplicate.
                 let definitely_first = !unknown_prior
                     && match &name {
                         Some(name) => !names.contains(name),
@@ -300,7 +298,6 @@ fn static_entry<'a>(expr: Expr<'a>, source: &str) -> Option<Entry<'a>> {
         has_value: false,
     };
     for item in attrset.items() {
-        // Inherited values and dynamic names are outside this rule's proof.
         let AttrItem::Binding(binding) = item else {
             return None;
         };

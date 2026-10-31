@@ -92,7 +92,6 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    // --- token access ---
 
     /// Kind of the next significant (non-trivia) token.
     fn current(&self) -> SyntaxKind {
@@ -155,8 +154,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // --- tree events ---
-
     fn start(&mut self, kind: SyntaxKind) {
         self.events.push(Event::Start(kind));
     }
@@ -185,8 +182,6 @@ impl<'a> Parser<'a> {
         }
         builder.finish_all()
     }
-
-    // --- error recovery ---
 
     /// Whether the current token is a safe place to resume parsing.
     fn is_sync(&self) -> bool {
@@ -231,16 +226,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // --- entry ---
-
     fn parse_root(&mut self) {
         self.start(K::Root);
         if !self.at_eof() {
             self.parse_expr();
         }
-        // Leftover significant tokens mean the expression was followed
-        // by garbage: wrap them in an error node. Trivia is flushed in
-        // either case so the tree still tiles the source exactly.
         let leftover = self.current() != K::Eof;
         if leftover {
             self.start(K::ErrorNode);
@@ -253,8 +243,6 @@ impl<'a> Parser<'a> {
         }
         self.finish();
     }
-
-    // --- expressions ---
 
     fn parse_expr(&mut self) {
         if self.at_eof() {
@@ -273,7 +261,7 @@ impl<'a> Parser<'a> {
         let checkpoint = self.events.len();
         if matches!(self.current(), K::Bang | K::Minus) && UNARY_BP >= min_bp {
             self.start(K::UnaryExpr);
-            self.bump(); // bang or minus
+            self.bump();
             self.parse_expr_bp(UNARY_BP);
             self.finish();
         } else {
@@ -289,11 +277,8 @@ impl<'a> Parser<'a> {
             } else {
                 K::BinExpr
             };
-            // Wrap the already-parsed left operand inside the operator
-            // node: '1 + 2 * 3' nests as BinExpr(1, +, BinExpr(2, *, 3)),
-            // not as a flat spine with the lhs as a preceding sibling.
             self.start_at(checkpoint, kind);
-            self.bump(); // the operator
+            self.bump();
             let rbp = if right_assoc { lbp } else { lbp + 1 };
             self.parse_expr_bp(rbp);
             self.finish();
@@ -306,11 +291,8 @@ impl<'a> Parser<'a> {
     /// of the whole chain); each select records its own operand start.
     fn parse_app(&mut self, checkpoint: usize) {
         match self.current() {
-            // x: body
             K::Ident if self.peek_next() == K::Colon => self.parse_lambda_ident(),
-            // args@{ ... }: body
             K::Ident if self.peek_next() == K::At => self.parse_lambda_named_formals(),
-            // { formals }: body
             K::LBrace if !self.brace_is_attrset() => self.parse_lambda_formals(),
             _ => {
                 self.parse_select();
@@ -338,22 +320,19 @@ impl<'a> Parser<'a> {
         self.parse_primary();
         while self.current() == K::Dot {
             self.start_at(operand_checkpoint, K::SelectExpr);
-            self.bump(); // dot
+            self.bump();
             self.parse_attrpath();
             if self.current() == K::KwOr {
                 self.bump();
-                // or default — the default is itself a select,
-                // and application continues outside.
                 self.parse_select();
             }
             self.finish();
         }
     }
-    // --- lambdas ---
 
     fn parse_lambda_ident(&mut self) {
         self.start(K::LambdaExpr);
-        self.bump(); // parameter ident
+        self.bump();
         self.expect(K::Colon);
         self.parse_expr();
         self.finish();
@@ -361,7 +340,7 @@ impl<'a> Parser<'a> {
 
     fn parse_lambda_named_formals(&mut self) {
         self.start(K::LambdaExpr);
-        self.bump(); // args ident
+        self.bump();
         self.expect(K::At);
         self.parse_formals_brace();
         self.expect(K::Colon);
@@ -388,7 +367,7 @@ impl<'a> Parser<'a> {
     /// Parse `{ a, b ? 1, ... }` as lambda formal parameters.
     fn parse_formals_brace(&mut self) {
         self.start(K::Formals);
-        self.bump(); // `{`
+        self.bump();
         loop {
             match self.current() {
                 K::RBrace => break,
@@ -408,8 +387,6 @@ impl<'a> Parser<'a> {
         self.finish();
     }
 
-    // --- primaries ---
-
     fn parse_primary(&mut self) {
         match self.current() {
             K::KwLet => self.parse_let(),
@@ -418,20 +395,17 @@ impl<'a> Parser<'a> {
             K::KwAssert => self.parse_assert(),
             K::KwRec => {
                 self.start(K::RecAttrsetExpr);
-                self.bump(); // `rec`
+                self.bump();
                 self.parse_attrset_body();
                 self.finish();
             }
             K::LBrace => {
-                // Only reachable when the brace is an attrset (formals
-                // are intercepted by parse_operand).
                 self.parse_attrset_body();
             }
             K::LBracket => self.parse_list(),
             K::LParen => self.parse_paren(),
             K::StringStart => self.parse_string(K::StringExpr, K::StringEnd),
             K::IndStringStart => self.parse_string(K::IndStringExpr, K::IndStringEnd),
-            // Plain atoms: ident, literals, paths, uris.
             _ if can_start_expr(self.current()) => self.bump(),
             _ => self.error_recover(),
         }
@@ -439,18 +413,18 @@ impl<'a> Parser<'a> {
 
     fn parse_let(&mut self) {
         self.start(K::LetExpr);
-        self.bump(); // `let`
+        self.bump();
         self.start(K::LetBindings);
         self.parse_bindings(K::KwIn);
-        self.finish(); // LetBindings
+        self.finish();
         self.expect(K::KwIn);
         self.parse_expr();
-        self.finish(); // LetExpr
+        self.finish();
     }
 
     fn parse_if(&mut self) {
         self.start(K::IfExpr);
-        self.bump(); // `if`
+        self.bump();
         self.parse_expr();
         self.expect(K::KwThen);
         self.parse_expr();
@@ -461,7 +435,7 @@ impl<'a> Parser<'a> {
 
     fn parse_with(&mut self) {
         self.start(K::WithExpr);
-        self.bump(); // `with`
+        self.bump();
         self.parse_expr();
         self.expect(K::Semicolon);
         self.parse_expr();
@@ -470,7 +444,7 @@ impl<'a> Parser<'a> {
 
     fn parse_assert(&mut self) {
         self.start(K::AssertExpr);
-        self.bump(); // `assert`
+        self.bump();
         self.parse_expr();
         self.expect(K::Semicolon);
         self.parse_expr();
@@ -479,7 +453,7 @@ impl<'a> Parser<'a> {
 
     fn parse_attrset_body(&mut self) {
         self.start(K::AttrsetExpr);
-        self.bump(); // `{`
+        self.bump();
         self.parse_bindings(K::RBrace);
         self.expect(K::RBrace);
         self.finish();
@@ -512,7 +486,7 @@ impl<'a> Parser<'a> {
 
     fn parse_inherit(&mut self) {
         self.start(K::InheritStmt);
-        self.bump(); // `inherit`
+        self.bump();
         if self.current() == K::LParen {
             self.bump();
             self.parse_expr();
@@ -537,7 +511,6 @@ impl<'a> Parser<'a> {
             } else if self.current() == K::StringStart {
                 self.parse_string(K::StringExpr, K::StringEnd);
             } else if self.current() == K::InterpStart {
-                // Unquoted dynamic segment: the expr in a.${b}.c.
                 self.parse_interp();
             } else {
                 break;
@@ -545,20 +518,18 @@ impl<'a> Parser<'a> {
             if self.current() != K::Dot {
                 break;
             }
-            self.bump(); // `.`
+            self.bump();
         }
         self.finish();
     }
 
     fn parse_list(&mut self) {
         self.start(K::ListExpr);
-        self.bump(); // [
+        self.bump();
         loop {
             match self.current() {
                 K::RBracket => break,
                 K::Eof => break,
-                // Nix list items are selects: no application folding
-                // ([ f x ] is two elements), no binops ([ 1 + 2 ] errors).
                 _ if can_start_expr(self.current()) => self.parse_select(),
                 _ => self.loop_error(),
             }
@@ -569,7 +540,7 @@ impl<'a> Parser<'a> {
 
     fn parse_paren(&mut self) {
         self.start(K::ParenExpr);
-        self.bump(); // `(`
+        self.bump();
         self.parse_expr();
         self.expect(K::RParen);
         self.finish();
@@ -577,7 +548,7 @@ impl<'a> Parser<'a> {
 
     fn parse_string(&mut self, node: SyntaxKind, end: SyntaxKind) {
         self.start(node);
-        self.bump(); // opening quote
+        self.bump();
         loop {
             match self.current() {
                 K::InterpStart => self.parse_interp(),
@@ -593,7 +564,7 @@ impl<'a> Parser<'a> {
 
     fn parse_interp(&mut self) {
         self.start(K::InterpExpr);
-        self.bump(); // `${`
+        self.bump();
         self.parse_expr();
         if self.current() == K::InterpEnd {
             self.bump();
@@ -602,8 +573,6 @@ impl<'a> Parser<'a> {
         }
         self.finish();
     }
-
-    // --- lookahead ---
 
     /// Decide whether the brace block starting at the current position
     /// is an attrset (bindings with `=`) or lambda formals.
@@ -620,8 +589,6 @@ impl<'a> Parser<'a> {
                 K::RBrace => {
                     depth = depth.saturating_sub(1);
                     if depth == 0 {
-                        // No separator seen: empty block, or a block
-                        // that contains only invalid-for-formals content.
                         return !matches!(
                             self.tokens.get(i + 1).map(|t| t.kind),
                             Some(K::Colon | K::At)
@@ -634,8 +601,6 @@ impl<'a> Parser<'a> {
             }
             i += 1;
         }
-        // Unterminated block: treat as an attrset to avoid a bogus
-        // lambda interpretation.
         true
     }
 }

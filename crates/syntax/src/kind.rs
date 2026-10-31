@@ -4,11 +4,9 @@
 /// Every kind of token (and later, node) in the Nix syntax vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxKind {
-    // --- trivia ---
     Whitespace,
     Comment,
 
-    // --- names and literals ---
     Ident,
     KwIf,
     KwThen,
@@ -26,7 +24,6 @@ pub enum SyntaxKind {
     SearchPath,
     Uri,
 
-    // --- string parts ---
     /// `"`
     StringStart,
     /// `''`
@@ -41,7 +38,6 @@ pub enum SyntaxKind {
     /// closing `''`
     IndStringEnd,
 
-    // --- punctuation and operators ---
     LBrace,
     RBrace,
     LBracket,
@@ -86,7 +82,6 @@ pub enum SyntaxKind {
     At,
     Colon,
 
-    // --- tree nodes ---
     /// Top-level node wrapping one whole file.
     Root,
     /// A malformed region produced by error recovery.
@@ -141,7 +136,6 @@ pub enum SyntaxKind {
     /// `( expr )`
     ParenExpr,
 
-    // --- bookkeeping ---
     Error,
     Eof,
 }

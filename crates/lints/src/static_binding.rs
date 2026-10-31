@@ -12,7 +12,6 @@ fn may_bind(item: AttrItem<'_>, name: &str, source: &str) -> bool {
             .and_then(|path| path.elements().next())
             .is_none_or(|attr| match attr {
                 AttrName::Ident(token) => token.text(source) == name,
-                // The semantic model does not resolve quoted/dynamic names.
                 _ => true,
             }),
         AttrItem::Inherit(inherit) => inherit.names().any(|token| token.text(source) == name),

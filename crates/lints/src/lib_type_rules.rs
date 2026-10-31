@@ -242,9 +242,6 @@ impl UnknownLibType {
                 diag = diag.with_help(help);
             }
             if name == "string" {
-                // The one safe fix: `str` is the direct replacement
-                // for the removed `string`, and the edit is a single
-                // ident token, so the splice cannot touch trivia.
                 diag = diag.with_fix(
                     Fix::new("replace types.string with types.str").edit(first.range(), "str"),
                 );
@@ -299,8 +296,6 @@ impl UnknownLibType {
                 return false;
             };
             let Some(source_expr) = stmt.source() else {
-                // Plain `inherit types;` re-binds an outer `types`;
-                // nothing provable about it.
                 return false;
             };
             return is_nixpkgs_lib_expr(model, &source_expr);
@@ -356,9 +351,6 @@ fn lib_type_members<'a>(model: &SemanticModel<'a>) -> Vec<(&'a SyntaxToken, Vec<
     for reference in model.references() {
         let name = reference.name.text(source);
         if name == "lib" {
-            // Only a formal or lexically-unbound `lib` provably
-            // means nixpkgs lib; a let/rec/inherit binding could
-            // be a custom lib, so it stays silent.
             match reference.resolved.map(|i| &model.bindings()[i]) {
                 Some(binding) if !is_formal(binding) => continue,
                 _ => {}
@@ -411,7 +403,7 @@ impl Rule for DiscouragedLibType {
         let source = model.source();
         for (start, members) in lib_type_members(model) {
             let [member] = members.as_slice() else {
-                continue; // deeper hops are type internals, not uses of the type
+                continue;
             };
             match member.text(source) {
                 "attrs" => {

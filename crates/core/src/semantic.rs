@@ -416,9 +416,6 @@ impl<'a> Built<'a> {
         let mut scope_id = self.innermost_scope(offset)?;
         loop {
             let scope = &self.scopes[scope_id.0 as usize];
-            // Attrset scopes host inherit names but bind nothing for
-            // resolution; Root, With, and empty slices fall through the
-            // loop naturally.
             if scope.kind != ScopeKind::Attrset {
                 for (pos, &bi) in scope.bindings.iter().enumerate() {
                     let binding = &self.bindings[bi];
@@ -556,11 +553,6 @@ impl<'a> Builder<'a> {
                     for item in bindings.items() {
                         match item {
                             AttrItem::Binding(binding) => {
-                                // Nix `let` is recursive: bindings are
-                                // visible inside their own value (forward
-                                // references and self-recursion both work;
-                                // evaluation is lazy). Visible from the
-                                // start of the scope.
                                 if let Some(name) = Self::binding_name(&binding) {
                                     self.register(
                                         name,
@@ -572,8 +564,6 @@ impl<'a> Builder<'a> {
                                 if let Some(value) = binding.value() {
                                     self.walk_expr(value);
                                 }
-                                // Walk string interpolations in the
-                                // binding attrpath ("${x}" = ...).
                                 if let Some(ap) = binding.attrpath() {
                                     self.walk_attrpath_interps(Some(ap));
                                 }
@@ -583,18 +573,9 @@ impl<'a> Builder<'a> {
                                     self.walk_expr(source);
                                 }
                                 for name in inherit.names() {
-                                    // Inherit names are definitions (fetched
-                                    // from the source) — only a sourceless
-                                    // `inherit x` is a lexical reference.
                                     if inherit.source().is_none() {
                                         self.idents.push(name);
                                     }
-                                    // Nix `let` is recursive: an inherited
-                                    // binding is visible from the start of the
-                                    // let, so earlier sibling bindings and the
-                                    // body can reference it too. The reference
-                                    // pushed above is for a sourceless `inherit
-                                    // x`, which resolves to an outer binding.
                                     let visible_from = let_expr.range().start();
                                     self.register(
                                         name,
@@ -616,14 +597,9 @@ impl<'a> Builder<'a> {
                 let scope = self.new_scope(ScopeKind::Lambda, lambda.range());
                 match lambda.param() {
                     LambdaParam::Ident(token) => {
-                        // `x: body` — x is visible in the body, never
-                        // in itself.
                         self.register(token, BindingKind::LambdaParam, scope, token.range().end());
                     }
                     LambdaParam::Formals(formals, at_name) => {
-                        // Nix formals defaults are recursive: a param is
-                        // visible in its own and later defaults, so
-                        // register before walking.
                         for param in formals.params() {
                             self.register(
                                 param.name,
@@ -636,8 +612,6 @@ impl<'a> Builder<'a> {
                             }
                         }
                         if let Some(at) = at_name {
-                            // The at-name is visible only in the body,
-                            // whichever side of the formals it sits on.
                             let visible_from = formals.range().end().max(at.range().end());
                             self.register(at, BindingKind::AtName, scope, visible_from);
                         }
@@ -649,8 +623,6 @@ impl<'a> Builder<'a> {
                 self.pop_scope();
             }
             Expr::With(with_expr) => {
-                // The scope expression is evaluated in the surrounding
-                // scope, not the with's own.
                 if let Some(scope_expr) = with_expr.scope() {
                     self.walk_expr(scope_expr);
                 }
@@ -659,10 +631,6 @@ impl<'a> Builder<'a> {
                         scope_range: with_expr.range(),
                         body_range: body.range(),
                     });
-                    // The with-scope governs only the body and never
-                    // shadows: its binding set is empty, so resolution
-                    // walks through it and the with shows up only as a
-                    // via_with fallback.
                     self.new_scope(ScopeKind::With, body.range());
                     self.walk_expr(body);
                     self.pop_scope();
@@ -673,13 +641,9 @@ impl<'a> Builder<'a> {
                 for item in attrset.items() {
                     match item {
                         AttrItem::Binding(binding) => {
-                            // A non-rec attrset binds nothing for
-                            // resolution; only its values are walked.
                             if let Some(value) = binding.value() {
                                 self.walk_expr(value);
                             }
-                            // Walk string interpolations in the
-                            // binding attrpath ("${x}" = ...).
                             if let Some(ap) = binding.attrpath() {
                                 self.walk_attrpath_interps(Some(ap));
                             }
@@ -689,14 +653,9 @@ impl<'a> Builder<'a> {
                                 self.walk_expr(source);
                             }
                             for name in inherit.names() {
-                                // Inherit names are definitions (fetched
-                                // from the source) — only a sourceless
-                                // `inherit x` is a lexical reference.
                                 if inherit.source().is_none() {
                                     self.idents.push(name);
                                 }
-                                // The new name binds forward in the
-                                // attrset — other attrs can inherit it.
                                 let visible_from = name.range().end();
                                 self.register(name, BindingKind::InheritName, scope, visible_from);
                             }
@@ -711,10 +670,6 @@ impl<'a> Builder<'a> {
                     for item in attrset.items() {
                         match item {
                             AttrItem::Binding(binding) => {
-                                // Register before walking the value:
-                                // rec makes every name visible in every
-                                // value, including earlier ones
-                                // (`rec { b = a; a = 1; }` is valid).
                                 if let Some(name) = Self::binding_name(&binding) {
                                     self.register(
                                         name,
@@ -726,8 +681,6 @@ impl<'a> Builder<'a> {
                                 if let Some(value) = binding.value() {
                                     self.walk_expr(value);
                                 }
-                                // Walk string interpolations in the
-                                // binding attrpath ("${x}" = ...).
                                 if let Some(ap) = binding.attrpath() {
                                     self.walk_attrpath_interps(Some(ap));
                                 }
@@ -737,9 +690,6 @@ impl<'a> Builder<'a> {
                                     self.walk_expr(source);
                                 }
                                 for name in inherit.names() {
-                                    // Inherit names are definitions (fetched
-                                    // from the source) — only a sourceless
-                                    // `inherit x` is a lexical reference.
                                     if inherit.source().is_none() {
                                         self.idents.push(name);
                                     }
@@ -813,20 +763,12 @@ impl<'a> Builder<'a> {
                 if let Some(base) = select.base() {
                     self.walk_expr(base);
                 }
-                // Field names are not references, but interpolated
-                // segments (a.${b}.c) ARE expression positions.
                 self.walk_attrpath_interps(select.attrpath());
                 if let Some(default) = select.default() {
                     self.walk_expr(default);
                 }
             }
             Expr::HasAttr(has_attr) => {
-                // `x ? a.b` — the right side is an attribute path, not
-                // a reference, even though the parser represents it as
-                // an expression. String interpolations inside the
-                // attrpath (c ? "${k}") ARE expression positions.
-                // Bare idents and select-chain bases are static
-                // attribute names, NOT references — skip them.
                 if let Some(base) = has_attr.base() {
                     self.walk_expr(base);
                 }
@@ -873,8 +815,6 @@ impl<'a> Builder<'a> {
                             self.walk_expr(inner);
                         }
                     }
-                    // Quoted segments ("${foo}" or "plain") carry
-                    // StringExpr parts; walk interpolations inside.
                     AttrName::Str(string_expr) => {
                         self.walk_string_parts(string_expr.parts());
                     }

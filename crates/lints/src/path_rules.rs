@@ -40,9 +40,6 @@ impl Rule for DanglingPath {
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
-        // Anonymous sources (tests, stdin) have no on-disk location to
-        // resolve relative paths against; without one every existence
-        // check would be a guess, so the rule stays silent entirely.
         let Some(file) = model.path() else { return };
         let source = model.source();
         let root = model.root();
@@ -53,27 +50,18 @@ impl Rule for DanglingPath {
                 continue;
             }
             let text = tok.text(source);
-            // `~` expands against $HOME at evaluation time; existence
-            // depends on the environment, not the repository, so
-            // nothing can be proven about it.
             if text.starts_with('~') {
                 continue;
             }
-            // A path probed with pathExists is *expected* to possibly
-            // not exist — that is the whole point of the probe.
             if guarded.contains(&text) {
                 continue;
             }
             let resolved = if text.starts_with('/') {
                 std::path::PathBuf::from(text)
             } else {
-                // Relative to the directory containing the linted file.
                 let Some(dir) = file.parent() else { continue };
                 dir.join(text)
             };
-            // metadata follows symlinks: a live symlink target counts
-            // as existing, a broken one does not — matching what Nix
-            // evaluation would see.
             match std::fs::metadata(&resolved) {
                 Err(_) => {
                     diags.push(
@@ -90,10 +78,6 @@ impl Rule for DanglingPath {
                     );
                 }
                 Ok(meta) => {
-                    // Importing a directory loads its default.nix; a
-                    // directory that exists but lacks one still fails
-                    // at evaluation. Only import targets are held to
-                    // this — a bare directory path is legal data.
                     if meta.is_dir()
                         && is_import_target(model, tok)
                         && std::fs::metadata(resolved.join("default.nix")).is_err()
@@ -141,8 +125,6 @@ impl Rule for AccidentalPathDivision {
             if tok.kind() != K::Path {
                 continue;
             }
-            // A trailing Slash/InterpStart fragment means this is part
-            // of an interpolated path composite, never a division trap.
             if let Some(next) = tokens.get(idx + 1) {
                 if tok.range().end() == next.range().start()
                     && matches!(next.kind(), K::Slash | K::InterpStart)
@@ -150,9 +132,6 @@ impl Rule for AccidentalPathDivision {
                     continue;
                 }
             }
-            // Our lexer starts numbers before paths, so `4/2` arrives
-            // as Int `4` + adjacent Path `/2`; glue the fragments back
-            // together to test the literal the user actually wrote.
             let range = match tokens.get(idx.wrapping_sub(1)) {
                 Some(prev)
                     if idx > 0
@@ -164,9 +143,6 @@ impl Rule for AccidentalPathDivision {
                 _ => tok.range(),
             };
             let text = &source[range.start() as usize..range.end() as usize];
-            // Exactly `digits / digits`: both split halves being all
-            // ASCII digits also enforces the single slash and rules
-            // out `./`, `../`, `/`, and `~` prefixes.
             let Some((num, den)) = text.split_once('/') else {
                 continue;
             };
@@ -177,8 +153,6 @@ impl Rule for AccidentalPathDivision {
             {
                 continue;
             }
-            // The fix deliberately changes semantics (path literal ->
-            // integer division): that is the entire point of the rule.
             let fix = Fix::new("interpret as division").edit(range, format!("{num} / {den}"));
             diags.push(
                 Diagnostic::new(
@@ -246,8 +220,6 @@ impl Rule for SearchPathReference {
     }
 }
 
-// --- helpers ----------------------------------------------------------
-
 /// Every token in source order, trivia included. The lexer splits
 /// composite paths into physically adjacent fragments, so path rules
 /// need each Path token's flat-stream neighbors — which tree-shaped
@@ -299,8 +271,6 @@ fn path_exists_arguments<'a>(root: &'a SyntaxNode, source: &'a str) -> Vec<&'a s
             return;
         };
         let Some(func) = apply.func() else { return };
-        // Node ranges flush leading trivia into the node; trim it away
-        // before comparing spellings.
         let callee = func.text(source).trim();
         if callee != "pathExists" && !callee.ends_with(".pathExists") {
             return;

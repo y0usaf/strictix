@@ -57,7 +57,6 @@ fn skips_shadowed_builtins_and_dynamic_entries() {
         "let builtins = {}; in builtins.listToAttrs [ { name = \"x\"; } { name = \"x\"; } ]"
     )
     .is_empty());
-    // A forward let binding still shadows the builtin under Nix scoping.
     assert!(run(
         "let x = builtins.listToAttrs [ { name = \"x\"; } { name = \"x\"; } ]; builtins = {}; in x"
     )

@@ -44,8 +44,6 @@ fn refs<'a>(m: &'a SemanticModel<'static>) -> Vec<(&'a str, Option<usize>, Optio
         .collect()
 }
 
-// --- 1. let shadowing -------------------------------------------------------
-
 #[test]
 fn let_shadowing_resolves_to_inner() {
     let src = "let a = 1; in let a = 2; in a";
@@ -53,14 +51,11 @@ fn let_shadowing_resolves_to_inner() {
     let inner = bindings_named(&m, "a").pop().expect("inner a");
     assert_eq!(bindings_named(&m, "a").len(), 2);
     let body_refs: Vec<_> = refs(&m);
-    // The final a reference resolves to the inner binding (index 1).
     let last = body_refs.last().expect("has body ref");
     assert_eq!(last.0, "a");
     assert_eq!(last.1, Some(1));
     assert_eq!(inner.references.len(), 1);
 }
-
-// --- 2. let sequential visibility -------------------------------------------
 
 #[test]
 fn let_value_sees_earlier_bindings() {
@@ -68,20 +63,15 @@ fn let_value_sees_earlier_bindings() {
     let m = model(src);
     let x = one_binding(&m, "x", BindingKind::LetBinding);
     assert_eq!(x.references.len(), 1, "y's value references outer x");
-    // The outer x has exactly one use; the inner y has one use (the body).
     let y = one_binding(&m, "y", BindingKind::LetBinding);
     assert_eq!(y.references.len(), 1);
 }
 
 #[test]
 fn let_binding_visible_in_own_value() {
-    // Nix `let` is recursive: the RHS x resolves to the binding itself,
-    // which is infinite recursion only when forced at runtime.
     let src = "let x = x; in x";
     let m = model(src);
     let r: Vec<_> = refs(&m);
-    // First x (in the value): resolves to the let binding itself.
-    // Second x (body): also the let binding.
     assert_eq!(r[0].0, "x");
     assert_eq!(r[0].1, Some(0), "recursive let sees its own binding");
     assert_eq!(r[1].1, Some(0), "body x resolves to the let binding");
@@ -89,7 +79,6 @@ fn let_binding_visible_in_own_value() {
 
 #[test]
 fn let_forward_reference_works() {
-    // Recursive let: a binding can forward-reference a later one.
     let src = "let a = b; b = 1; in a";
     let m = model(src);
     let a = one_binding(&m, "a", BindingKind::LetBinding);
@@ -100,8 +89,6 @@ fn let_forward_reference_works() {
     assert_eq!(r[0].1, Some(1), "forward reference resolves to b");
 }
 
-// --- 3. rec self-ref --------------------------------------------------------
-
 #[test]
 fn rec_attrs_mutually_visible() {
     let src = "rec { a = 1; b = a; }";
@@ -109,8 +96,6 @@ fn rec_attrs_mutually_visible() {
     let a = one_binding(&m, "a", BindingKind::RecAttr);
     assert_eq!(a.references.len(), 1, "b's value references a");
 }
-
-// --- 4. formals defaults ----------------------------------------------------
 
 #[test]
 fn formals_default_sees_earlier_param() {
@@ -122,8 +107,6 @@ fn formals_default_sees_earlier_param() {
     assert_eq!(b.references.len(), 1, "body references b");
 }
 
-// --- 5. at-name -------------------------------------------------------------
-
 #[test]
 fn at_name_binds_and_resolves() {
     let src = "args@{ a }: args";
@@ -131,8 +114,6 @@ fn at_name_binds_and_resolves() {
     let args = one_binding(&m, "args", BindingKind::AtName);
     assert_eq!(args.references.len(), 1);
 }
-
-// --- 6. inherit in let ------------------------------------------------------
 
 #[test]
 fn inherit_in_let_binds_and_resolves_source() {
@@ -146,31 +127,23 @@ fn inherit_in_let_binds_and_resolves_source() {
 
 #[test]
 fn inherit_from_source_name_is_not_a_lexical_reference() {
-    // `inherit (cfg) bar;` defines `bar` by copying `bar` out of `cfg`;
-    // the name is NOT a lexical use, so it must not appear as an
-    // (unresolved) reference.
     let src = "let cfg = {}; in { inherit (cfg) bar; }";
     let m = model(src);
     assert!(
         !m.references().iter().any(|r| r.name.text(src) == "bar"),
         "inherit-from name must not be recorded as a reference"
     );
-    // The inherit name still binds locally.
     assert!(!bindings_named(&m, "bar").is_empty());
 }
 
 #[test]
 fn sourceless_inherit_is_still_a_lexical_reference() {
-    // `inherit baz;` reads the outer `baz` binding, so it must still
-    // resolve.
     let src = "let baz = 1; in { inherit baz; }";
     let m = model(src);
     let r = refs(&m);
     let baz = r.iter().find(|x| x.0 == "baz").expect("baz reference");
     assert_eq!(baz.1, Some(0), "sourceless inherit still resolves");
 }
-
-// --- 7. with fallback -------------------------------------------------------
 
 #[test]
 fn with_fallback_recorded() {
@@ -184,8 +157,6 @@ fn with_fallback_recorded() {
     assert_eq!(a.2, Some(0), "innermost with candidate recorded");
 }
 
-// --- 8. lexical beats with --------------------------------------------------
-
 #[test]
 fn lexical_binding_beats_with() {
     let src = "let a = 1; in with { a = 2; }; a";
@@ -195,8 +166,6 @@ fn lexical_binding_beats_with() {
     assert_eq!(a.1, Some(0), "resolves to the let binding");
     assert_eq!(a.2, None, "not via with");
 }
-
-// --- 9. unbound -------------------------------------------------------------
 
 #[test]
 fn unbound_reference_recorded() {
@@ -210,36 +179,30 @@ fn unbound_reference_recorded() {
     assert!(m.bindings().is_empty());
 }
 
-// --- 10. import sites -------------------------------------------------------
-
 #[test]
 fn import_sites_recorded() {
     let src = "import ./foo.nix";
     let m = model(src);
     assert_eq!(m.import_sites().len(), 1);
     let site = &m.import_sites()[0];
-    assert_eq!(site.path_range.start(), 7); // "./foo.nix"
+    assert_eq!(site.path_range.start(), 7);
 
     let src2 = "builtins.import ./foo.nix";
     let m2 = model(src2);
     assert_eq!(m2.import_sites().len(), 1);
     let site2 = &m2.import_sites()[0];
-    assert_eq!(site2.path_range.start(), 16); // "./foo.nix" starts at 16
+    assert_eq!(site2.path_range.start(), 16);
 }
-
-// --- 11. laziness / malformed input -----------------------------------------
 
 #[test]
 fn construction_is_cheap_and_never_panics() {
     for src in ["let x =", "}", "if true then", "{ a = }"] {
         let tree = parse(src);
-        let m = SemanticModel::new(src, &tree); // must not walk or panic
-        let _ = m.bindings(); // build must not panic either
+        let m = SemanticModel::new(src, &tree);
+        let _ = m.bindings();
         let _ = m.references();
     }
 }
-
-// --- 12. attrpath elements are not references -------------------------------
 
 #[test]
 fn attrpath_elements_are_not_references() {
@@ -252,8 +215,6 @@ fn attrpath_elements_are_not_references() {
     assert_eq!(a.references.len(), 1);
 }
 
-// --- 13. reference/binding sanity -------------------------------------------
-
 #[test]
 fn bare_ident_is_one_reference_zero_bindings() {
     let src = "a";
@@ -261,8 +222,6 @@ fn bare_ident_is_one_reference_zero_bindings() {
     assert_eq!(m.references().len(), 1);
     assert!(m.bindings().is_empty());
 }
-
-// --- extra: select default, string interp, nested with ----------------------
 
 #[test]
 fn select_default_and_interp_references() {
@@ -298,8 +257,6 @@ fn with_scope_expr_resolves_outside() {
 
 #[test]
 fn shadowing_across_scopes_via_outer_shadow() {
-    // Recursive let sees itself at its own name position; shadowing is
-    // detected from the enclosing scope outward.
     let src = "let a = 1; in let a = 2; in a";
     let m = model(src);
     let inner = bindings_named(&m, "a").pop().expect("inner a");

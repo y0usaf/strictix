@@ -54,11 +54,8 @@ fn span(source: &str, needle: &str) -> String {
     format!("{}..{}", start, start + needle.len())
 }
 
-// --- unknown-option: read side ----------------------------------------
-
 #[test]
 fn read_side_accepts_wildcard_paths() {
-    // Regression: `users.users.<name>.home` must match any user name.
     let src = "{ config, ... }: { services.example.dataDir = config.users.users.alice.home; }";
     assert_eq!(run(src), Vec::<String>::new());
 }
@@ -77,9 +74,6 @@ fn read_side_still_flags_unknown_paths() {
 
 #[test]
 fn write_side_flags_unknown_path_with_empty_attrset_value() {
-    // Regression: an empty attrset has no leaves to descend into, so
-    // the accumulated path itself must be judged — otherwise a typo'd
-    // interior (`services.exampel.settings = { }`) escapes entirely.
     let src = "{ config, ... }: { services.exampel.settings = { }; }";
     assert_eq!(
         run(src),
@@ -92,21 +86,15 @@ fn write_side_flags_unknown_path_with_empty_attrset_value() {
 
 #[test]
 fn write_side_accepts_empty_attrset_on_declared_prefix() {
-    // `services.example = { };` is a structural write to a real prefix
-    // of declared options — legal, and judged by neither rule.
     let src = "{ config, ... }: { services.example = { }; }";
     assert_eq!(run(src), Vec::<String>::new());
 }
 
 #[test]
 fn write_side_accepts_empty_attrset_on_attrsof_option() {
-    // An empty attrset assigned to a declared `attribute set of` option
-    // is a matching literal, not a mismatch.
     let src = "{ config, ... }: { services.example.settings = { }; }";
     assert_eq!(run(src), Vec::<String>::new());
 }
-
-// --- unknown-option: write side ----------------------------------------
 
 #[test]
 fn write_side_flags_typoed_path() {
@@ -124,8 +112,6 @@ fn write_side_flags_typoed_path() {
 fn write_side_accumulates_nested_attrsets() {
     let ok = "{ pkgs, ... }: { services = { example = { enable = true; port = 8080; }; }; }";
     assert_eq!(run(ok), Vec::<String>::new());
-    // The diagnostic names the FULL accumulated path but points at the
-    // leaf binding's own attrpath.
     let bad = "{ pkgs, ... }: { services = { example = { enabel = true; }; }; }";
     assert_eq!(
         run(bad),
@@ -162,8 +148,6 @@ fn locally_declared_option_is_accepted() {
 
 #[test]
 fn freeform_interior_write_is_accepted() {
-    // `services.example.settings` is a declared attrset option; writing
-    // below it (freeform/submodule interior) is legitimate.
     let src = "{ pkgs, ... }: { services.example.settings.whatever.deep = \"x\"; }";
     assert_eq!(run(src), Vec::<String>::new());
 }
@@ -176,8 +160,6 @@ fn intermediate_attrset_write_is_structural() {
 
 #[test]
 fn non_module_file_write_side_is_silent() {
-    // No module formals, no imports/options/config key: not a module,
-    // so the typo'd path is never judged.
     let src = "{ services.exmple.enable = true; }";
     assert_eq!(run(src), Vec::<String>::new());
 }
@@ -187,8 +169,6 @@ fn dynamic_segments_abort_their_subtree() {
     let src = "{ pkgs, ... }: { services.${\"exmple\"}.enable = true; }";
     assert_eq!(run(src), Vec::<String>::new());
 }
-
-// --- option-type-mismatch -----------------------------------------------
 
 #[test]
 fn boolean_option_rejects_string_literal() {
@@ -332,7 +312,6 @@ fn wildcard_option_types_are_judged() {
 
 #[test]
 fn mismatch_is_judged_through_modifiers() {
-    // mkForce/mkIf unwrap to the payload literal before judging.
     let src = "{ lib, ... }: { services.example.enable = lib.mkForce \"yes\"; }";
     assert_eq!(
         run(src),
@@ -360,12 +339,10 @@ fn matching_literals_are_clean() {
 
 #[test]
 fn unjudgeable_values_and_types_stay_silent() {
-    // Non-literal RHS: never judged, even against a typed option.
     assert_eq!(
         run("{ pkgs, ... }: { services.example.port = builtins.getEnv \"PORT\"; }"),
         Vec::<String>::new()
     );
-    // `package`-typed option: never judged, even against a literal.
     assert_eq!(
         run("{ pkgs, ... }: { services.example.package = \"hello\"; }"),
         Vec::<String>::new()

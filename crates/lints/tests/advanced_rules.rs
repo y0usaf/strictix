@@ -92,8 +92,6 @@ fn builtin_arity_checks_extra_arguments_and_accepts_partial_applications() {
     assert!(codes("builtins.length xs", one(BuiltinArity)).is_empty());
     assert!(codes("builtins.elem", one(BuiltinArity)).is_empty());
 
-    // A complete application contains partial applications in its syntax tree.
-    // Only the outer application represents the call being checked.
     assert!(codes(
         r#"builtins.concatStringsSep " " ["a" "b"]"#,
         one(BuiltinArity)

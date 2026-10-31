@@ -123,7 +123,7 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
                     parse_toml_string(value).map_err(|e| format!("line {}: {e}", line_no + 1))?,
                 ));
             }
-            _ => {} // unknown key ignored
+            _ => {}
         }
     }
 
@@ -140,8 +140,6 @@ fn parse_string_array(value: &str) -> Result<Vec<String>, String> {
     if inner.trim().is_empty() {
         return Ok(Vec::new());
     }
-    // ponytail: naive comma split — rule codes and paths never contain
-    // commas, so this is correct for the subset.
     inner
         .split(',')
         .map(|s| parse_toml_string(s.trim()))

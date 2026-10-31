@@ -133,7 +133,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 fn cache_file_for(schema: &Path) -> PathBuf {
     let hash = std::fs::read(schema)
         .map(|bytes| fnv1a(&bytes))
-        .unwrap_or(0); // unreadable => hash 0, which matches a miss
+        .unwrap_or(0);
     std::env::temp_dir()
         .join("strictix-cache")
         .join(format!("{hash:016x}.paths"))
@@ -183,7 +183,7 @@ fn read_cache(cache: &Path, expected: u64) -> Option<HashMap<String, String>> {
     let mut lines = text.lines();
     let header = lines.next()?;
     if header != format!("{expected:016x}:v2") {
-        return None; // stale or pre-v2: reparse options.json
+        return None;
     }
     lines
         .map(|line| {
@@ -232,8 +232,6 @@ fn load_schema(path: &Path) -> Schema {
     write_cache(&cache, hash, &options);
     Ok(OptionsSchema::new(options))
 }
-
-// --- path matching ----------------------------------------------------
 
 /// Whether one schema path segment accepts one written segment: a
 /// placeholder like `<name>` matches any single segment, anything else
@@ -289,8 +287,6 @@ fn declared_type<'s>(
     schema.types.get(&hit.join(".")).map(String::as_str)
 }
 
-// --- read side (select chains off `config`) ---------------------------
-
 /// Whether a reference is a use of the `config` module argument: a
 /// LambdaParam binding named `config`.
 fn is_config_reference(model: &SemanticModel, reference: &Reference) -> bool {
@@ -336,8 +332,6 @@ fn select_chain<'a>(
     chain
 }
 
-// --- write side (option definitions in a module body) -----------------
-
 /// Formal names whose presence marks a NixOS module: these are the
 /// arguments the module system passes to every module.
 const MODULE_FORMALS: [&str; 4] = ["config", "lib", "pkgs", "options"];
@@ -379,7 +373,7 @@ pub(crate) fn static_segments(path: Attrpath<'_>, source: &str) -> Option<Vec<St
                     }
                 }
                 if text.contains('\\') {
-                    return None; // escapes: raw text is not the segment
+                    return None;
                 }
                 segments.push(text);
             }
@@ -496,13 +490,13 @@ fn collect_attrset<'a>(
 ) {
     for item in set.items() {
         let AttrItem::Binding(binding) = item else {
-            continue; // inherits define names, not provable option paths
+            continue;
         };
         let Some(path) = binding.attrpath() else {
             continue;
         };
         let Some(segments) = static_segments(path, source) else {
-            continue; // dynamic segment: skip this subtree silently
+            continue;
         };
         let Some(value) = binding.value() else {
             continue;
@@ -564,11 +558,9 @@ fn process_value<'a>(
                             process_value(source, item, path, at_root, name_range, out);
                         }
                     }
-                    return; // mkMerge of a non-list literal: nothing provable
+                    return;
                 }
                 _ => {
-                    // Two-argument modifiers: `mkIf cond X`, `mkOverride n X`
-                    // parse as Apply(Apply(mk*, first), X).
                     if let Expr::Apply(inner) = func {
                         if inner
                             .func()
@@ -583,12 +575,7 @@ fn process_value<'a>(
         }
     }
     match value {
-        // `config = { ... }`: descend as the definition root.
         Expr::Attrset(set) if at_root => collect_attrset(source, set, &[], true, out),
-        // A plain attrset literal is structure, not a leaf: descend.
-        // An EMPTY one has no leaves to judge, so the accumulated path
-        // itself becomes the write — otherwise `services.typo.x = { };`
-        // escapes unknown-option entirely.
         Expr::Attrset(set) if !path.is_empty() => {
             if set.items().next().is_none() {
                 out.push(OptionWrite {
@@ -608,7 +595,6 @@ fn process_value<'a>(
             name_range,
             value,
         }),
-        // A pathless non-attrset (`config = 5;`) proves nothing.
         _ => {}
     }
 }
@@ -671,8 +657,6 @@ fn declared_leaves(source: &str, value: Expr<'_>, prefix: &[String], out: &mut V
         }
     }
 }
-
-// --- literal/type judgement -------------------------------------------
 
 /// The literal kinds the type rule can prove from syntax alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -747,8 +731,6 @@ fn literal_kind(model: &SemanticModel<'_>, value: Expr<'_>) -> Option<LitKind> {
         Expr::List(_) => Some(LitKind::List),
         Expr::Attrset(_) | Expr::RecAttrset(_) => Some(LitKind::Attrs),
         Expr::Unary(unary) => {
-            // Negative number literals parse as unary minus over a
-            // number token; anything else under a unary op stays silent.
             let minus = unary
                 .syntax()
                 .child_tokens()
@@ -767,7 +749,7 @@ fn literal_kind(model: &SemanticModel<'_>, value: Expr<'_>) -> Option<LitKind> {
                 _ => return None,
             };
             if model.is_bound(name, token.range().start()) {
-                return None; // shadowed: not provably the literal
+                return None;
             }
             Some(kind)
         }
@@ -794,10 +776,8 @@ fn literal_matches_type(ty: &str, kind: LitKind) -> Option<bool> {
     } else if ty.starts_with("attribute set") {
         &[LitKind::Attrs]
     } else if ty.starts_with("string") {
-        // covers both "string" and "strings concatenated with ..."
         &[LitKind::Str]
     } else if ty.starts_with("path") {
-        // NixOS path types accept string values
         &[LitKind::Path, LitKind::Str]
     } else if ["package", "lambda", "function", "submodule", "float"]
         .iter()
@@ -806,12 +786,10 @@ fn literal_matches_type(ty: &str, kind: LitKind) -> Option<bool> {
         return None;
     } else if ty.contains("boolean") {
         if ty.contains("integer") {
-            return None; // mixed description: not judgeable
+            return None;
         }
         &[LitKind::Bool]
     } else if ty.contains("integer") {
-        // covers "signed integer", "unsigned integer", and port
-        // phrasings like "16 bit unsigned integer; between ..."
         &[LitKind::Int]
     } else {
         return None;
@@ -854,8 +832,6 @@ fn integer_literal(model: &SemanticModel<'_>, value: Expr<'_>) -> Option<i128> {
     }
 }
 
-// --- rules --------------------------------------------------------------
-
 /// Flags option paths that options.json does not declare, on both
 /// sides: reads off the `config` module argument and writes in a
 /// module body.
@@ -885,7 +861,7 @@ impl Rule for UnknownOption {
 
     fn check_file(&self, model: &SemanticModel, config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         let Some(schema) = schema_for(config, model.path()) else {
-            return; // schema rule off for this run
+            return;
         };
         let options = match schema {
             Ok(options) => options,
@@ -906,18 +882,14 @@ impl Rule for UnknownOption {
             }
         };
         let locals = local_declarations(model);
-        // Read side: select chains rooted at the `config` argument.
         for reference in model.references() {
             if !is_config_reference(model, reference) {
                 continue;
             }
             let chain = select_chain(model, reference.name.range());
-            // `config.a.b or fallback` tolerates an undeclared path on purpose.
             if chain.is_empty() || chain.iter().any(|s| s.default().is_some()) {
                 continue;
             }
-            // Collect the path segments innermost-out, skipping chains
-            // with any non-ident segment (strings, interpolations).
             let mut segments = Vec::new();
             let mut valid = true;
             for select in &chain {
@@ -953,7 +925,6 @@ impl Rule for UnknownOption {
                 range,
             ));
         }
-        // Write side: leaf option definitions in the module body.
         for write in collect_writes(model) {
             if path_declared(options, &locals, &write.segments, &write.path) {
                 continue;
@@ -996,17 +967,17 @@ impl Rule for OptionTypeMismatch {
 
     fn check_file(&self, model: &SemanticModel, config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         let Some(schema) = schema_for(config, model.path()) else {
-            return; // schema rules off for this run
+            return;
         };
         let Ok(options) = schema else {
-            return; // load failure already reported by unknown-option
+            return;
         };
         for write in collect_writes(model) {
             let Some(ty) = declared_type(options, &write.segments, &write.path) else {
-                continue; // no exact-length declared match: structural
+                continue;
             };
             let Some(kind) = literal_kind(model, write.value) else {
-                continue; // not a provable literal: never judged
+                continue;
             };
             if literal_matches_type(ty, kind) == Some(false) {
                 diags.push(
@@ -1092,7 +1063,6 @@ mod tests {
             Some("list of package")
         );
         assert!(!schema.types.contains_key("a.c"));
-        // A cache file now exists and read_cache returns the same map.
         let cache = cache_file_for(&path);
         assert!(cache.exists(), "cache file written on successful load");
         let hash = fnv1a(std::fs::read(&path).unwrap().as_slice());
@@ -1111,9 +1081,6 @@ mod tests {
         assert!(schema.types.contains_key("a.b"));
         let cache = cache_file_for(&path);
         let hash = fnv1a(std::fs::read(&path).unwrap().as_slice());
-        // Now write a different schema to the same path and bump its
-        // content: the stored fingerprint no longer matches, so
-        // read_cache must report a miss.
         std::fs::write(&path, r#"{"options": {"new.opt": {}}}"#).expect("rewrite schema");
         let reloaded = load_schema(&path).expect("reloads despite stale cache");
         assert!(reloaded.types.contains_key("new.opt"));
@@ -1127,8 +1094,6 @@ mod tests {
     #[test]
     fn missing_schema_is_error_not_cache_hit() {
         let missing = std::env::temp_dir().join("strictix-no-such-schema-anywhere");
-        // The cache fingerprint for an unreadable path is 0; this must not
-        // accidentally return an empty cache as a hit.
         let result = load_schema(&missing);
         assert!(result.is_err(), "missing schema is an error");
     }
@@ -1139,8 +1104,6 @@ mod tests {
         let cache = dir.join(format!("test-roundtrip-{}.paths", std::process::id()));
         let mut map = HashMap::new();
         map.insert("a.b".to_owned(), "boolean".to_owned());
-        // Arbitrary type text: embedded newlines/tabs become spaces at
-        // write time so the line-per-entry format survives.
         map.insert("weird.opt".to_owned(), "one\nof\t\"x\"\r or y".to_owned());
         map.insert("untyped.opt".to_owned(), String::new());
         write_cache(&cache, 42, &map);
@@ -1151,7 +1114,6 @@ mod tests {
             Some("one of \"x\"  or y")
         );
         assert_eq!(back.get("untyped.opt").map(String::as_str), Some(""));
-        // Wrong fingerprint misses.
         assert!(read_cache(&cache, 43).is_none(), "stale fingerprint misses");
         let _ = std::fs::remove_file(cache);
     }
@@ -1161,8 +1123,6 @@ mod tests {
         let dir = std::env::temp_dir().join("strictix-cache");
         let _ = std::fs::create_dir_all(&dir);
         let cache = dir.join(format!("test-v1-{}.paths", std::process::id()));
-        // The v1 format: `{hash}` header, then bare paths. The v2 reader
-        // must miss so the schema is reparsed with types.
         std::fs::write(&cache, format!("{{{:016x}}}\na.b\nc.d\n", 42u64)).unwrap();
         assert!(read_cache(&cache, 42).is_none(), "v1 cache is a miss");
         let _ = std::fs::remove_file(cache);
@@ -1175,16 +1135,12 @@ mod tests {
         types.insert("services.example.enable".to_owned(), "boolean".to_owned());
         let schema = OptionsSchema::new(types);
         let declared = |path: &str| path_declared(&schema, &[], &segs(path), path);
-        // (a) exact, wildcard segment matching any written segment
         assert!(declared("users.users.alice.home"));
         assert!(declared("services.example.enable"));
-        // (b) schema path is a prefix: writing below a declared option
         assert!(declared("users.users.alice.home.anything"));
-        // (c) written path is a proper prefix: structural intermediate
         assert!(declared("users.users"));
         assert!(declared("users.users.alice"));
         assert!(declared("services"));
-        // mismatched segments are not declared
         assert!(!declared("users.uzers.alice.home"));
         assert!(!declared("services.example.enabled"));
         assert!(!declared("services.exmaple.enable"));
@@ -1201,7 +1157,6 @@ mod tests {
             &segs("mine.stuff.enable"),
             "mine.stuff.enable"
         ));
-        // prefix and interior writes flow through the same predicate
         assert!(path_declared(
             &schema,
             &locals,
@@ -1231,7 +1186,6 @@ mod tests {
         let ty = |path: &str| declared_type(&schema, &segs(path), path).map(str::to_owned);
         assert_eq!(ty("services.example.enable"), Some("boolean".to_owned()));
         assert_eq!(ty("users.users.alice.home"), Some("path".to_owned()));
-        // above/below an option is structural: never type-judged
         assert_eq!(ty("users.users.alice"), None);
         assert_eq!(ty("users.users.alice.home.deep"), None);
         assert_eq!(ty("services.nope"), None);
@@ -1241,10 +1195,8 @@ mod tests {
     fn coarse_type_matching_follows_the_contract() {
         use LitKind as L;
         let m = literal_matches_type;
-        // boolean
         assert_eq!(m("boolean", L::Bool), Some(true));
         assert_eq!(m("boolean", L::Str), Some(false));
-        // integers, including port phrasing
         assert_eq!(m("signed integer", L::Int), Some(true));
         assert_eq!(m("signed integer", L::Str), Some(false));
         assert_eq!(
@@ -1261,26 +1213,21 @@ mod tests {
             ),
             Some(false)
         );
-        // strings, including concatenated phrasing
         assert_eq!(m("string", L::Str), Some(true));
         assert_eq!(m("string", L::Int), Some(false));
         assert_eq!(m("strings concatenated with \"\\n\"", L::Str), Some(true));
-        // null or X accepts null and recurses
         assert_eq!(m("null or string", L::Null), Some(true));
         assert_eq!(m("null or string", L::Str), Some(true));
         assert_eq!(m("null or string", L::Int), Some(false));
         assert_eq!(m("string", L::Null), Some(false));
-        // lists and attribute sets by prefix, beating word containment
         assert_eq!(m("list of string", L::List), Some(true));
         assert_eq!(m("list of string", L::Str), Some(false));
         assert_eq!(m("list of package", L::List), Some(true));
         assert_eq!(m("attribute set of string", L::Attrs), Some(true));
         assert_eq!(m("attribute set of string", L::List), Some(false));
-        // paths accept strings
         assert_eq!(m("path", L::Path), Some(true));
         assert_eq!(m("path", L::Str), Some(true));
         assert_eq!(m("path", L::Int), Some(false));
-        // never judged: packages, functions, submodules, floats, enums, empty
         assert_eq!(m("package", L::Str), None);
         assert_eq!(m("lambda", L::Int), None);
         assert_eq!(m("function that evaluates to a(n) string", L::Str), None);

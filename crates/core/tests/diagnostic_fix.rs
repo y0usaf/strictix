@@ -8,7 +8,6 @@ use strictix_syntax::TextRange;
 
 #[test]
 fn single_edit_mid_string() {
-    // Replace a word in the middle; text before and after survives.
     let source = "hello brave world";
     let edits = [TextEdit::new(TextRange::new(6, 11), "cruel")];
     assert_eq!(
@@ -19,20 +18,16 @@ fn single_edit_mid_string() {
 
 #[test]
 fn multiple_edits_reverse_order() {
-    // Edits arrive later-first (descending by position); result must be
-    // independent of input order.
     let source = "abcdef";
     let edits = [
-        TextEdit::new(TextRange::new(4, 6), "XY"), // later
-        TextEdit::new(TextRange::new(0, 2), "AB"), // earlier
+        TextEdit::new(TextRange::new(4, 6), "XY"),
+        TextEdit::new(TextRange::new(0, 2), "AB"),
     ];
     assert_eq!(apply_fixes(source, &edits), Ok("ABcdXY".to_string()));
 }
 
 #[test]
 fn multiple_edits_forward_order() {
-    // Same two edits given in source order — sorting inside apply_fixes
-    // must make both orders equivalent.
     let source = "abcdef";
     let edits = [
         TextEdit::new(TextRange::new(0, 2), "AB"),
@@ -43,8 +38,6 @@ fn multiple_edits_forward_order() {
 
 #[test]
 fn overlapping_edits_error() {
-    // Ranges 1..4 and 2..5 intersect: neither edit can be applied
-    // without corrupting the other's span.
     let source = "abcdef";
     let edits = [
         TextEdit::new(TextRange::new(1, 4), "X"),
@@ -61,7 +54,6 @@ fn overlapping_edits_error() {
 
 #[test]
 fn edit_beyond_source_error() {
-    // Source is 3 bytes; an edit ending at 5 points past the end.
     let source = "abc";
     let edits = [TextEdit::new(TextRange::new(1, 5), "X")];
     assert_eq!(
@@ -79,7 +71,6 @@ fn empty_replacement_deletes_range() {
 
 #[test]
 fn replacement_with_newlines() {
-    // Replacement text is arbitrary; newlines must pass through whole.
     let source = "a b";
     let edits = [TextEdit::new(TextRange::new(1, 2), "\n\n")];
     assert_eq!(apply_fixes(source, &edits), Ok("a\n\nb".to_string()));
@@ -87,8 +78,6 @@ fn replacement_with_newlines() {
 
 #[test]
 fn adjacent_edits_allowed() {
-    // Touching ranges (0..2 | 2..4 | 4..6) do not overlap by the
-    // intersection rule and must all apply.
     let source = "abcdef";
     let edits = [
         TextEdit::new(TextRange::new(2, 4), "CD"),
@@ -129,9 +118,6 @@ fn diagnostic_builder_chain() {
 
 #[test]
 fn fix_two_edits_swap_pieces() {
-    // One fix carrying two non-overlapping edits: swap 'one' and 'three'
-    // by replacing each word in place. Proves the fix's edit list flows
-    // straight into apply_fixes end-to-end.
     let source = "one two three";
     let fix = Fix::new("swap")
         .edit(TextRange::new(0, 3), "three")

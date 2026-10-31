@@ -131,7 +131,7 @@ pub fn run_rules_project(
     run_rules_project_inner(rules, tree, model, config, source, project, true, diags);
 }
 
-#[allow(clippy::too_many_arguments)] // The dispatch seam keeps node/file/project context explicit.
+#[allow(clippy::too_many_arguments)]
 fn run_rules_project_inner(
     rules: &[Box<dyn Rule>],
     tree: &SyntaxNode,
@@ -271,7 +271,6 @@ pub fn lint_project(
         match context.commit(&edits) {
             Ok(()) => {}
             Err(err) => {
-                // Atomic: undo any prior passes, leave the input intact.
                 context.rollback_all();
                 error = Some(err);
                 break;

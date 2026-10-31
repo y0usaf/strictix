@@ -239,8 +239,6 @@ impl TreeBuilder {
     pub fn token(&mut self, kind: SyntaxKind, range: TextRange) {
         self.last_end = range.end();
         let token = SyntaxToken { kind, range };
-        // A token outside any node should not happen; the parser always
-        // wraps everything in a Root.
         if let Some(node) = self.stack.last_mut() {
             node.children.push(NodeOrToken::Token(token));
         }

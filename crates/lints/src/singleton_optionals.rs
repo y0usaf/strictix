@@ -64,8 +64,6 @@ impl Rule for SingletonOptionals {
                 "optionals builds a one-element list; use optional with the element directly",
                 call.syntax().content_range())
                 .with_help("Use optional condition value; for an inherited helper, import optional from the same library.");
-            // A qualified replacement keeps precisely the same library base.
-            // Changing an inherited/aliased name could select a different binding.
             if let Expr::Select(select) = callee {
                 if let Some(AttrName::Ident(name)) =
                     select.attrpath().and_then(|path| path.elements().next())
@@ -87,8 +85,6 @@ impl Rule for SingletonOptionals {
                             .edit(name.range(), "optional");
                         if before.trim().is_empty() && after.trim().is_empty() {
                             let text = &source[range.start() as usize..range.end() as usize];
-                            // Parenthesize selections with defaults and control flow
-                            // so a surrounding application cannot capture their body.
                             let grouped = match item {
                                 Expr::Ident(_)
                                 | Expr::Int(_)
@@ -108,7 +104,6 @@ impl Rule for SingletonOptionals {
                             };
                             fix = fix.edit(list.syntax().content_range(), grouped);
                         } else {
-                            // Retain comments surrounding the item verbatim.
                             fix = fix.edit(open.range(), "(").edit(close.range(), ")");
                         }
                         diag = diag.with_fix(fix);

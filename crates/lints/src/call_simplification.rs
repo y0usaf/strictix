@@ -378,8 +378,6 @@ impl Rule for ManualGetattr {
             } else {
                 trimmed_text(name_arg, source)
             };
-            // A select binds tighter than every slot an apply can occupy,
-            // so the replacement never needs an outer paren layer.
             let replacement = format!("{}.{key}", operand_text(set_arg, source));
             let range = node.content_range();
             diags.push(
@@ -478,15 +476,9 @@ impl Rule for ManualOptional {
             else {
                 return;
             };
-            // Suggesting `lib.optional` only makes sense when `lib` is
-            // actually visible here; otherwise the rewrite would not
-            // even evaluate, so the rule stays entirely silent.
             if !model.is_bound("lib", node.content_range().start()) {
                 return;
             }
-            // A literal `true`/`false` condition is constant-if's
-            // finding (and its fix), never ours — overlapping fixes
-            // would make the engine reject both.
             if let Expr::Ident(t) = unwrap_paren(cond) {
                 if matches!(t.text(source), "true" | "false") {
                     return;
@@ -495,8 +487,6 @@ impl Rule for ManualOptional {
             let then_u = unwrap_paren(then_e);
             let else_u = unwrap_paren(else_e);
             let (helper, arg) = match (then_u, else_u) {
-                // `if c then [ x ] else [ ]` -> lib.optional c x
-                // `if c then [ x y ] else [ ]` -> lib.optionals c [ x y ]
                 (Expr::List(then_list), Expr::List(else_list))
                     if else_list.items().next().is_none() =>
                 {
@@ -510,13 +500,11 @@ impl Rule for ManualOptional {
                         ("optionals", argument_text(then_u, source))
                     }
                 }
-                // `if c then s else ""` -> lib.optionalString c s
                 (Expr::String(_) | Expr::IndString(_), Expr::String(else_string))
                     if else_string.parts().next().is_none() =>
                 {
                     ("optionalString", argument_text(then_u, source))
                 }
-                // `if c then { ... } else { }` -> lib.optionalAttrs c { ... }
                 (Expr::Attrset(_), Expr::Attrset(else_set))
                     if else_set.items().next().is_none() =>
                 {
@@ -644,8 +632,6 @@ impl Rule for OptionalListArgument {
             if second.range() == inner.range() {
                 continue;
             }
-            // Only a LITERAL list argument is provably wrong; a name
-            // that happens to hold a list is not this rule's business.
             let Expr::List(_) = second else {
                 continue;
             };
@@ -657,9 +643,6 @@ impl Rule for OptionalListArgument {
                     node.content_range(),
                 )
                 .with_help("lib.optionals takes the list directly")
-                // Token-range edit only: renaming `optional` to
-                // `optionals` states the intent without touching the
-                // arguments, so it can never collide with formatting.
                 .with_fix(Fix::new("call lib.optionals instead").edit(callee_token, "optionals")),
             );
         }

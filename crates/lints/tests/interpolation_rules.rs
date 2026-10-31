@@ -23,8 +23,6 @@ fn run(source: &str, rule: Box<dyn Rule>) -> Vec<Diagnostic> {
     diagnostics
 }
 
-// --- coerced-interpolation --------------------------------------------
-
 #[test]
 fn coerced_interpolation_flags_int_and_fixes_by_splicing_digits() {
     let source = r#""count: ${5}""#;
@@ -50,8 +48,6 @@ fn coerced_interpolation_whole_string_int_fix_round_trips() {
 
 #[test]
 fn coerced_interpolation_leading_zero_int_flags_without_fix() {
-    // `007` evaluates to 7, so splicing the raw digits would not match
-    // what toString produces; the finding stands but no fix is offered.
     let diagnostics = run(r#""${007}""#, Box::new(CoercedInterpolation {}));
     assert_eq!(diagnostics.len(), 1);
     assert!(diagnostics[0].fix.is_none());
@@ -59,7 +55,6 @@ fn coerced_interpolation_leading_zero_int_flags_without_fix() {
 
 #[test]
 fn coerced_interpolation_flags_float_without_fix() {
-    // toString 1.5 is "1.500000", so no splice is value-preserving.
     let diagnostics = run(r#""${1.5}""#, Box::new(CoercedInterpolation {}));
     assert_eq!(diagnostics.len(), 1);
     assert_eq!(diagnostics[0].code, "coerced-interpolation");
@@ -98,7 +93,6 @@ fn coerced_interpolation_attrset_with_outpath_or_tostring_is_silent() {
 
 #[test]
 fn coerced_interpolation_dynamic_attr_name_is_silent() {
-    // A dynamic name could evaluate to outPath; nothing is proven.
     assert!(run(
         r#"let k = "outPath"; in "${{ ${k} = "/x"; }}""#,
         Box::new(CoercedInterpolation {})
@@ -127,8 +121,6 @@ fn coerced_interpolation_flags_global_true_false_null() {
 
 #[test]
 fn coerced_interpolation_shadowed_true_is_silent() {
-    // `true` is an ordinary ident; a lexical binding makes it somebody's
-    // variable whose value the syntax cannot know.
     assert!(run(
         r#"let true = "y"; in "${true}""#,
         Box::new(CoercedInterpolation {})
@@ -138,7 +130,6 @@ fn coerced_interpolation_shadowed_true_is_silent() {
 
 #[test]
 fn coerced_interpolation_with_covered_null_is_silent() {
-    // An enclosing `with` may supply the name; nothing is proven.
     assert!(run(
         r#"with { null = "n"; }; "${null}""#,
         Box::new(CoercedInterpolation {})
@@ -180,15 +171,12 @@ fn coerced_interpolation_fires_inside_indented_string() {
 
 #[test]
 fn coerced_interpolation_ignores_attrname_interpolation() {
-    // `a.${...}` is an attrpath interpolation, not a string part.
     assert!(run(
         r#"let a = { "5" = 1; }; in a.${"5"}"#,
         Box::new(CoercedInterpolation {})
     )
     .is_empty());
 }
-
-// --- redundant-interpolation --------------------------------------------
 
 #[test]
 fn redundant_interpolation_flags_and_splices_plain_literal() {
@@ -212,9 +200,6 @@ fn redundant_interpolation_whole_string_identity_round_trips() {
 
 #[test]
 fn redundant_interpolation_escape_bearing_inner_is_fixless() {
-    // `\n` means a newline inside `"..."` but two literal characters if
-    // spliced into an indented string; and even in a `"..."` outer, the
-    // rule conservatively refuses to move escapes.
     let diagnostics = run(r#""${"a\nb"}""#, Box::new(RedundantInterpolation {}));
     assert_eq!(diagnostics.len(), 1);
     assert!(diagnostics[0].fix.is_none());
@@ -234,7 +219,6 @@ fn redundant_interpolation_indented_outer_splices_quote_free_content() {
 
 #[test]
 fn redundant_interpolation_indented_outer_refuses_quote_in_content() {
-    // A spliced `'` could pair with a neighboring quote into `''`.
     let diagnostics = run(r#"''${"it's"}''"#, Box::new(RedundantInterpolation {}));
     assert_eq!(diagnostics.len(), 1);
     assert!(diagnostics[0].fix.is_none());

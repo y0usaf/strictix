@@ -24,8 +24,6 @@ fn lintme() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/paths/lintme.nix")
 }
 
-// --- dangling-path ----------------------------------------------------
-
 #[test]
 fn dangling_path_flags_missing_relative_path_with_resolved_absolute() {
     let anchor = lintme();
@@ -70,8 +68,6 @@ fn dangling_path_is_silent_for_path_exists_guarded_path() {
     for source in [
         "builtins.pathExists ./missing.nix",
         "lib.filesystem.pathExists ./missing.nix",
-        // Every occurrence of a probed path is skipped, not just the
-        // probe argument itself.
         "if builtins.pathExists ./missing.nix then ./missing.nix else null",
     ] {
         assert!(
@@ -124,9 +120,6 @@ fn dangling_path_skips_home_relative_paths() {
 #[test]
 fn dangling_path_never_fires_on_interpolated_path_fragments() {
     let anchor = lintme();
-    // The lexer splits interpolated paths into fragments (Path, Slash,
-    // InterpStart, ..., InterpEnd, Path); none of the fragments is a
-    // whole path literal, so none may be existence-checked.
     for source in [
         "let v = \"a\"; in ./x/${v}",
         "let v = \"a\"; in /abs/${v}/tail",
@@ -141,14 +134,9 @@ fn dangling_path_never_fires_on_interpolated_path_fragments() {
 
 #[test]
 fn dangling_path_skips_numeric_division_trap_fragments() {
-    // `4/2` lexes as Int + Path `/2`; existence-checking the `/2`
-    // fragment would be nonsense (and would double-report the
-    // accidental-path-division finding).
     let anchor = lintme();
     assert!(check(&DanglingPath {}, "4/2", Some(&anchor)).is_empty());
 }
-
-// --- accidental-path-division ------------------------------------------
 
 #[test]
 fn accidental_path_division_flags_digits_slash_digits_and_fixes_spacing() {
@@ -184,8 +172,6 @@ fn accidental_path_division_is_silent_for_real_paths_and_real_division() {
         "foo/2",
         "4/bar",
         "4 / 2",
-        // Interpolated composite: the `4/2` prefix is a path fragment,
-        // not a completed literal.
         "let v = \"a\"; in 4/2/${v}",
     ] {
         assert!(
@@ -194,8 +180,6 @@ fn accidental_path_division_is_silent_for_real_paths_and_real_division() {
         );
     }
 }
-
-// --- search-path-reference ----------------------------------------------
 
 #[test]
 fn search_path_reference_flags_every_search_path() {

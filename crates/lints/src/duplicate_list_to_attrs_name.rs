@@ -39,8 +39,6 @@ impl Rule for DuplicateListToAttrsName {
             let Some(apply) = ApplyExpr::cast(node) else {
                 continue;
             };
-            // Only the explicitly qualified builtin is unambiguous here.
-            // A bare `listToAttrs` may be a user supplied global.
             if !is_qualified_list_to_attrs(apply.func(), model) {
                 continue;
             }

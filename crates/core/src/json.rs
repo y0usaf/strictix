@@ -170,7 +170,6 @@ impl Parser<'_> {
             self.pos += 1;
         }
         match self.peek_byte() {
-            // Leading zero: must not be followed by another digit ("01").
             Some(b'0') => {
                 self.pos += 1;
                 if matches!(self.peek_byte(), Some(b'0'..=b'9')) {
@@ -182,7 +181,6 @@ impl Parser<'_> {
                     self.pos += 1;
                 }
             }
-            // Bare '.' or '-' followed by non-digit.
             _ => return Err(self.error("invalid number")),
         }
         if self.peek_byte() == Some(b'.') {
@@ -207,8 +205,6 @@ impl Parser<'_> {
             }
         }
         let text = &self.input[start..self.pos];
-        // Reject NaN/Infinity (and overflow-to-infinity like "1e999"):
-        // a JSON number must be finite.
         match text.parse::<f64>() {
             Ok(n) if n.is_finite() => Ok(JsonValue::Number(n)),
             _ => Err(self.error("invalid number")),
@@ -218,7 +214,7 @@ impl Parser<'_> {
     /// Parse a double-quoted string, returning its decoded content.
     fn string(&mut self) -> Result<String, JsonError> {
         debug_assert_eq!(self.peek_byte(), Some(b'"'));
-        self.pos += 1; // opening quote
+        self.pos += 1;
         let mut out = String::new();
         loop {
             let Some(byte) = self.peek_byte() else {
@@ -233,11 +229,9 @@ impl Parser<'_> {
                     self.pos += 1;
                     self.escape(&mut out)?;
                 }
-                // Unescaped control characters are invalid JSON.
                 b if b < 0x20 => {
                     return Err(self.error("unexpected control character in string"));
                 }
-                // Raw content: copy a full (possibly multi-byte) char.
                 _ => {
                     let ch = self.input[self.pos..]
                         .chars()
@@ -300,7 +294,6 @@ impl Parser<'_> {
     fn unicode_escape(&mut self, out: &mut String) -> Result<(), JsonError> {
         let code_point = self.hex4()?;
         match code_point {
-            // High surrogate: must be immediately followed by \u + low.
             0xD800..=0xDBFF => {
                 if self.peek_byte() == Some(b'\\') {
                     self.pos += 1;
@@ -315,7 +308,6 @@ impl Parser<'_> {
                                     out.push(ch);
                                     return Ok(());
                                 }
-                                // Unreachable: a valid pair is always a scalar.
                                 None => return Err(self.error("invalid escape")),
                             }
                         }
@@ -323,15 +315,12 @@ impl Parser<'_> {
                 }
                 Err(self.error("unpaired surrogate"))
             }
-            // Lone low surrogate.
             0xDC00..=0xDFFF => Err(self.error("unpaired surrogate")),
             _ => match char::from_u32(code_point) {
                 Some(ch) => {
                     out.push(ch);
                     Ok(())
                 }
-                // Unreachable: 4 hex digits are at most 0xFFFF and
-                // surrogates are handled above.
                 None => Err(self.error("invalid escape")),
             },
         }

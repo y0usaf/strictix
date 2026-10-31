@@ -18,8 +18,6 @@ use strictix_syntax::{
     TextRange,
 };
 
-// --- empty-let-in ---------------------------------------------------
-
 pub struct EmptyLetIn;
 
 impl Rule for EmptyLetIn {
@@ -64,8 +62,6 @@ impl Rule for EmptyLetIn {
         diags.push(diag);
     }
 }
-
-// --- manual-inherit -------------------------------------------------
 
 pub struct ManualInherit;
 
@@ -121,8 +117,6 @@ impl Rule for ManualInherit {
     }
 }
 
-// --- manual-inherit-from --------------------------------------------
-
 pub struct ManualInheritFrom;
 
 impl Rule for ManualInheritFrom {
@@ -158,8 +152,6 @@ impl Rule for ManualInheritFrom {
         let Some(Expr::Select(select)) = binding.value() else {
             return;
         };
-        // A select with an `or` default (`x = a.b or default`) cannot be
-        // rewritten via inherit without dropping the fallback, so bail out.
         if select.default().is_some() {
             return;
         }
@@ -168,11 +160,6 @@ impl Rule for ManualInheritFrom {
         };
         let Some(base) = select.base() else { return };
 
-        // Walk the selected attribute path. It must be composed entirely
-        // of static idents (no `${...}` interpolation, no quoted segment)
-        // so that `dev = cfg.devices.dev` -> `inherit (cfg.devices) dev;`
-        // is a sound rewrite. A dynamic select like `cfg.devices.${name}`
-        // is NOT a static attribute access and must not be flagged.
         let elements = select_attrpath.elements();
         let mut index: Option<&SyntaxToken> = None;
         let mut from_suffix = String::new();
@@ -187,8 +174,6 @@ impl Rule for ManualInheritFrom {
                     }
                     index = Some(token);
                 }
-                // Dynamic or quoted segment: not a static `some.path`
-                // access, so this binding cannot be rewritten via inherit.
                 AttrName::Str(_) | AttrName::Interp(_) => return,
             }
         }
@@ -197,9 +182,6 @@ impl Rule for ManualInheritFrom {
             return;
         }
 
-        // The `from` expression is the base + every path element except
-        // the final one: `cfg.devices.dev` -> `inherit (cfg.devices) dev;`
-        // and `some.a` -> `inherit (some) a;`.
         let from = if from_suffix.is_empty() {
             base.text(source).to_string()
         } else {
@@ -220,8 +202,6 @@ impl Rule for ManualInheritFrom {
         );
     }
 }
-
-// --- collapsible-let-in ---------------------------------------------
 
 pub struct CollapsibleLetIn;
 
@@ -267,8 +247,6 @@ impl Rule for CollapsibleLetIn {
         );
     }
 }
-
-// --- eta-reduction --------------------------------------------------
 
 pub struct EtaReduction;
 
@@ -322,8 +300,6 @@ impl Rule for EtaReduction {
         );
     }
 }
-
-// --- empty-pattern --------------------------------------------------
 
 pub struct EmptyPattern;
 
@@ -390,8 +366,6 @@ fn is_module(body: Option<Expr<'_>>, source: &str) -> bool {
     })
 }
 
-// --- redundant-pattern-bind -----------------------------------------
-
 pub struct RedundantPatternBind;
 
 impl Rule for RedundantPatternBind {
@@ -443,8 +417,6 @@ impl Rule for RedundantPatternBind {
     }
 }
 
-// --- empty-inherit --------------------------------------------------
-
 pub struct EmptyInherit;
 
 impl Rule for EmptyInherit {
@@ -486,8 +458,6 @@ impl Rule for EmptyInherit {
     }
 }
 
-// --- deprecated-to-path ---------------------------------------------
-
 pub struct DeprecatedToPath;
 
 impl Rule for DeprecatedToPath {
@@ -523,8 +493,6 @@ impl Rule for DeprecatedToPath {
         ));
     }
 }
-
-// --- useless-has-attr -----------------------------------------------
 
 pub struct UselessHasAttr;
 
@@ -562,8 +530,6 @@ impl Rule for UselessHasAttr {
             return;
         }
         let expected = format!("{}.{}", set.text(source), attrpath.text(source));
-        // The select node's range is prefixed with the trivia (space)
-        // separating `then` from its branch, so compare trimmed.
         if then_branch.text(source).trim() != expected {
             return;
         }
@@ -608,8 +574,6 @@ fn is_primary(expr: Expr<'_>) -> bool {
             | Expr::Select(_)
     )
 }
-
-// --- empty-list-concat ----------------------------------------------
 
 pub struct EmptyListConcat;
 
@@ -732,8 +696,6 @@ fn is_empty_list(expr: Expr<'_>) -> bool {
     matches!(expr, Expr::List(l) if l.items().count() == 0)
 }
 
-// --- useless-parens (file rule) -------------------------------------
-
 pub struct UselessParens;
 
 impl Rule for UselessParens {
@@ -852,8 +814,6 @@ fn is_primitive(expr: Expr<'_>) -> bool {
     }
 }
 
-// --- repeated-keys (file rule) --------------------------------------
-
 pub struct RepeatedKeys;
 
 impl Rule for RepeatedKeys {
@@ -914,10 +874,6 @@ impl Rule for RepeatedKeys {
                                 if first_range.is_none() {
                                     first_range = Some(b.range());
                                 }
-                                // A common nested prefix is a valid Nix merge:
-                                // `finit.tasks."hermes-dirs".*` builds one tree.
-                                // Only report when the second component actually
-                                // branches, which is the flattening this rule targets.
                                 if let Some(second) = elements.next() {
                                     let text = match second {
                                         AttrName::Ident(id) => id.text(source),
@@ -947,8 +903,6 @@ impl Rule for RepeatedKeys {
         });
     }
 }
-
-// --- unquoted-uri (file rule) ---------------------------------------
 
 pub struct UnquotedUri;
 
@@ -986,8 +940,6 @@ impl Rule for UnquotedUri {
         });
     }
 }
-
-// --- walkers ---------------------------------------------------------
 
 fn walk<'a>(
     node: &'a SyntaxNode,

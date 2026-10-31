@@ -48,8 +48,6 @@ fn rules_available() -> bool {
         && String::from_utf8_lossy(&out.stdout).contains("unused-let-binding")
 }
 
-// --- help / version -------------------------------------------------
-
 #[test]
 fn help_exits_zero_and_mentions_commands() {
     let out = run(&["--help"]);
@@ -69,15 +67,12 @@ fn version_prints_crate_version() {
     );
 }
 
-// --- list -----------------------------------------------------------
-
 #[test]
 fn list_exits_zero_and_prints_rules() {
     let out = run(&["list"]);
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.is_empty(), "list output is non-empty");
-    // Loose format assertion: a real rule line carries its severity.
     if stdout.lines().any(|l| l.contains("unused-let-binding")) {
         let line = stdout
             .lines()
@@ -89,8 +84,6 @@ fn list_exits_zero_and_prints_rules() {
         );
     }
 }
-
-// --- check: clean and dirty -----------------------------------------
 
 #[test]
 fn check_clean_fixture_is_clean() {
@@ -156,14 +149,11 @@ fn disable_rule_cleans_dirty_fixture() {
     assert!(stdout.contains("0 diagnostics"), "rule disabled: {stdout}");
 }
 
-// --- fix ------------------------------------------------------------
-
 #[test]
 fn fix_rewrites_dirty_copy() {
     if !rules_available() {
         return;
     }
-    // Work on a copy so the checked-in fixture stays dirty.
     let dir = std::env::temp_dir().join(format!(
         "strictix-cli-fix-{}-{}",
         std::process::id(),
@@ -182,8 +172,6 @@ fn fix_rewrites_dirty_copy() {
     let after = std::fs::read_to_string(&copy).expect("read after");
 
     assert_ne!(before, after, "fix changed the file");
-    // unused-let-binding drops the dead binding, then the style
-    // empty-let-in rule collapses the now-empty let, leaving the body.
     assert_eq!(after, "2", "body survives: {after}");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -221,17 +209,12 @@ fn fix_dry_run_does_not_write_and_shows_diff() {
         stdout.contains("would apply 1 fix(es)"),
         "dry-run says would-apply: {stdout}"
     );
-    // The reactive fix loop removes the dead binding (unused-let-binding)
-    // and then collapses the resulting empty let (empty-let-in), leaving
-    // only the body.
     assert!(
         stdout.contains("-let x = 1; in 2") && stdout.contains("+2"),
         "diff shown: {stdout}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
-
-// --- usage errors ---------------------------------------------------
 
 #[test]
 fn unknown_flag_is_an_error() {
@@ -250,8 +233,6 @@ fn unknown_command_is_an_error() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("error:"));
 }
 
-// --- ignore file ----------------------------------------------------
-
 #[test]
 fn ignore_file_prunes_subdir() {
     let dir = fixture("ignore");
@@ -268,8 +249,6 @@ fn ignore_file_prunes_subdir() {
     );
 }
 
-// --- directory walking ----------------------------------------------
-
 #[test]
 fn walk_counts_nested_files() {
     let out = run(&["check", fixture("walk").to_str().unwrap()]);
@@ -280,8 +259,6 @@ fn walk_counts_nested_files() {
         "both nested files linted: {stdout}"
     );
 }
-
-// --- bad path -------------------------------------------------------
 
 #[test]
 fn missing_path_is_an_error() {

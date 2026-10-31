@@ -36,10 +36,6 @@ fn fixable_following(following: Expr<'_>) -> bool {
     match following {
         Expr::Path(_) => true,
         Expr::String(s) => !s.parts().any(|part| matches!(part, StringPart::Interp(_))),
-        // Compound nodes (lambdas, applies, the whole rest) are either
-        // already a single expression we don't need to touch, or too
-        // risky to rewrite by spanning text; give the user the plain
-        // diagnostic with no auto-fix for them.
         _ => false,
     }
 }
@@ -86,25 +82,15 @@ impl Rule for BareImportInList {
                 if name.text(source) != "import" {
                     continue;
                 }
-                // A `import` that resolves to a binding is a shadowed
-                // local function the user defined, not Nix's builtin —
-                // then this list is their business. (Same shadow-guard
-                // shape as UnknownBuiltin's `builtins` check.)
                 if model.resolve(name).is_some() {
                     continue;
                 }
-                // Nothing follows in the list → nothing to import; the
-                // bare `import` is just a value, leave it alone.
                 let Some(following) = items.get(idx + 1) else {
                     continue;
                 };
                 let following = *following;
                 let mut diag = Diagnostic::new(self.code(), self.severity(), MESSAGE, name.range());
                 if fixable_following(following) {
-                    // Replace the span from the bare `import` token
-                    // through the end of the following item, reusing the
-                    // ORIGINAL following text inside a paren frame:
-                    // `(import <following>)`.
                     let range = TextRange::new(name.range().start(), following.range().end());
                     let replacement = format!("(import {})", following.text(source));
                     diag = diag.with_fix(

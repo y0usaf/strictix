@@ -78,8 +78,6 @@ impl Ty {
     }
 }
 
-// The order is Nix's argument order.  Only contracts for which a literal
-// mismatch is useful are listed; polymorphic arguments remain unconstrained.
 fn contracts(name: &str) -> &'static [Ty] {
     use Ty::*;
     match name {
@@ -133,8 +131,6 @@ fn builtin_name<'a>(
             Some((name.text(source), 0))
         }
         Expr::Ident(token) => {
-            // Bare builtin functions are globals, but a lexical binding or a
-            // `with` reference wins over that global.
             if !crate::static_binding::is_unshadowed(token, model)
                 || model
                     .references()
@@ -175,7 +171,6 @@ fn definitely_wrong(expr: Expr<'_>, expected: Ty, source: &str) -> bool {
             expr,
             Expr::Float(_) | Expr::String(_) | Expr::IndString(_) | Expr::List(_)
         ),
-        // Paths and attribute sets may be coerced to strings; leave them unknown.
         Ty::String => matches!(expr, Expr::Float(_) | Expr::Int(_) | Expr::List(_)),
         Ty::Function => definitely_non_function(expr, source),
     }

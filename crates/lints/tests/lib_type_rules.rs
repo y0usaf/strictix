@@ -94,8 +94,6 @@ fn let_bound_lib_is_a_custom_lib_and_stays_silent() {
 
 #[test]
 fn unbound_lib_still_flags() {
-    // Top-level bare `lib` (file evaluated with lib in scope) is
-    // treated as nixpkgs lib.
     let diagnostics = run("lib.types.string", Box::new(UnknownLibType {}));
     assert_eq!(diagnostics.len(), 1);
 }
@@ -121,9 +119,6 @@ fn inherited_types_from_let_bound_lib_is_silent() {
 
 #[test]
 fn inherit_from_lib_types_binds_members_not_the_set() {
-    // `inherit (lib.types) str` binds individual members; a later
-    // `str.whatever`-style use is a different shape entirely and a
-    // plain `inherit types;` proves nothing — both stay silent.
     assert!(run(
         "{ lib, ... }: let inherit (lib.types) str; in str",
         Box::new(UnknownLibType {}),

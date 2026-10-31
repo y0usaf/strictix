@@ -182,8 +182,6 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
             .collect()
     });
 
-    // Classify: files that read cleanly are linted; read errors go to
-    // stderr and force a failure exit.
     let mut any_error = false;
     let mut linted = 0usize;
     let mut total_diags = 0usize;
@@ -354,9 +352,6 @@ fn process_file(
     let mut write_error = None;
     let mut apply_error = None;
 
-    // Single engine path: `check` (fix_mode=false) is one read-only
-    // pass; `fix` (fix_mode=true) is the reactive loop. Diagnostics
-    // reported are the first pass's — what the user started with.
     let run =
         strictix_core::rules::lint_project(rules, &source, Some(path), config, fix_mode, project);
     let diagnostics = run.diagnostics;

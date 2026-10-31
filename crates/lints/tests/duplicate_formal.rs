@@ -49,11 +49,8 @@ fn one(rule: Box<dyn Rule>) -> Vec<Box<dyn Rule>> {
     vec![rule]
 }
 
-// --- positive cases --------------------------------------------------
-
 #[test]
 fn duplicate_formal_flags_repeated_name() {
-    // "{ a, a }: a" — the second `a` spans byte 5..6.
     assert_eq!(
         run("{ a, a }: a"),
         ["[duplicate-formal] error 5..6 duplicate formal argument 'a'"]
@@ -62,7 +59,6 @@ fn duplicate_formal_flags_repeated_name() {
 
 #[test]
 fn duplicate_formal_flags_defaulted_duplicate() {
-    // "{ pkgs, pkgs ? null }: pkgs" — the second `pkgs` spans 8..12.
     assert_eq!(
         run("{ pkgs, pkgs ? null }: pkgs"),
         ["[duplicate-formal] error 8..12 duplicate formal argument 'pkgs'"]
@@ -71,8 +67,6 @@ fn duplicate_formal_flags_defaulted_duplicate() {
 
 #[test]
 fn duplicate_formal_flags_each_repeat_after_first() {
-    // Three `a`s: the second and third occurrences are each flagged on
-    // their own name token.
     assert_eq!(
         run("{ a, a, a }: a"),
         [
@@ -97,11 +91,8 @@ fn duplicate_formal_carries_no_fix() {
         &mut diags,
     );
     assert_eq!(diags.len(), 1);
-    // Which occurrence to delete is ambiguous, so there is no auto-fix.
     assert!(diags[0].fix.is_none());
 }
-
-// --- clean cases ------------------------------------------------------
 
 #[test]
 fn duplicate_formal_clean_distinct_names() {
@@ -110,14 +101,11 @@ fn duplicate_formal_clean_distinct_names() {
 
 #[test]
 fn duplicate_formal_clean_default_is_not_a_name() {
-    // `a` appears only as the *default value* of `b`; the declared names
-    // are a and b, so there is no duplicate.
     assert_eq!(run("{ a, b ? a }: a"), Vec::<String>::new());
 }
 
 #[test]
 fn duplicate_formal_clean_ellipsis_adds_no_name() {
-    // The ellipsis is an open interface, not a declared name.
     assert_eq!(run("{ a, ... }: a"), Vec::<String>::new());
 }
 

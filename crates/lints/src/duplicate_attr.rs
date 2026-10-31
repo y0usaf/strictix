@@ -70,9 +70,6 @@ impl Rule for DuplicateAttribute {
         let source = model.source();
         for node in model.root().descendants() {
             match node.kind() {
-                // AttrsetExpr also covers rec attrsets: the parser nests
-                // an AttrsetExpr node under a RecAttrsetExpr, so walking
-                // this kind visits both the plain and the rec body.
                 K::AttrsetExpr => {
                     let Some(attrset) = AttrsetExpr::cast(node) else {
                         continue;
@@ -107,7 +104,7 @@ fn check_container<'a>(
                     continue;
                 };
                 let Some((path, range)) = static_attrpath(attrpath, source) else {
-                    continue; // dynamic path: cannot prove a collision
+                    continue;
                 };
                 let is_attrset_literal = matches!(
                     binding.value(),
@@ -116,10 +113,6 @@ fn check_container<'a>(
                 record(path, range, is_attrset_literal, false, &mut seen, diags);
             }
             AttrItem::Inherit(inherit) => {
-                // `inherit a;` binds the one-element path `a`; `inherit
-                // (x) a b;` binds `a` and `b` (the source `x` is not a
-                // binding). The inherited value is never a bare attrset
-                // literal here, so it can be a leaf in a prefix clash.
                 for name in inherit.names() {
                     record(
                         vec![name.text(source).to_string()],
@@ -153,14 +146,10 @@ fn static_attrpath<'a>(
                 path.push(token.text(source).to_string());
             }
             AttrName::Str(string) => {
-                // Interpolated string as a path element is dynamic.
                 if string.parts().any(|p| matches!(p, StringPart::Interp(_))) {
                     return None;
                 }
                 if first.is_none() {
-                    // A StringExpr node flushes leading trivia into its
-                    // range; the trimmed content range spans exactly the
-                    // opening quote through the closing quote.
                     first = Some(string.syntax().content_range());
                 }
                 path.push(decode_string(string, source));
@@ -182,27 +171,20 @@ fn record(
     diags: &mut Vec<Diagnostic>,
 ) {
     let mut message: Option<String> = None;
-    // (a) an identical full static path bound more than once.
     for prior in seen.iter() {
         if prior.path == path && !(prior.is_inherit && is_inherit) {
             message = Some(path.join("."));
             break;
         }
     }
-    // (b) a static path that is a strict prefix of another, when the
-    // leaf binding defines a value that is NOT a bare attrset literal.
     if message.is_none() {
         for prior in seen.iter() {
             if prior.path.len() < path.len() && path.starts_with(&prior.path) {
-                // The already-bound leaf (prefix) is earlier; only a
-                // non-attrset-literal leaf is a real collision in Nix.
                 if !prior.is_attrset_literal {
                     message = Some(prior.path.join("."));
                     break;
                 }
             } else if path.len() < prior.path.len() && prior.path.starts_with(&path) {
-                // This path is the leaf; a child was bound earlier. Only
-                // fire when this leaf is a value, not a mergeable attrset.
                 if !is_attrset_literal {
                     message = Some(path.join("."));
                     break;
@@ -210,7 +192,6 @@ fn record(
             }
         }
     }
-    // Remember the binding regardless, so a third occurrence reports too.
     if let Some(name) = message {
         diags.push(Diagnostic::new(
             "duplicate-attribute",

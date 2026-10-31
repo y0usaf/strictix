@@ -99,8 +99,6 @@ fn fix_result(source: &str, code: &str) -> String {
     apply_fixes(source, &fix.edits).expect("fix applies")
 }
 
-// --- empty-let-in ----------------------------------------------------
-
 #[test]
 fn empty_let_in_diag() {
     assert_eq!(
@@ -119,8 +117,6 @@ fn empty_let_in_fix_removes_let() {
     assert_eq!(fix_result("let in 1", "empty-let-in"), "1");
 }
 
-// --- manual-inherit --------------------------------------------------
-
 #[test]
 fn manual_inherit_diag() {
     assert_eq!(
@@ -138,8 +134,6 @@ fn manual_inherit_no_diag_for_distinct_names() {
 fn manual_inherit_fix_uses_inherit() {
     assert_eq!(fix_result("{ a = a; }", "manual-inherit"), "{ inherit a; }");
 }
-
-// --- manual-inherit-from ---------------------------------------------
 
 #[test]
 fn manual_inherit_from_diag() {
@@ -175,24 +169,16 @@ fn manual_inherit_from_static_multi_segment_fix() {
 
 #[test]
 fn manual_inherit_from_dynamic_select_no_diag() {
-    // `cfg.devices.${name}` is a dynamic select; the selected attribute
-    // path is not a static ident equal to the binding key, so the rule
-    // must NOT fire.
     assert!(run("{ dev = cfg.devices.${name}; }").is_empty());
 }
 
 #[test]
 fn manual_inherit_from_or_default_no_diag() {
-    // `x = foo.bar or default` is a SelectExpr with an `or` fallback;
-    // rewriting it to `inherit (foo) bar;` would silently drop the
-    // default, so the rule must NOT fire.
     assert!(run("{ x = foo.bar or null; }").is_empty());
 }
 
 #[test]
 fn manual_inherit_from_multiline_fix_preserves_newline() {
-    // The binding's node range includes the leading newline; the fix must
-    // not eat it (that would merge `let` + `inherit` into `letinherit`).
     assert_eq!(
         fix_result(
             "let\n  system = pkgs.stdenv.hostPlatform.system;\nin null",
@@ -201,8 +187,6 @@ fn manual_inherit_from_multiline_fix_preserves_newline() {
         "let\n  inherit (pkgs.stdenv.hostPlatform) system;\nin null",
     );
 }
-
-// --- collapsible-let-in ----------------------------------------------
 
 #[test]
 fn collapsible_let_in_diag() {
@@ -219,8 +203,6 @@ fn collapsible_let_in_fix_merges_bindings() {
         "let x = 1;  y = 2; in 3",
     );
 }
-
-// --- eta-reduction ---------------------------------------------------
 
 #[test]
 fn eta_reduction_diag() {
@@ -240,8 +222,6 @@ fn eta_reduction_fix() {
     assert_eq!(fix_result("x: f x", "eta-reduction"), "f");
 }
 
-// --- empty-pattern ---------------------------------------------------
-
 #[test]
 fn empty_pattern_diag() {
     assert_eq!(
@@ -260,8 +240,6 @@ fn empty_pattern_fix_uses_underscore() {
     assert_eq!(fix_result("{ ... }: 1", "empty-pattern"), "_: 1");
 }
 
-// --- redundant-pattern-bind ------------------------------------------
-
 #[test]
 fn redundant_pattern_bind_diag() {
     assert_eq!(
@@ -277,8 +255,6 @@ fn redundant_pattern_bind_fix_drops_formals() {
         "args: 1",
     );
 }
-
-// --- empty-inherit ---------------------------------------------------
 
 #[test]
 fn empty_inherit_diag() {
@@ -298,8 +274,6 @@ fn empty_inherit_fix_removes() {
     assert_eq!(fix_result("{ inherit; }", "empty-inherit"), "{ }");
 }
 
-// --- deprecated-to-path ----------------------------------------------
-
 #[test]
 fn deprecated_to_path_diag() {
     assert_eq!(
@@ -317,8 +291,6 @@ fn deprecated_to_path_no_fix() {
     assert!(diag.fix.is_none());
 }
 
-// --- useless-has-attr ------------------------------------------------
-
 #[test]
 fn useless_has_attr_diag() {
     assert_eq!(
@@ -334,8 +306,6 @@ fn useless_has_attr_fix_uses_or() {
         "x.a or 0",
     );
 }
-
-// --- singleton-list-concat ------------------------------------------
 
 #[test]
 fn singleton_list_concat_combines_lists() {
@@ -362,8 +332,6 @@ fn singleton_list_concat_reports_comments_without_fix() {
     assert!(diagnostics[0].fix.is_none());
 }
 
-// --- empty-list-concat -----------------------------------------------
-
 #[test]
 fn empty_list_concat_diag() {
     assert_eq!(
@@ -376,8 +344,6 @@ fn empty_list_concat_diag() {
 fn empty_list_concat_fix_drops_empty_list() {
     assert_eq!(fix_result("[] ++ x", "empty-list-concat"), "x");
 }
-
-// --- useless-parens --------------------------------------------------
 
 #[test]
 fn useless_parens_body_of_let_diag() {
@@ -400,8 +366,6 @@ fn useless_parens_general_case_preserves_space() {
     assert_eq!(fix_result("f (x)", "useless-parens"), "f x",);
 }
 
-// --- repeated-keys ---------------------------------------------------
-
 #[test]
 fn repeated_keys_diag() {
     assert_eq!(
@@ -417,8 +381,6 @@ fn repeated_keys_no_diag_for_two() {
 
 #[test]
 fn repeated_keys_no_diag_for_nested_prefix_merge() {
-    // Nix merges these bindings into one `finit.tasks."hermes-dirs"` attrset;
-    // repeating the prefix is intentional, not a flat-key style issue.
     assert!(run(r#"{
           finit.tasks."hermes-dirs".foo = 1;
           finit.tasks."hermes-dirs".bar = 2;
@@ -434,8 +396,6 @@ fn repeated_keys_still_flags_distinct_second_components() {
         vec!["[repeated-keys] warning 2..10 key `a` is repeated 3 times; consider nesting"],
     );
 }
-
-// --- unquoted-uri ----------------------------------------------------
 
 #[test]
 fn unquoted_uri_diag() {

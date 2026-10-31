@@ -68,7 +68,7 @@ impl Rule for IllTypedBinop {
             return;
         };
         let Some(op) = operator(op_kind) else {
-            return; // relational / lambda ops and everything else: skip
+            return;
         };
         let (Some(lhs), Some(rhs)) = (bin_expr.lhs(), bin_expr.rhs()) else {
             return;
@@ -89,8 +89,6 @@ impl Rule for IllTypedBinop {
             ),
             bin_expr.syntax().content_range(),
         );
-        // The one auto-fix: `+` on two plain (non-interpolated) strings
-        // collapses to their concatenation.
         if op == Operator::Plus {
             if let Some(fix) = concat_fix(lhs, rhs, source, node) {
                 diag = diag.with_fix(fix);
@@ -113,7 +111,6 @@ fn operator(kind: SyntaxKind) -> Option<Operator> {
         SlashSlash => Operator::Merge,
         AndAnd => Operator::AndAnd,
         OrOr => Operator::OrOr,
-        // EqEq, Neq, Lt, LtEq, Gt, GtEq, Arrow: skipped.
         _ => return None,
     })
 }
@@ -187,8 +184,6 @@ fn operand_type(expr: Expr<'_>, source: &str) -> Option<Lit> {
         Expr::Ident(t) => match t.text(source) {
             "true" | "false" => Lit::Bool,
             "null" => Lit::Null,
-            // An ordinary ident, application, select, let, and every
-            // other compound: not provably ill-typed.
             _ => return None,
         },
         _ => return None,
@@ -198,11 +193,9 @@ fn operand_type(expr: Expr<'_>, source: &str) -> Option<Lit> {
 /// Whether the operator must fire given the two literal types. `None`
 /// on either side never fires.
 fn should_fire(op: Operator, l: Option<Lit>, r: Option<Lit>) -> bool {
-    // `//` fires one-sided: a non-attrset literal can never merge, no
-    // matter what the other operand turns out to be.
     if op == Operator::Merge {
         if l.is_some_and(is_attr_like) || r.is_some_and(is_attr_like) {
-            return false; // `//` with an attrset is its whole purpose
+            return false;
         }
         return l.is_some_and(is_merge_bad) || r.is_some_and(is_merge_bad);
     }
@@ -211,38 +204,25 @@ fn should_fire(op: Operator, l: Option<Lit>, r: Option<Lit>) -> bool {
     };
     match op {
         Operator::Plus => {
-            // Path carve-out: path segment append is defined, so a
-            // path on either side wins.
             if l == Lit::Path || r == Lit::Path {
                 return false;
             }
-            // A string, list, or attrset on a side is provably wrong
-            // for `+` (the string+string case is still flagged; the
-            // concatenation fix is the point of the rule).
             is_string(l) || is_string(r) || is_attr_like(l) || is_attr_like(r)
         }
         Operator::Minus | Operator::Star | Operator::Slash => {
-            // `-`, `*`, `/`: a path operand is defined; skip.
             if l == Lit::Path || r == Lit::Path {
                 return false;
             }
             is_string(l) || is_string(r) || is_attr_like(l) || is_attr_like(r)
         }
         Operator::Concat => {
-            // `++` is list concat; both lists are fine. Any listed
-            // literal (string/int/float/attr/rec-attr/path) on a side
-            // is wrong, and so is a list against a non-list literal.
             if l == Lit::List && r == Lit::List {
-                return false; // legal list concat
+                return false;
             }
             is_concat_bad(l) || is_concat_bad(r)
         }
-        // Handled above (one-sided).
         Operator::Merge => unreachable!("merge is decided before the both-literal gate"),
         Operator::AndAnd | Operator::OrOr => {
-            // `&&`/`||` need booleans; any non-boolean literal on a side
-            // is a certain error (`true && x` is clean — an Ident may be
-            // a boolean variable).
             is_boolean_bad(l) || is_boolean_bad(r)
         }
     }
@@ -300,7 +280,7 @@ fn plain_string(expr: Expr<'_>, source: &str) -> Option<String> {
         return None;
     };
     if s.parts().any(|part| matches!(part, StringPart::Interp(_))) {
-        return None; // interpolation → no fix
+        return None;
     }
     let mut out = String::new();
     for part in s.parts() {

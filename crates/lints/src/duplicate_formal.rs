@@ -47,11 +47,6 @@ impl Rule for DuplicateFormal {
         let Some(formals) = Formals::cast(node) else {
             return;
         };
-        // The syntax library models each parameter as a name token plus
-        // an optional default expr; only the name token participates in
-        // the duplicate check. Names are Idents (the parser rejects
-        // quoted-string formals), so equality is exact token-text
-        // equality.
         let mut seen: Vec<&str> = Vec::new();
         for param in formals.params() {
             let name = param.name.text(source);

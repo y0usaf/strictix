@@ -174,7 +174,7 @@ fn walk_dir(
             .map_err(|e| format!("cannot stat {}: {e}", path.display()))?;
         if file_type.is_dir() {
             if ignore.matches(&rel_owned, true) {
-                continue; // prune the directory
+                continue;
             }
             walk_dir(&path, &rel_owned, ignore, out)?;
         } else if file_type.is_file() {

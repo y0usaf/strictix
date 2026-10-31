@@ -124,10 +124,9 @@ impl<'m, 'a> FileReads<'m, 'a> {
                 self.read_from(reference.name.range(), &[], ALIAS_DEPTH, out);
             }
         }
-        // `system.config.a.b`: the options of an evaluated configuration.
         for select in self.selects.values() {
             if matches!(select.base(), Some(Expr::Ident(t)) if t.text(source) == "config") {
-                continue; // a formal `config` was handled above
+                continue;
             }
             let Some(path) = select.attrpath() else {
                 continue;

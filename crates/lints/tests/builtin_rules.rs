@@ -50,8 +50,6 @@ fn builtin_rules() -> Vec<Box<dyn Rule>> {
     one(Box::new(UnknownBuiltin {}))
 }
 
-// --- undefined-variable ---------------------------------------------
-
 #[test]
 fn undefined_variable_flags_unbound_name() {
     let cfg = LintConfig::default();
@@ -63,8 +61,6 @@ fn undefined_variable_flags_unbound_name() {
 
 #[test]
 fn undefined_variable_offers_escape_fix_in_indented_string() {
-    // `'' text ${HOME} ''` — a shell variable meant literally inside an
-    // indented string. The escape fix rewrites `${HOME}` to `''${HOME}`.
     let source = "'' text ${HOME} ''";
     let tree = parse(source);
     let model = SemanticModel::new(source, &tree);
@@ -98,8 +94,6 @@ fn undefined_variable_offers_escape_fix_in_indented_string() {
 
 #[test]
 fn undefined_variable_no_fix_in_plain_string() {
-    // A normal double-quoted string has no safe generic fix, so the
-    // error still fires but no fix rides along.
     let source = "\"${HOME}\"";
     let tree = parse(source);
     let model = SemanticModel::new(source, &tree);
@@ -122,7 +116,6 @@ fn undefined_variable_no_fix_in_plain_string() {
 #[test]
 fn undefined_variable_clean_cases() {
     let cfg = LintConfig::default();
-    // with-provided name: resolves via the with fallback.
     assert_eq!(
         run(
             "let pkgs = 1; in with pkgs; hello",
@@ -131,34 +124,27 @@ fn undefined_variable_clean_cases() {
         ),
         Vec::<String>::new()
     );
-    // a select field is not a reference; builtins is a global.
     assert_eq!(
         run("builtins.attrNames {}", &undefined_rules(), cfg.clone()),
         Vec::<String>::new()
     );
-    // rec attr: mutually visible.
     assert_eq!(
         run("rec { x = 1; y = x; }", &undefined_rules(), cfg.clone()),
         Vec::<String>::new()
     );
-    // a straightforward let-bound name.
     assert_eq!(
         run("let a = 1; in a", &undefined_rules(), cfg.clone()),
         Vec::<String>::new()
     );
-    // lambda param used.
     assert_eq!(
         run("map (x: x) [1]", &undefined_rules(), cfg.clone()),
         Vec::<String>::new()
     );
-    // globals gate: map is a Nix global, x is a param.
     assert_eq!(
         run("\"hello ${map (x: x) [1]}\"", &undefined_rules(), cfg),
         Vec::<String>::new()
     );
 }
-
-// --- unknown-builtin ------------------------------------------------
 
 #[test]
 fn unknown_builtin_flags_filter_attrs() {
@@ -213,8 +199,6 @@ fn unknown_builtin_clean_for_real_builtins() {
 #[test]
 fn unknown_builtin_hasattr_probe_guard() {
     let cfg = LintConfig::default();
-    // `builtins ? fetchTree` is a feature probe (HasAttr), not a
-    // select; the actual `builtins.fetchTree` is a valid builtin.
     assert_eq!(
         run(
             "if builtins ? fetchTree then builtins.fetchTree {} else {}",
@@ -228,8 +212,6 @@ fn unknown_builtin_hasattr_probe_guard() {
 #[test]
 fn unknown_builtin_skips_shadowed_builtins() {
     let cfg = LintConfig::default();
-    // `builtins` is renamed (let-bound) here, so `builtins.foo` is a
-    // select off a real binding, not the constant — no diagnostic.
     assert_eq!(
         run("let builtins = 1; in builtins.foo", &builtin_rules(), cfg),
         Vec::<String>::new()
@@ -239,8 +221,6 @@ fn unknown_builtin_skips_shadowed_builtins() {
 #[test]
 fn unknown_builtin_skips_deep_attrpaths() {
     let cfg = LintConfig::default();
-    // `builtins.map.anything` — only the first hop (map) is a builtin;
-    // past the first hop is a user namespace, not this rule's business.
     assert_eq!(
         run("builtins.map.clearCache", &builtin_rules(), cfg),
         Vec::<String>::new()

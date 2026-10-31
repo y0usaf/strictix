@@ -202,8 +202,6 @@ impl Rule for UndefinedVariable {
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         for reference in model.references() {
-            // A lexical binding or an enclosing with covers the name;
-            // it is not undefined.
             if reference.resolved.is_some() || reference.via_with.is_some() {
                 continue;
             }
@@ -218,10 +216,6 @@ impl Rule for UndefinedVariable {
                 format!("undefined variable '{name}' in expression position is never bound"),
                 range,
             );
-            // Only inside an indented-string `${name}` is there a safe
-            // rewrite: escape it so the shell keeps the literal. A
-            // double-quoted string or plain expression has no generic
-            // fix, so none is offered.
             if let Some(interp_range) = indented_string_fix_range(model, range) {
                 let replacement = format!(
                     "''{}",
@@ -279,13 +273,9 @@ impl Rule for UnknownBuiltin {
             if base.text(source) != "builtins" {
                 continue;
             }
-            // A `builtins` that resolves to a binding is a shadowed
-            // name, not the constant — skip.
             if model.resolve(base).is_some() {
                 continue;
             }
-            // Only the single-hop form `builtins.<name>` is this rule's
-            // business; deeper attrpaths (`builtins.map.<Y>`) are not.
             let Some(attrpath) = select.attrpath() else {
                 continue;
             };

@@ -82,9 +82,6 @@ fn unwrap_parens(mut expr: Expr<'_>) -> Expr<'_> {
 /// name that could produce either at eval time. Conservative: any doubt
 /// counts as coercible, so the rule stays silent.
 fn attrset_may_coerce(set: AttrsetExpr<'_>, source: &str) -> bool {
-    // An unparseable entry (e.g. a leading dynamic name `${k} = v;`,
-    // which the parser recovers as an ErrorNode) is invisible to
-    // `items()`; it could bind anything, so nothing is proven.
     if set
         .syntax()
         .child_nodes()
@@ -108,9 +105,6 @@ fn attrset_may_coerce(set: AttrsetExpr<'_>, source: &str) -> bool {
                         }
                     }
                     AttrName::Str(string) => {
-                        // A quoted head with interpolation is dynamic;
-                        // a static one is compared by decoded value so
-                        // `"\outPath"` (= `outPath`) still counts.
                         if string.parts().any(|p| matches!(p, StringPart::Interp(_))) {
                             return true;
                         }
@@ -206,9 +200,6 @@ impl Rule for CoercedInterpolation {
             let Some(span) = interp_span(interp) else {
                 return;
             };
-            // Interpolation coerces only strings, paths, and attrsets
-            // carrying outPath/__toString; each arm below is a form the
-            // syntax alone proves uncoercible.
             let (what, help): (&str, &str) = match unwrap_parens(expr) {
                 Expr::Int(token) => {
                     let digits = token.text(source);
@@ -219,10 +210,6 @@ impl Rule for CoercedInterpolation {
                         span,
                     )
                     .with_help("splice the digits directly or wrap the value in toString");
-                    // `toString 5` is exactly "5", so splicing the
-                    // digits is value-preserving — except for a leading
-                    // zero (`007` evaluates to 7), where the raw text
-                    // and toString diverge, so no fix there.
                     if digits.len() == 1 || !digits.starts_with('0') {
                         diag = diag.with_fix(
                             Fix::new("splice the integer's digits into the string")
@@ -232,9 +219,6 @@ impl Rule for CoercedInterpolation {
                     diags.push(diag);
                     return;
                 }
-                // No fix for floats: `toString 1.5` is "1.500000", so
-                // splicing "1.5" and adding toString give different
-                // strings — the user's intent is ambiguous.
                 Expr::Float(_) => (
                     "a float literal",
                     "wrap the value in toString (note: toString renders floats with six decimals, e.g. \"1.500000\")",
@@ -255,8 +239,6 @@ impl Rule for CoercedInterpolation {
                 Expr::RecAttrset(rec) => {
                     let coercible = match rec.attrset() {
                         Some(set) => attrset_may_coerce(set, source),
-                        // A rec attrset with no recoverable inner set is
-                        // malformed; prove nothing, stay silent.
                         None => true,
                     };
                     if coercible {
@@ -272,11 +254,6 @@ impl Rule for CoercedInterpolation {
                     if !matches!(name, "true" | "false" | "null") {
                         return;
                     }
-                    // `true`/`false`/`null` are ordinary idents: a
-                    // lexical binding or an enclosing `with` makes the
-                    // name somebody's variable, whose value the syntax
-                    // cannot know. Only the global constants are proven
-                    // uncoercible.
                     let unbound = model
                         .references()
                         .iter()
@@ -335,9 +312,6 @@ impl Rule for RedundantInterpolation {
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         let source = model.source();
         for_each_string_interp(model.root(), |interp, indented| {
-            // Only a direct `${"..."}` with exactly one literal part:
-            // a nested interpolation means the wrapper does real work,
-            // and an empty string has no content token to splice.
             let Some(Expr::String(inner)) = interp.expr() else {
                 return;
             };
@@ -359,13 +333,6 @@ impl Rule for RedundantInterpolation {
                 span,
             )
             .with_help("splice the string's content directly into the outer string");
-            // The splice moves raw text between escaping contexts, so
-            // it is only offered when the text provably means the same
-            // thing in both: no `\` escape (indented strings do not
-            // process them), no `''` (indented-string terminator /
-            // escape introducer), no `${` (would become a new
-            // interpolation), and inside an indented string no `'` at
-            // all (a spliced quote could form `''` with a neighbor).
             let safe = !raw.contains('\\')
                 && !raw.contains("''")
                 && !raw.contains("${")

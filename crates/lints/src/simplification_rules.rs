@@ -52,31 +52,19 @@ impl Rule for BooleanIf {
         else {
             return;
         };
-        // Ownership exclusion: a literal true/false condition belongs to
-        // constant-if. Firing here too would attach a second fix to the
-        // same node and the two fixes would overlap.
         if bool_literal(cond, source).is_some() {
             return;
         }
         let then_lit = bool_literal(then_b, source);
         let else_lit = bool_literal(else_b, source);
-        // `if` slots are full-expression slots (Nix parses `if` at the
-        // lowest precedence level), so a `c || e` / `c && e` replacement
-        // is parse-safe bare; only the *operands* need the guard below.
         let rewrite = match (then_lit, else_lit) {
-            // if c then true else false  ->  c
             (Some(true), Some(false)) => {
                 Some((operand_text(cond, source), "replace with the condition"))
             }
-            // if c then false else true  ->  !c
             (Some(false), Some(true)) => Some((
                 format!("!{}", operand_text(cond, source)),
                 "replace with the negated condition",
             )),
-            // One literal branch, one definitely-boolean branch. The
-            // boolean proof matters: Nix `||`/`&&` force both sides to
-            // booleans, while an if-branch of any other type is legal,
-            // so rewriting a non-boolean branch would add a type error.
             (Some(true), None) if is_definitely_boolean(else_b, source) => Some((
                 format!(
                     "{} || {}",
@@ -123,11 +111,6 @@ impl Rule for BooleanIf {
             );
             return;
         }
-        // Identical branches: only same-kind atoms with identical text
-        // are compared (the Tautology approach), so `1` vs `1.0` or two
-        // structurally equal attrsets never match. No fix: inlining a
-        // branch skips forcing the condition, which changes error and
-        // divergence behavior.
         let same_kind = matches!(
             (then_b, else_b),
             (Expr::Ident(_), Expr::Ident(_)) | (Expr::Int(_), Expr::Int(_))
@@ -174,19 +157,12 @@ impl Rule for NegationSimplification {
         let Some(unary) = UnaryExpr::cast(node) else {
             return;
         };
-        // Only boolean `!`. The parser currently builds UnaryExpr for
-        // Bang alone, but check the token so a future arithmetic `-`
-        // unary never lands here by accident.
         if !node.child_tokens().any(|t| t.kind() == K::Bang) {
             return;
         }
         let Some(operand) = unary.operand() else {
             return;
         };
-        // Unwrap exactly one paren layer: `!` binds tighter than every
-        // comparison, so a negated comparison can only appear as
-        // `!(a == b)`, and Nix rejects `!!x` without parens — the single
-        // paren layer is the only shape these forms take.
         let inner = match operand {
             Expr::Paren(paren) => match paren.expr() {
                 Some(inner) => inner,
@@ -195,9 +171,6 @@ impl Rule for NegationSimplification {
             other => other,
         };
         match inner {
-            // !(!x) -> x. The inner operand sat in a unary slot, so it
-            // is atom/paren/select/apply-shaped and binds tighter than
-            // the outer UnaryExpr's own slot — safe to splice bare.
             Expr::Unary(inner_unary) => {
                 let Some(inner_operand) = inner_unary.operand() else {
                     return;
@@ -215,10 +188,6 @@ impl Rule for NegationSimplification {
                     ),
                 );
             }
-            // !(a op b) -> (a flipped-op b). Nix comparisons are total
-            // on comparable values (both sides throw identically on
-            // incomparable ones), so flipping the operator is an exact
-            // equivalence.
             Expr::Bin(binary) => {
                 let Some(op) = binary.op() else { return };
                 let flipped = match op {
@@ -233,9 +202,6 @@ impl Rule for NegationSimplification {
                 let (Some(lhs), Some(rhs)) = (binary.lhs(), binary.rhs()) else {
                     return;
                 };
-                // Ownership exclusion: identical same-kind atoms are
-                // tautology's finding (`x == x`); a second fix on the
-                // same text would overlap with its rewrite.
                 let same_kind = matches!(
                     (lhs, rhs),
                     (Expr::Ident(_), Expr::Ident(_)) | (Expr::Int(_), Expr::Int(_))
@@ -246,13 +212,6 @@ impl Rule for NegationSimplification {
                 if same_kind && same_text {
                     return;
                 }
-                // The replacement keeps the operand's parentheses:
-                // without a parent pointer we cannot prove the outer
-                // UnaryExpr is not itself a binop operand (`!(a == b) //
-                // c` or a non-associative comparison chain), and a bare
-                // comparison there would re-associate or fail to parse.
-                // `(a != b)` is precedence-inert at every slot `!(…)`
-                // could occupy.
                 let replacement = format!(
                     "({} {} {})",
                     trimmed_text(lhs, source),
@@ -307,8 +266,6 @@ impl Rule for TrivialLet {
         let Some(bindings) = let_expr.bindings() else {
             return;
         };
-        // Exactly one plain binding: any inherit or second entry means
-        // the let introduces more than the returned name.
         let mut items = bindings.items();
         let Some(AttrItem::Binding(binding)) = items.next() else {
             return;
@@ -319,9 +276,6 @@ impl Rule for TrivialLet {
         let Some(attrpath) = binding.attrpath() else {
             return;
         };
-        // A single bare-ident path only: `x.y = …` builds a nested
-        // attrset, and quoted or dynamic segments are not the plain
-        // name the body could repeat.
         let mut elements = attrpath.elements();
         let Some(AttrName::Ident(name_token)) = elements.next() else {
             return;
@@ -339,11 +293,6 @@ impl Rule for TrivialLet {
         let Some(value) = binding.value() else {
             return;
         };
-        // Let bindings are recursive, so a value mentioning its own name
-        // (`let x = f x; in x`) resolves that name to the binding, not
-        // the enclosing scope — splicing the value text out would
-        // rebind it. The token scan over-approximates (a select attr
-        // named `x` also matches), which only makes the rule quieter.
         if mentions_name(value, source, name) {
             return;
         }
