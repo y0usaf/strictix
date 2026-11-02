@@ -15,7 +15,8 @@ use strictix_core::{
     semantic::SemanticModel,
 };
 use strictix_syntax::{
-    AstNode, AttrItem, AttrName, AttrsetExpr, Expr, InterpExpr, StringPart, SyntaxKind, TextRange,
+    AstNode, AttrItem, AttrName, Attrpath, AttrsetExpr, Expr, InterpExpr, StringPart, SyntaxKind,
+    TextRange,
 };
 
 /// Visit every interpolation part of every string literal under
@@ -343,5 +344,78 @@ impl Rule for RedundantInterpolation {
             }
             diags.push(diag);
         });
+    }
+}
+
+pub struct RedundantQuotedAttr;
+
+impl Rule for RedundantQuotedAttr {
+    fn code(&self) -> &'static str {
+        "redundant-quoted-attr"
+    }
+
+    fn name(&self) -> &'static str {
+        "Redundant quoted attribute name"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags an attribute name written as `\"${...}\"` — quoting a lone interpolation adds nothing, since `${...}` produces the same attribute name."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let source = model.source();
+        for node in model.root().descendants() {
+            if node.kind() != SyntaxKind::Attrpath {
+                continue;
+            }
+            let Some(path) = Attrpath::cast(node) else {
+                continue;
+            };
+            for element in path.elements() {
+                let AttrName::Str(string) = element else {
+                    continue;
+                };
+                let mut parts = string.parts();
+                let Some(StringPart::Interp(interp)) = parts.next() else {
+                    continue;
+                };
+                if parts.next().is_some() {
+                    continue;
+                }
+                let children = string.syntax().children();
+                let Some(open) = children
+                    .iter()
+                    .find(|c| c.kind() == SyntaxKind::StringStart)
+                else {
+                    continue;
+                };
+                let Some(close) = children
+                    .iter()
+                    .rev()
+                    .find(|c| c.kind() == SyntaxKind::StringEnd)
+                else {
+                    continue;
+                };
+                let Some(inner) = interp_span(interp) else {
+                    continue;
+                };
+                let span = TextRange::new(open.range().start(), close.range().end());
+                let replacement = &source[inner.start() as usize..inner.end() as usize];
+                diags.push(
+                    Diagnostic::new(
+                        self.code(),
+                        self.severity(),
+                        "`\"${...}\"` quotes a lone interpolation; `${...}` is the same attribute name",
+                        span,
+                    )
+                    .with_help("drop the quotes around the interpolation")
+                    .with_fix(Fix::new("unquote the interpolated attribute name").edit(span, replacement)),
+                );
+            }
+        }
     }
 }

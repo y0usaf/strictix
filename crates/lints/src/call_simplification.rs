@@ -15,8 +15,8 @@ use strictix_core::{
     semantic::{BindingKind, SemanticModel},
 };
 use strictix_syntax::{
-    ApplyExpr, AstNode, AttrItem, AttrName, Expr, IfExpr, LambdaParam, StringExpr, StringPart,
-    SyntaxKind, SyntaxNode, TextRange,
+    ApplyExpr, AstNode, AttrItem, AttrName, Expr, IfExpr, InheritStmt, LambdaParam, StringExpr,
+    StringPart, SyntaxKind, SyntaxNode, TextRange,
 };
 
 use SyntaxKind as K;
@@ -760,6 +760,121 @@ impl Rule for ManualGenAttrs {
                     range,
                 )
                 .with_fix(Fix::new("rewrite with lib.genAttrs").edit(range, replacement)),
+            );
+        });
+    }
+}
+
+fn is_lib_remove_suffix(model: &SemanticModel<'_>, callee: Expr<'_>) -> bool {
+    let source = model.source();
+    match callee {
+        Expr::Ident(tok) => {
+            if tok.text(source) != "removeSuffix" {
+                return false;
+            }
+            let Some(binding) = model.resolve(tok) else {
+                return false;
+            };
+            model
+                .root()
+                .descendants()
+                .filter_map(InheritStmt::cast)
+                .any(|stmt| {
+                    stmt.names().any(|n| n.range() == binding.name.range())
+                        && stmt.source().is_some_and(|s| {
+                            matches!(trimmed_text(s, source), "lib" | "lib.strings")
+                        })
+                })
+        }
+        Expr::Select(sel) => {
+            let Some(Expr::Ident(base)) = sel.base() else {
+                return false;
+            };
+            if base.text(source) != "lib" || sel.default().is_some() {
+                return false;
+            }
+            let Some(attrpath) = sel.attrpath() else {
+                return false;
+            };
+            let names: Vec<&str> = attrpath
+                .elements()
+                .map(|e| match e {
+                    AttrName::Ident(t) => t.text(source),
+                    _ => "",
+                })
+                .collect();
+            matches!(
+                names.as_slice(),
+                ["removeSuffix"] | ["strings", "removeSuffix"]
+            )
+        }
+        _ => false,
+    }
+}
+
+pub struct ManualFileContents;
+
+impl Rule for ManualFileContents {
+    fn code(&self) -> &'static str {
+        "manual-file-contents"
+    }
+
+    fn name(&self) -> &'static str {
+        "Manual fileContents"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags `lib.removeSuffix \"\\n\" (builtins.readFile f)` when `lib` is in scope; nixpkgs defines `lib.fileContents f` as exactly that."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let source = model.source();
+        let mut ancestors: Vec<&SyntaxNode> = Vec::new();
+        walk(model.root(), &mut ancestors, &mut |node, ancestors| {
+            let Some(outer) = ApplyExpr::cast(node) else {
+                return;
+            };
+            let Some(Expr::Apply(inner)) = outer.func() else {
+                return;
+            };
+            let Some(callee) = inner.func() else {
+                return;
+            };
+            if !is_lib_remove_suffix(model, callee) {
+                return;
+            }
+            let Some(Expr::String(suffix)) = inner.arg().map(unwrap_paren) else {
+                return;
+            };
+            if plain_string_inner(suffix, source) != Some("\\n") {
+                return;
+            }
+            let Some(Expr::Apply(read)) = outer.arg().map(unwrap_paren) else {
+                return;
+            };
+            let Some(file) = one_arg_call(model, read.syntax(), "readFile") else {
+                return;
+            };
+            if !model.is_bound("lib", node.content_range().start()) {
+                return;
+            }
+            let mut replacement = format!("lib.fileContents {}", argument_text(file, source));
+            if parent_requires_parens(ancestors) {
+                replacement = format!("({replacement})");
+            }
+            let range = node.content_range();
+            diags.push(
+                Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    "this removeSuffix/readFile pair is lib.fileContents",
+                    range,
+                )
+                .with_fix(Fix::new("rewrite with lib.fileContents").edit(range, replacement)),
             );
         });
     }

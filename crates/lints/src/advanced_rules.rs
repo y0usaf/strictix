@@ -3,11 +3,13 @@
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
+    fix::Fix,
     rules::Rule,
     semantic::SemanticModel,
 };
 use strictix_syntax::{
-    ApplyExpr, AstNode, AttrItem, Expr, IfExpr, ListExpr, RecAttrsetExpr, SyntaxKind,
+    ApplyExpr, AstNode, AttrItem, AttrName, Expr, IfExpr, InheritStmt, ListExpr, RecAttrsetExpr,
+    SyntaxKind, SyntaxToken, TextRange, WithExpr,
 };
 
 fn is_trackable_flake_input(raw: &str) -> bool {
@@ -124,26 +126,135 @@ impl Rule for UnsafeWithShadowing {
         "Unsafe with shadowing"
     }
     fn description(&self) -> &'static str {
-        "Flags names resolved through with, because their meaning depends on the runtime attribute set."
+        "Flags names resolved through with, because their meaning depends on the runtime attribute set. Fixes a non-nested `with S;` over an identifier or static select chain by removing it and prefixing each with-resolved name with `S.`."
     }
     fn severity(&self) -> Severity {
         Severity::Warning
     }
     fn check_file(&self, m: &SemanticModel, _: &LintConfig, d: &mut Vec<Diagnostic>) {
+        let mut seen = vec![false; m.with_sites().len()];
         for r in m.references() {
-            if r.via_with.is_some() {
-                d.push(Diagnostic::new(
-                    self.code(),
-                    self.severity(),
-                    format!(
-                        "reference '{}' depends on a with-scope",
-                        r.name.text(m.source())
-                    ),
-                    r.name.range(),
-                ));
+            let Some(site) = r.via_with else {
+                continue;
+            };
+            let diagnostic = Diagnostic::new(
+                self.code(),
+                self.severity(),
+                format!(
+                    "reference '{}' depends on a with-scope",
+                    r.name.text(m.source())
+                ),
+                r.name.range(),
+            );
+            if std::mem::replace(&mut seen[site], true) {
+                d.push(diagnostic);
+                continue;
+            }
+            d.push(match with_removal_fix(m, site) {
+                Some(fix) => diagnostic.with_fix(fix),
+                None => diagnostic,
+            });
+        }
+    }
+}
+
+fn static_scope_chain<'a>(e: Expr<'a>, s: &str) -> Option<(&'a SyntaxToken, String)> {
+    match e {
+        Expr::Ident(t) => Some((t, t.text(s).to_string())),
+        Expr::Select(select) if select.default().is_none() => {
+            let (root, mut text) = static_scope_chain(select.base()?, s)?;
+            for element in select.attrpath()?.elements() {
+                let AttrName::Ident(t) = element else {
+                    return None;
+                };
+                let name = t.text(s);
+                if t.kind() != SyntaxKind::Ident || !is_bare_attr_name(name) {
+                    return None;
+                }
+                text.push('.');
+                text.push_str(name);
+            }
+            Some((root, text))
+        }
+        _ => None,
+    }
+}
+
+fn is_bare_attr_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '\'' | '-'))
+        && name != "or"
+}
+
+fn with_removal_fix(m: &SemanticModel, site: usize) -> Option<Fix> {
+    let s = m.source();
+    let sites = m.with_sites();
+    let range = sites[site].scope_range;
+    if sites.iter().enumerate().any(|(j, w)| {
+        j != site && w.scope_range.start() < range.end() && range.start() < w.scope_range.end()
+    }) {
+        return None;
+    }
+    let with_expr = m
+        .root()
+        .descendants()
+        .filter_map(WithExpr::cast)
+        .find(|w| w.range() == range)?;
+    let body = with_expr.body()?;
+    let (root, prefix) = static_scope_chain(with_expr.scope()?, s)?;
+    let start = with_expr.syntax().content_range().start();
+    let body_start = body.content_range().start();
+    let gap = &s[start as usize..body_start as usize];
+    if gap.contains('#') || gap.contains("/*") {
+        return None;
+    }
+    let root_name = root.text(s);
+    let root_binding = m.resolve_lexical(root_name, start).map(|b| b.name.range());
+    for inherit in with_expr
+        .syntax()
+        .descendants()
+        .filter_map(InheritStmt::cast)
+    {
+        if inherit.source().is_some() || inherit.range().start() < body_start {
+            continue;
+        }
+        for name in inherit.names() {
+            let text = name.text(s);
+            let binding = m.resolve_lexical(text, name.range().start()).and_then(|b| {
+                if b.name.range() == name.range() {
+                    m.outer_shadow(b)
+                } else {
+                    Some(b)
+                }
+            });
+            if binding.is_none() && !crate::reference_rules::is_global(text) {
+                return None;
             }
         }
     }
+    let mut fix = Fix::new(format!(
+        "replace `with {prefix};` with explicit `{prefix}.` selects"
+    ))
+    .edit(TextRange::new(start, body_start), "");
+    for r in m.references().iter().filter(|r| r.via_with == Some(site)) {
+        let name = r.name.text(s);
+        if crate::reference_rules::is_global(name) {
+            continue;
+        }
+        if name.starts_with("__")
+            || !is_bare_attr_name(name)
+            || m.resolve_lexical(root_name, r.name.range().start())
+                .map(|b| b.name.range())
+                != root_binding
+        {
+            return None;
+        }
+        fix = fix.edit(r.name.range(), format!("{prefix}.{name}"));
+    }
+    Some(fix)
 }
 
 pub struct DynamicImport;

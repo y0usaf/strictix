@@ -222,9 +222,7 @@ fn should_fire(op: Operator, l: Option<Lit>, r: Option<Lit>) -> bool {
             is_concat_bad(l) || is_concat_bad(r)
         }
         Operator::Merge => unreachable!("merge is decided before the both-literal gate"),
-        Operator::AndAnd | Operator::OrOr => {
-            is_boolean_bad(l) || is_boolean_bad(r)
-        }
+        Operator::AndAnd | Operator::OrOr => is_boolean_bad(l) || is_boolean_bad(r),
     }
 }
 

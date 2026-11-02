@@ -25,6 +25,7 @@ pub mod lib_type_rules;
 pub mod missing_attribute;
 pub mod missing_function_argument;
 pub mod module_rules;
+pub mod never_enabled_option;
 pub mod node_rules;
 pub mod non_boolean_condition;
 pub mod non_callable_application;
@@ -50,8 +51,8 @@ use builtin_value_rules::{
     InvalidBuiltinRange, InvalidListToAttrsEntry, ReplaceStringsLengthMismatch,
 };
 use call_simplification::{
-    DeprecatedIsNull, ManualGenAttrs, ManualGetattr, ManualHasattr, ManualOptional,
-    OptionalListArgument,
+    DeprecatedIsNull, ManualFileContents, ManualGenAttrs, ManualGetattr, ManualHasattr,
+    ManualOptional, OptionalListArgument,
 };
 use cognitive_complexity::CognitiveComplexity;
 use duplicate_attr::DuplicateAttribute;
@@ -65,12 +66,13 @@ use file_rules::{
 };
 use ill_typed_binop::IllTypedBinop;
 use ill_typed_unary_op::IllTypedUnaryOp;
-use interpolation_rules::{CoercedInterpolation, RedundantInterpolation};
+use interpolation_rules::{CoercedInterpolation, RedundantInterpolation, RedundantQuotedAttr};
 use invalid_list_access::InvalidListAccess;
 use lib_type_rules::{DiscouragedLibType, UnknownLibType};
 use missing_attribute::MissingAttribute;
 use missing_function_argument::MissingFunctionArgument;
 use module_rules::{ConfigDependentImports, MixedModuleSyntax};
+use never_enabled_option::NeverEnabledOption;
 use node_rules::{AssertTrue, ConstantIf, ConstantIfBranches, Tautology};
 use non_boolean_condition::NonBooleanCondition;
 use non_callable_application::NonCallableApplication;
@@ -140,8 +142,10 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         UnknownBuiltin,
         UnknownOption,
         UnusedOption,
+        NeverEnabledOption,
         DiscouragedLibType,
         ManualGenAttrs,
+        ManualFileContents,
         EmptyLetIn,
         ManualInherit,
         ManualInheritFrom,
@@ -179,6 +183,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         ReboundConstant,
         CoercedInterpolation,
         RedundantInterpolation,
+        RedundantQuotedAttr,
         DanglingPath,
         AccidentalPathDivision,
         SearchPathReference,

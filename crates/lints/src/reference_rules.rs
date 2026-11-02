@@ -172,7 +172,7 @@ const VALID_BUILTINS: &[&str] = &[
 
 /// Whether `name` is the Nix `builtins` constant or one of the values
 /// it exposes in scope implicitly — a reference never flags these.
-fn is_global(name: &str) -> bool {
+pub(crate) fn is_global(name: &str) -> bool {
     NIX_GLOBALS.contains(&name)
 }
 

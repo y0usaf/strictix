@@ -92,7 +92,6 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-
     /// Kind of the next significant (non-trivia) token.
     fn current(&self) -> SyntaxKind {
         self.tokens[self.pos..]
