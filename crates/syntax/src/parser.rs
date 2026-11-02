@@ -272,12 +272,14 @@ impl<'a> Parser<'a> {
             if lbp < min_bp {
                 break;
             }
-            let kind = if self.current() == K::Question {
-                K::HasAttrExpr
-            } else {
-                K::BinExpr
-            };
-            self.start_at(checkpoint, kind);
+            if self.current() == K::Question {
+                self.start_at(checkpoint, K::HasAttrExpr);
+                self.bump();
+                self.parse_attrpath();
+                self.finish();
+                continue;
+            }
+            self.start_at(checkpoint, K::BinExpr);
             self.bump();
             let rbp = if right_assoc { lbp } else { lbp + 1 };
             self.parse_expr_bp(rbp);

@@ -772,14 +772,7 @@ impl<'a> Builder<'a> {
                 if let Some(base) = has_attr.base() {
                     self.walk_expr(base);
                 }
-                if let Some(attr_expr) = has_attr.attrpath() {
-                    match attr_expr {
-                        Expr::String(s) => self.walk_string_parts(s.parts()),
-                        Expr::IndString(s) => self.walk_string_parts(s.parts()),
-                        Expr::Select(s) => self.walk_attrpath_interps(s.attrpath()),
-                        _ => {}
-                    }
-                }
+                self.walk_attrpath_interps(has_attr.attrpath());
             }
             Expr::String(string) => self.walk_string_parts(string.parts()),
             Expr::IndString(string) => self.walk_string_parts(string.parts()),

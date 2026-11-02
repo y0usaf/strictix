@@ -623,11 +623,9 @@ impl<'a> HasAttrExpr<'a> {
         first_expr(self.syntax())
     }
 
-    /// The attribute path on the right, parsed as an expression
-    /// (an ident, a string, or a select chain for dotted paths).
     #[must_use]
-    pub fn attrpath(&self) -> Option<Expr<'a>> {
-        last_expr(self.syntax())
+    pub fn attrpath(&self) -> Option<Attrpath<'a>> {
+        self.syntax().child_node(K::Attrpath).map(Attrpath)
     }
 }
 

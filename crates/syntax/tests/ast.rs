@@ -556,7 +556,7 @@ fn has_attr() {
         panic!()
     };
     assert_eq!(h.base().unwrap().text(src), "config");
-    assert_eq!(h.attrpath().unwrap().text(src), "services");
+    assert_eq!(h.attrpath().unwrap().syntax().text(src).trim(), "services");
 }
 
 #[test]

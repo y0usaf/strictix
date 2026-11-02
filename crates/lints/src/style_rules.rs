@@ -529,7 +529,9 @@ impl Rule for UselessHasAttr {
         if !matches!(then_branch, Expr::Select(_)) {
             return;
         }
-        let expected = format!("{}.{}", set.text(source), attrpath.text(source));
+        let path = attrpath.syntax().content_range();
+        let path = &source[path.start() as usize..path.end() as usize];
+        let expected = format!("{}.{path}", set.text(source));
         if then_branch.text(source).trim() != expected {
             return;
         }
