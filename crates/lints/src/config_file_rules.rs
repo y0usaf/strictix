@@ -3,6 +3,7 @@ use std::path::{Component, Path, PathBuf};
 
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
+use strictix_core::json::JsonValue;
 use strictix_core::project::ProjectContext;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::SemanticModel;
@@ -501,151 +502,8 @@ fn is_ini(body: &str) -> bool {
     !sections.is_empty()
 }
 
-struct Json<'a> {
-    bytes: &'a [u8],
-    at: usize,
-}
-
-impl Json<'_> {
-    fn space(&mut self) {
-        while self.bytes.get(self.at).is_some_and(u8::is_ascii_whitespace) {
-            self.at += 1;
-        }
-    }
-
-    fn eat(&mut self, byte: u8) -> bool {
-        self.space();
-        let hit = self.bytes.get(self.at) == Some(&byte);
-        if hit {
-            self.at += 1;
-        }
-        hit
-    }
-
-    fn literal(&mut self, word: &[u8]) -> bool {
-        let hit = self.bytes[self.at..].starts_with(word);
-        if hit {
-            self.at += word.len();
-        }
-        hit
-    }
-
-    fn digits(&mut self) -> usize {
-        let start = self.at;
-        while self.bytes.get(self.at).is_some_and(u8::is_ascii_digit) {
-            self.at += 1;
-        }
-        self.at - start
-    }
-
-    fn number(&mut self) -> bool {
-        if self.bytes.get(self.at) == Some(&b'-') {
-            self.at += 1;
-        }
-        let leading_zero = self.bytes.get(self.at) == Some(&b'0');
-        let integer = self.digits();
-        if integer == 0 || (leading_zero && integer > 1) {
-            return false;
-        }
-        if self.bytes.get(self.at) == Some(&b'.') {
-            self.at += 1;
-            if self.digits() == 0 {
-                return false;
-            }
-        }
-        if matches!(self.bytes.get(self.at), Some(b'e' | b'E')) {
-            self.at += 1;
-            if matches!(self.bytes.get(self.at), Some(b'+' | b'-')) {
-                self.at += 1;
-            }
-            if self.digits() == 0 {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn string(&mut self) -> bool {
-        if !self.eat(b'"') {
-            return false;
-        }
-        while let Some(&byte) = self.bytes.get(self.at) {
-            self.at += 1;
-            match byte {
-                b'"' => return true,
-                b'\\' => {
-                    let Some(&escape) = self.bytes.get(self.at) else {
-                        return false;
-                    };
-                    self.at += 1;
-                    if escape == b'u' {
-                        let hex = self.bytes.get(self.at..self.at + 4);
-                        if !hex.is_some_and(|h| h.iter().all(u8::is_ascii_hexdigit)) {
-                            return false;
-                        }
-                        self.at += 4;
-                    } else if !b"\"\\/bfnrt".contains(&escape) {
-                        return false;
-                    }
-                }
-                0..=0x1f => return false,
-                _ => {}
-            }
-        }
-        false
-    }
-
-    fn sequence(&mut self, close: u8, mut item: impl FnMut(&mut Self) -> bool) -> bool {
-        if self.eat(close) {
-            return true;
-        }
-        loop {
-            if !item(self) {
-                return false;
-            }
-            if self.eat(close) {
-                return true;
-            }
-            if !self.eat(b',') {
-                return false;
-            }
-        }
-    }
-
-    fn object(&mut self) -> bool {
-        self.eat(b'{')
-            && self.sequence(b'}', |json| json.string() && json.eat(b':') && json.value())
-    }
-
-    fn value(&mut self) -> bool {
-        self.space();
-        match self.bytes.get(self.at) {
-            Some(b'{') => self.object(),
-            Some(b'[') => {
-                self.at += 1;
-                self.sequence(b']', Self::value)
-            }
-            Some(b'"') => self.string(),
-            Some(b't') => self.literal(b"true"),
-            Some(b'f') => self.literal(b"false"),
-            Some(b'n') => self.literal(b"null"),
-            Some(b'-' | b'0'..=b'9') => self.number(),
-            _ => false,
-        }
-    }
-}
-
 fn is_json_object(body: &str) -> bool {
-    let mut json = Json {
-        bytes: body.as_bytes(),
-        at: 0,
-    };
-    json.space();
-    if json.bytes.get(json.at) != Some(&b'{') || !json.object() {
-        return false;
-    }
-    json.space();
-    json.at == json.bytes.len()
+    matches!(JsonValue::parse(body), Ok(JsonValue::Object(_)))
 }
 
 fn text_body(value: Expr<'_>, source: &str, format: Format) -> Option<String> {
