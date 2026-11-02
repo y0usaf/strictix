@@ -96,12 +96,15 @@ fn render(node: &Node, indent: &str, depth: usize, out: &mut String) {
 pub(crate) fn ini(body: &str, interps: &[Interp<'_>], indent: &str) -> Option<String> {
     let mut interps = interps.iter();
     let mut sections: Vec<(String, Node)> = Vec::new();
+    let mut names: Vec<&str> = Vec::new();
     for line in body.lines().map(str::trim) {
         if line.is_empty() {
             continue;
         }
         if let Some(header) = line.strip_prefix('[') {
-            sections.push((attr_name(header.strip_suffix(']')?)?, Node::Set(Vec::new())));
+            let name = header.strip_suffix(']')?;
+            names.push(name);
+            sections.push((attr_name(name)?, Node::Set(Vec::new())));
             continue;
         }
         let (key, value) = line.split_once('=')?;
@@ -112,6 +115,7 @@ pub(crate) fn ini(body: &str, interps: &[Interp<'_>], indent: &str) -> Option<St
         }
     }
     interps.next().is_none().then_some(())?;
+    names.windows(2).all(|w| w[0] < w[1]).then_some(())?;
     let mut out = String::from("lib.generators.toINI { } ");
     render(&Node::Set(sections), indent, 0, &mut out);
     Some(out)
