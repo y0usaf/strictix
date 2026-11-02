@@ -11,6 +11,7 @@ pub mod builtin_argument_type;
 pub mod builtin_value_rules;
 pub mod call_simplification;
 pub mod cognitive_complexity;
+pub mod config_file_rules;
 pub mod duplicate_attr;
 pub mod duplicate_formal;
 pub mod duplicate_inherit;
@@ -55,6 +56,7 @@ use call_simplification::{
     ManualOptional, OptionalListArgument,
 };
 use cognitive_complexity::CognitiveComplexity;
+use config_file_rules::{HandWrittenConfig, MaskedGenerator};
 use duplicate_attr::DuplicateAttribute;
 use duplicate_formal::DuplicateFormal;
 use duplicate_inherit::DuplicateInherit;
@@ -202,5 +204,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         ManualOptional,
         OptionalListArgument,
         SingletonOptionals,
+        MaskedGenerator,
+        HandWrittenConfig,
     }
 }
