@@ -514,6 +514,8 @@ impl<'a> Parser<'a> {
             } else if self.current() == K::InterpStart {
                 self.parse_interp();
             } else {
+                self.start(K::ErrorNode);
+                self.finish();
                 break;
             }
             if self.current() != K::Dot {

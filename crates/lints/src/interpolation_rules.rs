@@ -359,7 +359,7 @@ impl Rule for RedundantQuotedAttr {
     }
 
     fn description(&self) -> &'static str {
-        "Flags an attribute name written as `\"${...}\"` — quoting a lone interpolation adds nothing, since `${...}` produces the same attribute name."
+        "Flags an attribute name written as `\"${...}\"`: when the interpolated value is a string, `${...}` names the same attribute without the quotes. No automatic fix, because the quoted form also coerces sets with `__toString` or `outPath`, which `${...}` rejects."
     }
 
     fn severity(&self) -> Severity {
@@ -367,7 +367,6 @@ impl Rule for RedundantQuotedAttr {
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
-        let source = model.source();
         for node in model.root().descendants() {
             if node.kind() != SyntaxKind::Attrpath {
                 continue;
@@ -380,7 +379,7 @@ impl Rule for RedundantQuotedAttr {
                     continue;
                 };
                 let mut parts = string.parts();
-                let Some(StringPart::Interp(interp)) = parts.next() else {
+                let Some(StringPart::Interp(_)) = parts.next() else {
                     continue;
                 };
                 if parts.next().is_some() {
@@ -400,20 +399,15 @@ impl Rule for RedundantQuotedAttr {
                 else {
                     continue;
                 };
-                let Some(inner) = interp_span(interp) else {
-                    continue;
-                };
                 let span = TextRange::new(open.range().start(), close.range().end());
-                let replacement = &source[inner.start() as usize..inner.end() as usize];
                 diags.push(
                     Diagnostic::new(
                         self.code(),
                         self.severity(),
-                        "`\"${...}\"` quotes a lone interpolation; `${...}` is the same attribute name",
+                        "`\"${...}\"` quotes a lone interpolation; for a string value `${...}` is the same attribute name",
                         span,
                     )
-                    .with_help("drop the quotes around the interpolation")
-                    .with_fix(Fix::new("unquote the interpolated attribute name").edit(span, replacement)),
+                    .with_help("drop the quotes if the value is always a string"),
                 );
             }
         }
