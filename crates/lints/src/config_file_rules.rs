@@ -3,6 +3,7 @@ use std::path::{Component, Path, PathBuf};
 
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
+use strictix_core::fix::Fix;
 use strictix_core::json::JsonValue;
 use strictix_core::project::ProjectContext;
 use strictix_core::rules::Rule;
@@ -12,6 +13,7 @@ use strictix_syntax::{
     SyntaxKind, TextRange,
 };
 
+use crate::config_text_generator::{self, Interp, SENTINEL};
 use crate::schema::{callee_name, unwrap_parens};
 
 const RESERVED_HEADS: [&str; 5] = ["imports", "options", "_module", "disabledModules", "key"];
@@ -506,31 +508,72 @@ fn is_json_object(body: &str) -> bool {
     matches!(JsonValue::parse(body), Ok(JsonValue::Object(_)))
 }
 
-fn text_body(value: Expr<'_>, source: &str, format: Format) -> Option<String> {
+struct TextBody<'a> {
+    detect: String,
+    body: String,
+    interps: Vec<Interp<'a>>,
+    range: TextRange,
+    parens: bool,
+    escaped: bool,
+}
+
+fn text_body<'a>(value: Expr<'a>, source: &'a str, format: Format) -> Option<TextBody<'a>> {
     let mut value = value;
+    let mut nested = false;
     while let Some(items) = wrapped(value, source) {
         let [item] = items.as_slice() else {
             return None;
         };
         value = *item;
+        nested = true;
     }
+    let parens = nested && !matches!(value, Expr::Paren(_));
     let Expr::IndString(string) = unwrap_parens(value) else {
         return None;
     };
-    let mut body = String::new();
+    let mut text = TextBody {
+        detect: String::new(),
+        body: String::new(),
+        interps: Vec::new(),
+        range: unwrap_parens(value).content_range(),
+        parens,
+        escaped: false,
+    };
+    let mut dollar = false;
     for part in string.parts() {
         match part {
             StringPart::Content(token) => {
-                let text = token.text(source);
-                if text.contains("''") {
-                    return None;
-                }
-                body.push_str(text);
+                let content = token.text(source);
+                dollar = content.ends_with('$');
+                text.escaped |= content.contains("''") || content.contains(SENTINEL);
+                text.detect.push_str(content);
+                text.body.push_str(content);
             }
-            StringPart::Interp(_) => body.push_str(format.placeholder()),
+            StringPart::Interp(interp) => {
+                text.escaped |= std::mem::take(&mut dollar);
+                text.detect.push_str(format.placeholder());
+                text.body.push(SENTINEL);
+                text.interps.push(Interp {
+                    full: interp.syntax().text(source),
+                    json: interp
+                        .expr()
+                        .and_then(|expr| to_json_argument(expr, source)),
+                });
+            }
         }
     }
-    Some(body)
+    Some(text)
+}
+
+fn to_json_argument<'a>(expr: Expr<'a>, source: &'a str) -> Option<&'a str> {
+    let Expr::Apply(apply) = unwrap_parens(expr) else {
+        return None;
+    };
+    let text = |expr: Expr<'_>| {
+        let range = expr.content_range();
+        &source[range.start() as usize..range.end() as usize]
+    };
+    (text(apply.func()?) == "builtins.toJSON").then_some(text(apply.arg()?))
 }
 
 fn text_bindings<'a>(value: Expr<'a>, source: &str, out: &mut Vec<(Expr<'a>, TextRange)>) {
@@ -578,7 +621,7 @@ impl Rule for HandWrittenConfig {
     }
 
     fn description(&self) -> &'static str {
-        "Flags a file entry's `text` written as an indented string that parses entirely as the format its name declares: `.ini` (and `.list`/`.conf`/`.desktop` bodies) made only of `[section]` headers and `key=value` lines with no comments or duplicate keys, or `.json` bodies that parse as a JSON object with each interpolation treated as an opaque scalar. Such text is a Nix value spelled by hand; generate it with `lib.generators.toINI {}`, `builtins.toJSON` or `pkgs.formats.*` instead."
+        "Flags a file entry's `text` written as an indented string that parses entirely as the format its name declares: `.ini` (and `.list`/`.conf`/`.desktop` bodies) made only of `[section]` headers and `key=value` lines with no comments or duplicate keys, or `.json` bodies that parse as a JSON object with each interpolation treated as an opaque scalar. Such text is a Nix value spelled by hand; generate it with `lib.generators.toINI {}`, `builtins.toJSON` or `pkgs.formats.*` instead. The fix replaces the string with the equivalent generator call, withheld when it could change the text's meaning (INI without `lib` in scope, `''` escapes, interpolated section or key names; JSON floats, exponents, duplicate keys, inexpressible control characters, or whole-value interpolations other than `${builtins.toJSON e}`)."
     }
 
     fn severity(&self) -> Severity {
@@ -618,18 +661,51 @@ impl Rule for HandWrittenConfig {
                 continue;
             };
             for (text, range) in texts {
-                if text_body(text, source, format).is_some_and(|body| format.accepts(&body)) {
-                    diags.push(Diagnostic::new(
-                        self.code(),
-                        self.severity(),
-                        format!(
-                            "{name} is hand-written {}; generate it from a Nix value (e.g. lib.generators.toINI {{}}, builtins.toJSON, pkgs.formats.*)",
-                            format.name()
-                        ),
-                        range,
-                    ));
+                let Some(body) = text_body(text, source, format) else {
+                    continue;
+                };
+                if !format.accepts(&body.detect) {
+                    continue;
                 }
+                let diagnostic = Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!(
+                        "{name} is hand-written {}; generate it from a Nix value (e.g. lib.generators.toINI {{}}, builtins.toJSON, pkgs.formats.*)",
+                        format.name()
+                    ),
+                    range,
+                );
+                diags.push(match generated(model, &body, format) {
+                    Some(replacement) => diagnostic.with_fix(
+                        Fix::new(format!("generate the {} text", format.name()))
+                            .edit(body.range, replacement),
+                    ),
+                    None => diagnostic,
+                });
             }
         }
     }
+}
+
+fn generated(model: &SemanticModel, body: &TextBody<'_>, format: Format) -> Option<String> {
+    if body.escaped {
+        return None;
+    }
+    let source = model.source();
+    let start = body.range.start() as usize;
+    let line = &source[source[..start].rfind('\n').map_or(0, |i| i + 1)..start];
+    let indent = &line[..line.len() - line.trim_start().len()];
+    let generated = match format {
+        Format::Ini if model.is_bound("lib", body.range.start()) => {
+            config_text_generator::ini(&body.body, &body.interps, indent)?
+        }
+        Format::Ini => return None,
+        Format::Json => config_text_generator::json(&body.body, &body.interps, indent)?,
+    };
+    Some(if body.parens {
+        format!("({generated})")
+    } else {
+        generated
+    })
 }

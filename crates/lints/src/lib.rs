@@ -12,6 +12,7 @@ pub mod builtin_value_rules;
 pub mod call_simplification;
 pub mod cognitive_complexity;
 pub mod config_file_rules;
+mod config_text_generator;
 pub mod duplicate_attr;
 pub mod duplicate_formal;
 pub mod duplicate_inherit;
