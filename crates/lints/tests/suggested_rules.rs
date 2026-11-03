@@ -148,6 +148,18 @@ fn duplicate_literal_list_item_exempts_a_data_file_of_lines() {
 }
 
 #[test]
+fn duplicate_literal_list_item_exempts_a_data_file_of_a_syntax_tree() {
+    let tree = r#"{ rows, ... }: [ (rows [ [ "+" "x" "x" ] ]) [ ":cpu" ":cpu" ] ]"#;
+    assert!(run_at(tree, "modules/lisp/bar.data.nix").is_empty());
+    assert_eq!(run_at(tree, "modules/bar.nix").len(), 2);
+    assert_eq!(
+        run_at(r#"{ x }: { y = [ "a" "a" ]; }"#, "modules/x.data.nix").len(),
+        1,
+        "a function returning an attribute set is not a syntax tree"
+    );
+}
+
+#[test]
 fn duplicate_literal_list_item_exempts_numeric_vectors() {
     assert!(run(r#"[ 0 0 1.5 1.5 ]"#, Box::new(DuplicateLiteralListItem {}),).is_empty());
 }

@@ -146,7 +146,10 @@ maximum of 5 was calibrated on `~/finix`, which scores at most 5 everywhere.
 
 `duplicate-literal-list-item` skips a list of only strings that is the whole
 of a `*.data.nix` file (a text kept one line per string, where blank and
-closing lines repeat by nature), including such a binding of a merged file.
+closing lines repeat by nature), and every list of a `*.data.nix` file that is
+a function returning a list (a syntax tree built from a generator's
+constructors, where a symbol repeats as often as the code uses it), including
+such a binding of a merged file.
 
 `singleton-optionals` simplifies `lib.optionals condition [value]` to
 `lib.optional condition value`. Qualified calls have an automatic fix that

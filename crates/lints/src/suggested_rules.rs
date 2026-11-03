@@ -311,24 +311,33 @@ impl Rule for DuplicateLiteralListItem {
         "Duplicate literal list item"
     }
     fn description(&self) -> &'static str {
-        "Flags a repeated string, boolean, or null literal in one list — usually a copy-paste slip in an imports or package list. Numeric literals are exempt (coordinate and dimension vectors repeat them legitimately), as is a list of only strings that is the whole of a `*.data.nix` file (text kept one line per string, where blank lines and closing lines repeat by nature); duplicates may still be intentional, so the rule is warning-only and offers no fix."
+        "Flags a repeated string, boolean, or null literal in one list — usually a copy-paste slip in an imports or package list. Numeric literals are exempt (coordinate and dimension vectors repeat them legitimately), as is a list of only strings that is the whole of a `*.data.nix` file (text kept one line per string, where blank lines and closing lines repeat by nature) and every list of a `*.data.nix` file that is a function returning a list (a syntax tree built from a generator's constructors, where a symbol or word repeats as often as the code uses it); duplicates may still be intentional, so the rule is warning-only and offers no fix."
     }
     fn severity(&self) -> Severity {
         Severity::Warning
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
-        let lines = model
+        let data = model
             .path()
-            .is_some_and(|path| path.to_string_lossy().ends_with(".data.nix"))
-            .then(|| line_list(model.root()))
-            .flatten();
+            .is_some_and(|path| path.to_string_lossy().ends_with(".data.nix"));
+        if data && syntax_tree(model.root()) {
+            return;
+        }
+        let lines = data.then(|| line_list(model.root())).flatten();
         for node in model.root().descendants() {
             if node.kind() == K::ListExpr && Some(node.range()) != lines {
                 self.check_list(node, model.source(), diags);
             }
         }
     }
+}
+
+fn syntax_tree(root: &SyntaxNode) -> bool {
+    let Some(Expr::Lambda(lambda)) = Root::cast(root).and_then(|root| root.expr()) else {
+        return false;
+    };
+    matches!(lambda.body().map(unwrap_parens), Some(Expr::List(_)))
 }
 
 fn line_list(root: &SyntaxNode) -> Option<TextRange> {
