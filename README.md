@@ -87,8 +87,8 @@ $ strictix split . --merged flake.nix
 
 `strictix import LANGUAGE FILE` parses a source file with the language's
 tree-sitter grammar (`glsl`: tree-sitter-glsl, `lisp`: tree-sitter-commonlisp,
-`luau`: tree-sitter-luau, `markdown`: tree-sitter-md, `patch`:
-tree-sitter-diff, `shell`: tree-sitter-bash, `vbs`: jcolozzi's
+`lua`: tree-sitter-lua, `luau`: tree-sitter-luau, `markdown`: tree-sitter-md,
+`patch`: tree-sitter-diff, `shell`: tree-sitter-bash, `vbs`: jcolozzi's
 tree-sitter-VB6-VBA-VBS, whose `source_file` cannot start with a comment or
 blank line, so the leading run of comment and blank lines is read without it,
 and which parses `Set x = y` as a call of `Set`, read back as the assignment

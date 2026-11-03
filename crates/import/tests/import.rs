@@ -221,3 +221,44 @@ fn glsl_layout_the_printer_cannot_reproduce_is_an_error() {
     assert!(expression("glsl", "float a = f(b , c);\n", &[]).is_err());
     assert!(expression("glsl", "float a = 1.0; // one\n", &[]).is_err());
 }
+
+#[test]
+fn lua_calls_are_nix_lists_and_blocks_keep_their_layout() {
+    let source = "local t = { a = 1, \"x\", -1 }\nif not t then return end\n\nfor i = 1, #t do f:write(t[i]); break end\n";
+    assert_eq!(
+        expression("lua", source, &[]).unwrap(),
+        "[\n  (local \"t\" [(table [(field \"a\" 1) (str \"x\") (-1)])])\n  (if' (not \"t\") (inline [(return [])]))\n  blank\n  (forNum \"i\" [1 (len \"t\")] (inline [[\"f:write\" (index \"t\" \"i\")] \";\" \"break\"]))\n]"
+    );
+}
+
+#[test]
+fn lua_broken_conditions_and_tables_are_rows() {
+    let source = "if a\n  and b == nil then\n  x = {\n    { 1 }, { 2 },\n    p{ q = true },\n  }\nelseif c then y() else z() end\n";
+    assert_eq!(
+        expression("lua", source, &[]).unwrap(),
+        "[\n  (ifElse (op (rows [[\"a\"] [\"and\" (op [\"b\" \"==\" null])]])) [\n(assign \"x\" [(table (rows [\n[(table [1]) (table [2])]\n(apply \"p\" (table [(field \"q\" true)]))\n]))])\n] (ifElse \"c\" (inline [[\"y\"]]) (inline [[\"z\"]])))\n]"
+    );
+}
+
+#[test]
+fn lua_layout_the_printer_cannot_reproduce_is_an_error() {
+    assert!(expression("lua", "f(a,b)\n", &[])
+        .unwrap_err()
+        .contains("expected"));
+    assert!(expression("lua", "f() g()\n", &[])
+        .unwrap_err()
+        .contains("share a line"));
+    assert!(expression("lua", "x = [[long]]\n", &[])
+        .unwrap_err()
+        .contains("long bracket"));
+    assert!(expression("lua", "local t = { a = 1 }\n", &[]).is_ok());
+    assert!(expression("lua", "local t = {\n  a = 1\n}\n", &[]).is_err());
+}
+
+#[test]
+fn lua_data_file_formals_leave_out_nix_literals() {
+    assert_eq!(
+        data_file("lua", "x = true\n", &[]).unwrap(),
+        "{\n  assign,\n  ...\n}: [\n  (assign \"x\" [true])\n]\n"
+    );
+}
