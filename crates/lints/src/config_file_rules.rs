@@ -864,6 +864,34 @@ fn import_call<'a>(apply: ApplyExpr<'a>, source: &'a str) -> Option<Expr<'a>> {
         .then(|| data_argument(apply, source))?
 }
 
+fn line_list_call(
+    apply: ApplyExpr<'_>,
+    source: &str,
+    dir: &Path,
+    config: &LintConfig,
+) -> Option<(String, PathBuf)> {
+    let generator = apply
+        .func()?
+        .content_text(source)
+        .strip_prefix("generators.")?;
+    let (id, _) = config
+        .codec_generators
+        .iter()
+        .find(|(_, name)| name == generator)?;
+    let Expr::Apply(import) = unwrap_parens(apply.arg()?) else {
+        return None;
+    };
+    (import.func()?.content_text(source) == "import").then_some(())?;
+    let Expr::Path(token) = unwrap_parens(import.arg()?) else {
+        return None;
+    };
+    let text = token.text(source);
+    (text.starts_with("./") || text.starts_with("../")).then_some(())?;
+    text.ends_with(".data.nix").then_some(())?;
+    let file = normalize(&dir.join(text));
+    (!config.is_generated(&file)).then(|| (id.clone(), file))
+}
+
 pub struct CodecCandidate;
 
 impl Rule for CodecCandidate {
@@ -876,7 +904,7 @@ impl Rule for CodecCandidate {
     }
 
     fn description(&self) -> &'static str {
-        "Runs only when the config declares `[codecs.<id>]` sections with `extensions`. Flags data a codec can convert into a Nix value: a file entry whose name ends in a codec extension and whose `text` is a string literal without interpolations (through `mkForce`/`mkAfter`/... wrappers), and a literal relative path to a file with a codec extension read by `lib.importJSON`, `lib.importTOML`, `builtins.fromJSON (builtins.readFile ./x)`, `builtins.fromTOML (builtins.readFile ./x)` or installed as a `source`. Lock files (names containing `lock`) and paths under the config's `generated` prefixes are skipped. The JSON output carries a `codec` object (id, kind, target, loader, replace range, whether `lib`/`pkgs` are in scope, entry) for `nix run .#lint -- fix` to perform the conversion."
+        "Runs only when the config declares `[codecs.<id>]` sections with `extensions`. Flags data a codec can convert into a Nix value: a file entry whose name ends in a codec extension and whose `text` is a string literal without interpolations (through `mkForce`/`mkAfter`/... wrappers), and a literal relative path to a file with a codec extension read by `lib.importJSON`, `lib.importTOML`, `builtins.fromJSON (builtins.readFile ./x)`, `builtins.fromTOML (builtins.readFile ./x)` or installed as a `source`. A codec with a `generator` also flags `generators.<generator> (import ./x.data.nix)`, a text kept one string per line, as a `file` candidate with the `lines` loader whose target is the data file itself. Lock files (names containing `lock`) and paths under the config's `generated` prefixes are skipped. The JSON output carries a `codec` object (id, kind, target, loader, replace range, whether `lib`/`pkgs` are in scope, entry) for `nix run .#lint -- fix` to perform the conversion."
     }
 
     fn severity(&self) -> Severity {
@@ -924,6 +952,31 @@ impl Rule for CodecCandidate {
                             );
                         }
                     }
+                }
+            }
+            if let Some(Expr::Apply(apply)) = Expr::cast(node) {
+                if let Some((id, target)) = line_list_call(apply, source, dir, config) {
+                    let replace = apply.syntax().content_range();
+                    let (lib, pkgs) = scope(replace);
+                    diags.push(
+                        Diagnostic::new(
+                            self.code(),
+                            self.severity(),
+                            format!("{} is {id} kept as a line list; nix run .#lint -- fix converts it to a syntax tree", target.display()),
+                            replace,
+                        )
+                        .with_codec(Codec {
+                            id,
+                            kind: CodecKind::File,
+                            target: Some(target.display().to_string()),
+                            loader: Some(CodecLoader::Lines),
+                            replace,
+                            lib,
+                            pkgs,
+                            entry: None,
+                        }),
+                    );
+                    continue;
                 }
             }
             let (candidate, loader, call) = match Expr::cast(node) {

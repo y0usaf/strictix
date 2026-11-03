@@ -27,6 +27,7 @@ pub struct LintConfig {
     /// Codecs from `[codecs.<id>]` as `(id, extensions)`; non-empty
     /// enables `codec-candidate`.
     pub codecs: Vec<(String, Vec<String>)>,
+    pub codec_generators: Vec<(String, String)>,
 }
 
 impl LintConfig {

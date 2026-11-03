@@ -48,6 +48,7 @@ pub enum CodecKind {
 pub enum CodecLoader {
     Import,
     Source,
+    Lines,
 }
 
 /// A `codec-candidate` finding, consumed by an external converter.

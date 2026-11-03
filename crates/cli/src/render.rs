@@ -243,6 +243,7 @@ fn codec_json(codec: &Codec) -> JsonValue {
             text(codec.loader.map(|loader| match loader {
                 CodecLoader::Import => "import",
                 CodecLoader::Source => "source",
+                CodecLoader::Lines => "lines",
             })),
         ),
         ("replace".to_owned(), range_json(codec.replace)),

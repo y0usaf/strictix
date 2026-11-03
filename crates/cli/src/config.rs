@@ -22,7 +22,8 @@
 //! section, `disabled`, `enabled` and `generated` (arrays of strings), `schema` (string),
 //! and the `[schemas]` section of `"path prefix" = "options.json"` pairs
 //! (`""` turns the schema rules off under that prefix), and
-//! `[codecs.<id>]` sections with an `extensions` string array. Unknown keys in
+//! `[codecs.<id>]` sections with an `extensions` string array and an optional
+//! `generator` string. Unknown keys in
 //! `[lint]` and unknown sections are ignored; missing keys are fine.
 //!
 //! ponytail: no trailing comments, no multiline arrays, no other TOML
@@ -102,7 +103,12 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
         let key = key.trim();
         let value = value.trim();
         if let Some(id) = codec {
-            if key == "extensions" {
+            if key == "generator" {
+                let generator =
+                    parse_toml_string(value).map_err(|e| format!("line {}: {e}", line_no + 1))?;
+                config.codec_generators.retain(|(known, _)| *known != id);
+                config.codec_generators.push((id, generator));
+            } else if key == "extensions" {
                 let extensions =
                     parse_string_array(value).map_err(|e| format!("line {}: {e}", line_no + 1))?;
                 match config.codecs.iter_mut().find(|(known, _)| *known == id) {
