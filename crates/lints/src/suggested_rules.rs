@@ -333,7 +333,7 @@ impl Rule for DuplicateLiteralListItem {
     }
 }
 
-fn syntax_tree(root: &SyntaxNode) -> bool {
+pub(crate) fn syntax_tree(root: &SyntaxNode) -> bool {
     let Some(Expr::Lambda(lambda)) = Root::cast(root).and_then(|root| root.expr()) else {
         return false;
     };
