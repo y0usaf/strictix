@@ -13,7 +13,9 @@ pub mod call_simplification;
 pub mod cognitive_complexity;
 pub mod config_file_rules;
 mod config_text_generator;
+pub mod constant_option;
 pub mod duplicate_attr;
+pub mod duplicate_definitions;
 pub mod duplicate_formal;
 pub mod duplicate_inherit;
 pub mod duplicate_list_to_attrs_name;
@@ -61,7 +63,9 @@ use cognitive_complexity::CognitiveComplexity;
 use config_file_rules::{
     CodecCandidate, HandMaintainedDataFile, HandWrittenConfig, MaskedGenerator,
 };
+use constant_option::ConstantOption;
 use duplicate_attr::DuplicateAttribute;
+use duplicate_definitions::DuplicateDefinitions;
 use duplicate_formal::DuplicateFormal;
 use duplicate_inherit::DuplicateInherit;
 use duplicate_list_to_attrs_name::DuplicateListToAttrsName;
@@ -150,6 +154,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         UnknownOption,
         UnusedOption,
         NeverEnabledOption,
+        ConstantOption,
         DiscouragedLibType,
         ManualGenAttrs,
         ManualFileContents,
@@ -184,6 +189,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         LiteralDivisionByZero,
         RedundantBooleanComparison,
         DuplicateLiteralListItem,
+        DuplicateDefinitions,
         CircularLet,
         CyclomaticComplexity,
         CognitiveComplexity,

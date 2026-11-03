@@ -12,7 +12,13 @@ use crate::schema::{callee_name, module_attrset, static_segments, unwrap_parens}
 
 type Segment = Option<String>;
 
-struct OptionWrites(Vec<Vec<Segment>>);
+pub(crate) struct OptionWrites(Vec<Vec<Segment>>);
+
+impl OptionWrites {
+    pub(crate) fn reach(&self, declared: &[String]) -> bool {
+        self.0.iter().any(|write| reaches(write, declared))
+    }
+}
 
 const RESERVED_HEADS: [&str; 5] = ["imports", "options", "_module", "disabledModules", "key"];
 
@@ -176,7 +182,7 @@ fn module_root(expr: Expr<'_>, source: &str, out: &mut Vec<Vec<Segment>>) {
     walk(source, expr, &[], true, out);
 }
 
-fn project_writes(project: &ProjectContext) -> OptionWrites {
+pub(crate) fn project_writes(project: &ProjectContext) -> OptionWrites {
     let mut writes = Vec::new();
     for file in project.sources() {
         let source = file.source.as_str();
@@ -184,6 +190,18 @@ fn project_writes(project: &ProjectContext) -> OptionWrites {
         let root = &root;
         if let Some(expr) = Root::cast(root).and_then(|r| r.expr()) {
             module_root(expr, source, &mut writes);
+            if let Some(bindings) = match unwrap_parens(expr) {
+                Expr::Let(let_expr) => let_expr.bindings(),
+                _ => None,
+            } {
+                for item in bindings.items() {
+                    if let AttrItem::Binding(binding) = item {
+                        if let Some(value) = binding.value() {
+                            module_root(value, source, &mut writes);
+                        }
+                    }
+                }
+            }
         }
         for node in root.descendants() {
             let Some(binding) = Binding::cast(node) else {
@@ -210,7 +228,7 @@ fn project_writes(project: &ProjectContext) -> OptionWrites {
     OptionWrites(writes)
 }
 
-fn is_false(model: &SemanticModel<'_>, expr: Expr<'_>) -> bool {
+pub(crate) fn is_false(model: &SemanticModel<'_>, expr: Expr<'_>) -> bool {
     matches!(unwrap_parens(expr), Expr::Ident(t)
         if t.text(model.source()) == "false" && !model.is_bound("false", t.range().start()))
 }
@@ -239,7 +257,7 @@ fn bool_default_false(model: &SemanticModel<'_>, arg: Expr<'_>) -> bool {
     boolean && off
 }
 
-fn is_enable_option(model: &SemanticModel<'_>, value: Expr<'_>) -> bool {
+pub(crate) fn is_enable_option(model: &SemanticModel<'_>, value: Expr<'_>) -> bool {
     let Expr::Apply(apply) = unwrap_parens(value) else {
         return false;
     };
@@ -253,12 +271,58 @@ fn is_enable_option(model: &SemanticModel<'_>, value: Expr<'_>) -> bool {
     }
 }
 
-fn declarations(model: &SemanticModel<'_>) -> Vec<(Vec<String>, TextRange)> {
+fn module_sets<'a>(model: &SemanticModel<'a>) -> Vec<AttrsetExpr<'a>> {
+    if let Some(set) = module_attrset(model) {
+        return vec![set];
+    }
+    let Some(Expr::Let(let_expr)) = Root::cast(model.root())
+        .and_then(|r| r.expr())
+        .map(unwrap_parens)
+    else {
+        return Vec::new();
+    };
+    let Some(bindings) = let_expr.bindings() else {
+        return Vec::new();
+    };
+    bindings
+        .items()
+        .filter_map(|item| {
+            let AttrItem::Binding(binding) = item else {
+                return None;
+            };
+            let mut expr = binding.value()?;
+            loop {
+                expr = match unwrap_parens(expr) {
+                    Expr::Lambda(lambda) => lambda.body()?,
+                    Expr::Let(inner) => inner.body()?,
+                    Expr::With(with) => with.body()?,
+                    Expr::Attrset(set) => return Some(set),
+                    _ => return None,
+                };
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn declarations(
+    model: &SemanticModel<'_>,
+    accept: fn(&SemanticModel<'_>, Expr<'_>) -> bool,
+) -> Vec<(Vec<String>, TextRange)> {
     let source = model.source();
     let mut out = Vec::new();
-    let Some(set) = module_attrset(model) else {
-        return out;
-    };
+    for set in module_sets(model) {
+        module_declarations(model, set, source, accept, &mut out);
+    }
+    out
+}
+
+fn module_declarations(
+    model: &SemanticModel<'_>,
+    set: AttrsetExpr<'_>,
+    source: &str,
+    accept: fn(&SemanticModel<'_>, Expr<'_>) -> bool,
+    out: &mut Vec<(Vec<String>, TextRange)>,
+) {
     for item in set.items() {
         let AttrItem::Binding(binding) = item else {
             continue;
@@ -277,10 +341,10 @@ fn declarations(model: &SemanticModel<'_>) -> Vec<(Vec<String>, TextRange)> {
             value,
             &segments[1..],
             path.syntax().content_range(),
-            &mut out,
+            accept,
+            out,
         );
     }
-    out
 }
 
 fn leaves(
@@ -288,10 +352,11 @@ fn leaves(
     value: Expr<'_>,
     prefix: &[String],
     range: TextRange,
+    accept: fn(&SemanticModel<'_>, Expr<'_>) -> bool,
     out: &mut Vec<(Vec<String>, TextRange)>,
 ) {
     let Expr::Attrset(set) = unwrap_parens(value) else {
-        if !prefix.is_empty() && is_enable_option(model, value) {
+        if !prefix.is_empty() && accept(model, value) {
             out.push((prefix.to_vec(), range));
         }
         return;
@@ -308,11 +373,18 @@ fn leaves(
         };
         let mut full = prefix.to_vec();
         full.extend(segments);
-        leaves(model, value, &full, path.syntax().content_range(), out);
+        leaves(
+            model,
+            value,
+            &full,
+            path.syntax().content_range(),
+            accept,
+            out,
+        );
     }
 }
 
-fn display(path: &[String]) -> String {
+pub(crate) fn display(path: &[String]) -> String {
     path.iter()
         .map(|segment| {
             let plain = segment
@@ -365,13 +437,13 @@ impl Rule for NeverEnabledOption {
         let Some(project) = project else {
             return;
         };
-        let declared = declarations(model);
+        let declared = declarations(model, is_enable_option);
         if declared.is_empty() {
             return;
         }
         let writes = project.memo(project_writes);
         for (path, range) in declared {
-            if writes.0.iter().any(|write| reaches(write, &path)) {
+            if writes.reach(&path) {
                 continue;
             }
             diags.push(Diagnostic::new(

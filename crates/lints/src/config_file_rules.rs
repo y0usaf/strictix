@@ -331,7 +331,7 @@ fn line_of(source: &str, offset: u32) -> usize {
         + 1
 }
 
-fn relative(from: &Path, to: &Path) -> PathBuf {
+pub(crate) fn relative(from: &Path, to: &Path) -> PathBuf {
     let base: Vec<Component<'_>> = from
         .parent()
         .map_or_else(Vec::new, |p| p.components().collect());

@@ -68,7 +68,7 @@ $ strictix split . --merged finix.nix
 
 ## Rules
 
-101 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
+103 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
@@ -76,9 +76,9 @@ $ strictix split . --merged finix.nix
 | Certain evaluation errors | self-referential-let, circular-let, undefined-variable, non-boolean-condition, ill-typed-binop, ill-typed-unary-op, non-callable-application, literal-division-by-zero, coerced-interpolation, assert-false, duplicate-attribute, duplicate-formal, dangling-path, missing-import, import-cycle, missing-function-argument, unexpected-function-argument, missing-attribute, builtin-argument-type, builtin-arity, invalid-list-access, invalid-list-to-attrs-entry, replace-strings-length-mismatch, invalid-builtin-range |
 | Hallucination checks | unknown-option, option-type-mismatch, unknown-builtin, unknown-lib-type |
 | Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, duplicate-function-argument, dynamic-import, suspicious-import-argument, suspicious-recursion, unsafe-with-shadowing, shallow-merge-overwrite (opt-in), discouraged-lib-type, masked-generator |
-| Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in) |
+| Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in), constant-option (opt-in) |
 | Maintainability | cyclomatic-complexity, cognitive-complexity |
-| Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data, codec-candidate |
+| Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data, codec-candidate, duplicate-definitions |
 
 `cognitive-complexity` warns when a lambda scores above **5**. It counts
 control-flow nesting, conditional helpers (`lib.mkIf`, `lib.optional*`),
@@ -143,6 +143,14 @@ without a `config.` prefix and through `mkIf`/`mkMerge`/`mkDefault`
 wrappers, including inline modules in `imports`/`modules` lists. A
 dynamic segment (`${...}`), an `inherit`, or a non-literal value at a
 prefix that could reach the option counts as setting it.
+
+`constant-option` is opt-in and project-wide: it reports `mkOption`
+declarations with a literal default that no linted file ever defines,
+matching definitions exactly as `never-enabled-option` does, so every
+configuration uses the default. Replace such an option with a `let` value
+in the module that reads it, or delete it if nothing reads it. Modules
+from flake inputs are not linted, so an option they define is still
+reported.
 
 `discouraged-lib-type` flags `types.attrs`, which merges definitions
 shallowly and does not discharge `mkIf`/`mkDefault`, and fixes it to
