@@ -1,14 +1,16 @@
 mod lisp;
+mod markdown;
 mod nix;
 mod shell;
 
 pub use nix::HOLE_BASE;
 
-pub const LANGUAGES: [&str; 2] = ["lisp", "shell"];
+pub const LANGUAGES: [&str; 3] = ["lisp", "markdown", "shell"];
 
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {
         "lisp" => lisp::import(source, holes),
+        "markdown" => markdown::import(source, holes),
         "shell" => shell::import(source, holes),
         other => Err(format!(
             "no importer for {other}; known: {}",

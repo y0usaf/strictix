@@ -211,7 +211,7 @@ COMMANDS:
     split     Write the bindings of --merged back to their original files
               (path: merge root, default .)
     import    Print LANGUAGE FILE as the Nix syntax tree finix's generators
-              render (LANGUAGE: lisp, shell); a .nix FILE is read as a
+              render (LANGUAGE: lisp, markdown, shell); a .nix FILE is read as a
               line list, or as a file holding one generators.<name>Source
               call on a line list, which is printed back with the call
               replaced
