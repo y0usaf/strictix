@@ -114,7 +114,10 @@ pub fn identifiers(expression: &str) -> std::collections::BTreeSet<String> {
                 {
                     at += 1;
                 }
-                names.insert(expression[start..at].to_owned());
+                let name = &expression[start..at];
+                if !matches!(name, "true" | "false" | "null") {
+                    names.insert(name.to_owned());
+                }
             }
             _ => at += 1,
         }

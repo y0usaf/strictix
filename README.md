@@ -86,8 +86,8 @@ $ strictix split . --merged flake.nix
 ```
 
 `strictix import LANGUAGE FILE` parses a source file with the language's
-tree-sitter grammar (`lisp`: tree-sitter-commonlisp, `shell`:
-tree-sitter-bash) and prints it as the Nix syntax tree finix's generators
+tree-sitter grammar (`lisp`: tree-sitter-commonlisp, `lua`: tree-sitter-lua,
+`shell`: tree-sitter-bash) and prints it as the Nix syntax tree finix's generators
 render: a data file `{rows, str, ...}: [ ... ]`, a function of the
 constructors of `generators.LANGUAGE` it uses. A `.nix` FILE is read as a
 line list (one string per source line); when it is not a list itself but
