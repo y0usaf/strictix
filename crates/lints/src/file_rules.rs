@@ -73,10 +73,10 @@ fn lambda_complexity(lambda: LambdaExpr<'_>) -> usize {
                     *score += 1;
                 }
             }
-            SyntaxKind::SelectExpr => {
-                if SelectExpr::cast(node).is_some_and(|expr| expr.default().is_some()) {
-                    *score += 1;
-                }
+            SyntaxKind::SelectExpr
+                if SelectExpr::cast(node).is_some_and(|expr| expr.default().is_some()) =>
+            {
+                *score += 1;
             }
             _ => {}
         }

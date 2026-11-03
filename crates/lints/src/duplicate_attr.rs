@@ -184,11 +184,12 @@ fn record(
                     message = Some(prior.path.join("."));
                     break;
                 }
-            } else if path.len() < prior.path.len() && prior.path.starts_with(&path) {
-                if !is_attrset_literal {
-                    message = Some(path.join("."));
-                    break;
-                }
+            } else if path.len() < prior.path.len()
+                && prior.path.starts_with(&path)
+                && !is_attrset_literal
+            {
+                message = Some(path.join("."));
+                break;
             }
         }
     }
