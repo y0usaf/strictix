@@ -20,6 +20,10 @@ pub enum Command {
     Explain,
     /// Print the whole rule registry as a table.
     List,
+    /// Inline every reachable .nix file of a tree into one file.
+    Merge,
+    /// Write a merged file's bindings back to their original files.
+    Split,
 }
 
 /// Output format for diagnostics.
@@ -60,6 +64,10 @@ pub struct Args {
     pub disabled: Vec<String>,
     pub enabled: Vec<String>,
     pub schema: Option<PathBuf>,
+    pub entry: Option<String>,
+    pub out: Option<String>,
+    pub expand: Vec<String>,
+    pub merged: Option<String>,
     pub dry_run: bool,
     pub help: bool,
     pub version: bool,
@@ -80,6 +88,10 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut disabled = Vec::new();
     let mut enabled = Vec::new();
     let mut schema = None;
+    let mut entry = None;
+    let mut out = None;
+    let mut expand = Vec::new();
+    let mut merged = None;
     let mut dry_run = false;
     let mut help = false;
     let mut version = false;
@@ -120,6 +132,10 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                     let value = next_value(args, &mut i, "--schema")?;
                     schema = Some(PathBuf::from(value));
                 }
+                "--entry" => entry = Some(next_value(args, &mut i, "--entry")?),
+                "--out" => out = Some(next_value(args, &mut i, "--out")?),
+                "--expand" => expand.push(next_value(args, &mut i, "--expand")?),
+                "--merged" => merged = Some(next_value(args, &mut i, "--merged")?),
                 "--dry-run" => dry_run = true,
                 other => return Err(format!("unknown flag '{other}'")),
             }
@@ -143,6 +159,10 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         disabled,
         enabled,
         schema,
+        entry,
+        out,
+        expand,
+        merged,
         dry_run,
         help,
         version,
@@ -165,6 +185,8 @@ fn parse_command(word: &str) -> Result<Command, String> {
         "fix" => Ok(Command::Fix),
         "explain" => Ok(Command::Explain),
         "list" => Ok(Command::List),
+        "merge" => Ok(Command::Merge),
+        "split" => Ok(Command::Split),
         other => Err(format!("unknown command '{other}'")),
     }
 }
@@ -182,6 +204,10 @@ COMMANDS:
     fix       Lint and apply automatic fixes
     explain   Explain a lint rule by code
     list      List all lint rules
+    merge     Inline every .nix file reachable from --entry into --out
+              (path: merge root, default .)
+    split     Write the bindings of --merged back to their original files
+              (path: merge root, default .)
 
 OPTIONS:
     -h, --help            Print this help
@@ -192,6 +218,11 @@ OPTIONS:
     --disable CODE        Skip a rule by code (repeatable)
     --enable CODE         Enable an opt-in rule (repeatable; --disable wins)
     --schema FILE         options.json path, enabling the unknown-option rule
-    --dry-run             (fix) show what would change without writing
+    --dry-run             (fix, merge, split) show what would change without writing
+    --entry FILE          (merge) root-relative entry file
+    --out FILE            (merge) root-relative output file
+    --expand NAME         (merge) evaluate calls of NAME in the entry's scope
+                          into explicit module lists (repeatable)
+    --merged FILE         (split) root-relative merged file
 "
 }

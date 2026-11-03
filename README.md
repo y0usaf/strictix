@@ -37,6 +37,35 @@ $ strictix fix slop.nix
 +  ty = lib.types.str;
 ```
 
+`strictix merge` collapses a tree into one file. Starting from `--entry`,
+every `.nix` file reached through a relative path literal given to
+`import`/`callPackage` or listed in a module list becomes one `let` binding
+of `--out`, named after its path; other relative paths are rebased to the
+output's directory. `--expand NAME` evaluates calls of `NAME` (e.g. a
+`listFilesRecursive` helper) with `nix eval` in the entry's own scope and
+replaces them with explicit lists. A file that is still named by a string or
+path, or imported by a file that is not merged, stays a file and the merged
+file refers to it by path; every other merged file is deleted, so each file
+exists exactly once. The merged file ends in a `merge_manifest` binding of
+plain data recording each binding's path, the expanded calls, and any
+reference spelled differently from the default, and is formatted with the
+flake's formatter:
+
+```
+$ strictix merge . --entry modules/outputs.nix --out finix.nix --expand nixFiles
+```
+
+`strictix split` is the inverse: it writes every binding of `--merged` back to
+its path in the manifest, restores `import ./x.nix`, `./x.nix` in module lists,
+`./dir` for `dir/default.nix` and the expanded calls, points the entry's
+referrers back at it, deletes the merged file and formats what it wrote. Edits
+made in the merged file land in the original files; a new binding needs its
+path added to `merge_manifest.files`:
+
+```
+$ strictix split . --merged finix.nix
+```
+
 ## Rules
 
 101 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:

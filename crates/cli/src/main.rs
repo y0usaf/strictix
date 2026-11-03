@@ -14,7 +14,9 @@
 
 mod args;
 mod config;
+mod merge;
 mod render;
+mod split;
 mod walk;
 
 use std::path::{Path, PathBuf};
@@ -54,14 +56,111 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let Some(command) = parsed.command else {
-        return usage_error("no command given (expected check, fix, explain, or list)");
+        return usage_error(
+            "no command given (expected check, fix, explain, list, merge, or split)",
+        );
     };
     match command {
         Command::Check => run_check(&parsed, false),
         Command::Fix => run_check(&parsed, true),
         Command::Explain => run_explain(&parsed),
         Command::List => run_list(),
+        Command::Merge => run_merge(&parsed),
+        Command::Split => run_split(&parsed),
     }
+}
+
+fn command_root(args: &Args) -> PathBuf {
+    args.paths
+        .first()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn run_merge(args: &Args) -> ExitCode {
+    let (Some(entry), Some(out)) = (&args.entry, &args.out) else {
+        return usage_error("merge requires --entry and --out");
+    };
+    let options = merge::MergeOptions {
+        root: command_root(args),
+        entry: entry.clone(),
+        out: out.clone(),
+        expand: args.expand.clone(),
+        dry_run: args.dry_run,
+    };
+    let report = match merge::merge(&options) {
+        Ok(report) => report,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!(
+        "inlined {} files into {out} ({} lines)",
+        report.inlined.len(),
+        report.out_lines
+    );
+    for (call, count) in &report.expansions {
+        println!("expanded `{call}` into {count} modules");
+    }
+    for (file, reason) in &report.kept {
+        println!("kept {file} as a file: {reason}");
+    }
+    for name in &report.dropped_bindings {
+        println!("removed let binding {name}: every use was expanded");
+    }
+    for file in &report.keyed_modules {
+        println!("keyed module {file}: listed as a module more than once");
+    }
+    for path in &report.partial_paths {
+        println!("sub-path reference {path}: directory not kept whole");
+    }
+    for file in &report.rewritten {
+        println!("rewrote {file}: entry reference now points at {out}");
+    }
+    let verb = if args.dry_run {
+        "would delete"
+    } else {
+        "deleted"
+    };
+    println!(
+        "{verb} {} inlined files; {} other .nix files untouched",
+        report.inlined.len(),
+        report.untouched
+    );
+    ExitCode::SUCCESS
+}
+
+fn run_split(args: &Args) -> ExitCode {
+    let Some(merged) = &args.merged else {
+        return usage_error("split requires --merged");
+    };
+    let options = split::SplitOptions {
+        root: command_root(args),
+        merged: merged.clone(),
+        dry_run: args.dry_run,
+    };
+    let report = match split::split(&options) {
+        Ok(report) => report,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let verb = if args.dry_run {
+        "would restore"
+    } else {
+        "restored"
+    };
+    println!("{verb} {} files from {merged}", report.restored.len());
+    println!("restored {} expanded calls", report.expansions);
+    for file in &report.redirected {
+        println!("rewrote {file}: entry reference points back at the entry");
+    }
+    for note in &report.notes {
+        println!("note: {note}");
+    }
+    ExitCode::SUCCESS
 }
 
 /// The list command: one line per rule in the registry.
