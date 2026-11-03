@@ -7,7 +7,7 @@ pub(crate) struct Interp<'a> {
     pub(crate) json: Option<&'a str>,
 }
 
-enum Node {
+pub(crate) enum Node {
     Raw(String),
     List(Vec<Node>),
     Set(Vec<(String, Node)>),
@@ -26,7 +26,7 @@ fn is_ident(name: &str) -> bool {
         && !KEYWORDS.contains(&name)
 }
 
-fn nix_string<'a>(
+pub(crate) fn nix_string<'a>(
     text: &str,
     interps: &mut impl Iterator<Item = &'a Interp<'a>>,
 ) -> Option<String> {
@@ -48,7 +48,7 @@ fn nix_string<'a>(
     Some(out)
 }
 
-fn attr_name(name: &str) -> Option<String> {
+pub(crate) fn attr_name(name: &str) -> Option<String> {
     if name.contains(SENTINEL) {
         return None;
     }
@@ -59,7 +59,7 @@ fn attr_name(name: &str) -> Option<String> {
     }
 }
 
-fn render(node: &Node, indent: &str, depth: usize, out: &mut String) {
+pub(crate) fn render(node: &Node, indent: &str, depth: usize, out: &mut String) {
     let pad = |out: &mut String, depth: usize| {
         out.push_str(indent);
         out.push_str(&"  ".repeat(depth));

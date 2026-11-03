@@ -9,8 +9,8 @@ use strictix_core::project::ProjectContext;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::SemanticModel;
 use strictix_syntax::{
-    parse, AstNode, AttrItem, AttrName, AttrsetExpr, Binding, Expr, Root, StringExpr, StringPart,
-    SyntaxKind, TextRange,
+    parse, ApplyExpr, AstNode, AttrItem, AttrName, AttrsetExpr, Binding, Expr, Root, StringExpr,
+    StringPart, SyntaxKind, SyntaxToken, TextRange,
 };
 
 use crate::config_text_generator::{self, Interp, SENTINEL};
@@ -74,7 +74,7 @@ fn is_file_name(name: &str) -> bool {
             .any(|(i, c)| c == '.' && i > 0 && i + 1 < name.len())
 }
 
-fn string_text(string: StringExpr<'_>, source: &str) -> String {
+pub(crate) fn string_text(string: StringExpr<'_>, source: &str) -> String {
     let mut text = String::new();
     for part in string.parts() {
         match part {
@@ -108,7 +108,7 @@ fn segment(element: AttrName<'_>, source: &str, origin: TextRange) -> Segment {
     }
 }
 
-fn wrapped<'a>(expr: Expr<'a>, source: &str) -> Option<Vec<Expr<'a>>> {
+pub(crate) fn wrapped<'a>(expr: Expr<'a>, source: &str) -> Option<Vec<Expr<'a>>> {
     let Expr::Apply(apply) = unwrap_parens(expr) else {
         return None;
     };
@@ -609,6 +609,27 @@ fn text_bindings<'a>(value: Expr<'a>, source: &str, out: &mut Vec<(Expr<'a>, Tex
     }
 }
 
+pub(crate) fn file_texts<'a>(
+    binding: Binding<'a>,
+    source: &str,
+) -> Option<(String, Vec<(Expr<'a>, TextRange)>)> {
+    let (path, value) = (binding.attrpath()?, binding.value()?);
+    let elements: Vec<AttrName<'_>> = path.elements().collect();
+    let (name, texts) = match elements.as_slice() {
+        [.., AttrName::Str(entry), AttrName::Ident(last)] if last.text(source) == "text" => (
+            string_text(*entry, source),
+            vec![(value, path.syntax().content_range())],
+        ),
+        [.., AttrName::Str(entry)] => {
+            let mut texts = Vec::new();
+            text_bindings(value, source, &mut texts);
+            (string_text(*entry, source), texts)
+        }
+        _ => return None,
+    };
+    is_file_name(&name).then_some((name, texts))
+}
+
 pub struct HandWrittenConfig;
 
 impl Rule for HandWrittenConfig {
@@ -634,29 +655,9 @@ impl Rule for HandWrittenConfig {
             let Some(binding) = Binding::cast(node) else {
                 continue;
             };
-            let (Some(path), Some(value)) = (binding.attrpath(), binding.value()) else {
+            let Some((name, texts)) = file_texts(binding, source) else {
                 continue;
             };
-            let elements: Vec<AttrName<'_>> = path.elements().collect();
-            let (name, texts) = match elements.as_slice() {
-                [.., AttrName::Str(entry), AttrName::Ident(last)]
-                    if last.text(source) == "text" =>
-                {
-                    (
-                        string_text(*entry, source),
-                        vec![(value, path.syntax().content_range())],
-                    )
-                }
-                [.., AttrName::Str(entry)] => {
-                    let mut texts = Vec::new();
-                    text_bindings(value, source, &mut texts);
-                    (string_text(*entry, source), texts)
-                }
-                _ => continue,
-            };
-            if !is_file_name(&name) {
-                continue;
-            }
             let Some(format) = Format::of(&name) else {
                 continue;
             };
@@ -708,4 +709,115 @@ fn generated(model: &SemanticModel, body: &TextBody<'_>, format: Format) -> Opti
     } else {
         generated
     })
+}
+
+const DATA_FORMATS: [(&str, &str); 4] = [
+    (".json", "JSON"),
+    (".toml", "TOML"),
+    (".yaml", "YAML"),
+    (".yml", "YAML"),
+];
+
+fn data_path<'a>(expr: Expr<'a>, source: &'a str) -> Option<(&'a SyntaxToken, &'static str)> {
+    let Expr::Path(token) = unwrap_parens(expr) else {
+        return None;
+    };
+    let text = token.text(source);
+    if !(text.starts_with("./") || text.starts_with("../")) || text.contains("${") {
+        return None;
+    }
+    DATA_FORMATS
+        .iter()
+        .find(|(ext, _)| text.ends_with(ext))
+        .map(|&(_, format)| (token, format))
+}
+
+fn data_argument<'a>(apply: ApplyExpr<'a>, source: &'a str) -> Option<Expr<'a>> {
+    let (func, arg) = (apply.func()?, apply.arg()?);
+    match callee_name(func, source)? {
+        "importJSON" | "importTOML" => Some(arg),
+        "fromJSON" | "fromTOML" => match unwrap_parens(arg) {
+            Expr::Apply(read)
+                if read
+                    .func()
+                    .and_then(|f| callee_name(f, source))
+                    .is_some_and(|n| n == "readFile") =>
+            {
+                read.arg()
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn source_value<'a>(binding: Binding<'a>, source: &str) -> Option<Expr<'a>> {
+    let path = binding.attrpath()?;
+    let last = path.elements().last()?;
+    matches!(last, AttrName::Ident(t) if t.text(source) == "source").then_some(())?;
+    binding.value()
+}
+
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+pub struct HandMaintainedDataFile;
+
+impl Rule for HandMaintainedDataFile {
+    fn code(&self) -> &'static str {
+        "hand-maintained-data-file"
+    }
+
+    fn name(&self) -> &'static str {
+        "Hand-maintained data file"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags a literal relative path to a `.json`, `.toml`, `.yaml` or `.yml` file that is read as data (`lib.importJSON`, `lib.importTOML`, `builtins.fromJSON (builtins.readFile ./x.json)`, `builtins.fromTOML (builtins.readFile ./x.toml)`) or installed as a file entry's `source` (e.g. `environment.etc.\"x.json\".source`). Data kept by hand in a serialisation format is better kept as a `.nix` value and serialised by a generator where a file is needed. Interpolated paths, lock files (names containing `lock`) and paths under the config's `generated` prefixes are skipped. Report only."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let source = model.source();
+        let dir = model.path().and_then(Path::parent).unwrap_or(Path::new(""));
+        for node in model.root().descendants() {
+            let candidate = match Expr::cast(node) {
+                Some(Expr::Apply(apply)) => data_argument(apply, source),
+                _ => Binding::cast(node).and_then(|b| source_value(b, source)),
+            };
+            let Some((token, format)) = candidate.and_then(|e| data_path(e, source)) else {
+                continue;
+            };
+            let text = token.text(source);
+            let file = normalize(&dir.join(text));
+            let name = file.file_name().and_then(|n| n.to_str()).unwrap_or(text);
+            if name.contains("lock") || config.is_generated(&file) {
+                continue;
+            }
+            diags.push(Diagnostic::new(
+                self.code(),
+                self.severity(),
+                format!(
+                    "{text} is data maintained by hand in {format}; keep it as a .nix value (import ./x.nix) and let a generator write {format} where a file is needed"
+                ),
+                token.range(),
+            ));
+        }
+    }
 }

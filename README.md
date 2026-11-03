@@ -39,7 +39,7 @@ $ strictix fix slop.nix
 
 ## Rules
 
-98 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
+100 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
@@ -49,7 +49,7 @@ $ strictix fix slop.nix
 | Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, duplicate-function-argument, dynamic-import, suspicious-import-argument, suspicious-recursion, unsafe-with-shadowing, shallow-merge-overwrite (opt-in), discouraged-lib-type, masked-generator |
 | Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in) |
 | Maintainability | cyclomatic-complexity, cognitive-complexity |
-| Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config |
+| Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data |
 
 `cognitive-complexity` warns when a lambda scores above **5**. It counts
 control-flow nesting, conditional helpers (`lib.mkIf`, `lib.optional*`),
@@ -135,6 +135,8 @@ enabling. `strictix list` marks opt-in rules; `strictix explain` shows whether a
 rule runs by default.
 
 Config (strictix.toml) toggles rules; .strictixignore prunes paths.
+`[lint] generated = ["path/prefix", ...]` marks generated data files (matched like
+`[schemas]` prefixes) so `hand-maintained-data-file` skips them.
 For a one-off finding, put a full-line `# strictix: disable-next-line=CODE`
 comment immediately above the code it reports. The directive is intentionally
 narrow: malformed or unknown codes are ignored, and it suppresses only that

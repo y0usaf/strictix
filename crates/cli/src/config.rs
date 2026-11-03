@@ -8,6 +8,7 @@
 //! [lint]
 //! disabled = ["tautology"]
 //! schema = "options.json"
+//! generated = ["modules/data/lock.json"]
 //!
 //! [schemas]
 //! "modules/phone" = "phone-options.json"
@@ -15,7 +16,7 @@
 //! ```
 //!
 //! Supported: `#` comments (full line), blank lines, the `[lint]`
-//! section, `disabled` and `enabled` (arrays of strings), `schema` (string),
+//! section, `disabled`, `enabled` and `generated` (arrays of strings), `schema` (string),
 //! and the `[schemas]` section of `"path prefix" = "options.json"` pairs
 //! (`""` turns the schema rules off under that prefix). Unknown keys in
 //! `[lint]` and unknown sections are ignored; missing keys are fine.
@@ -117,6 +118,13 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
             "enabled" => {
                 config.enabled =
                     parse_string_array(value).map_err(|e| format!("line {}: {e}", line_no + 1))?;
+            }
+            "generated" => {
+                config.generated = parse_string_array(value)
+                    .map_err(|e| format!("line {}: {e}", line_no + 1))?
+                    .into_iter()
+                    .map(PathBuf::from)
+                    .collect();
             }
             "schema" => {
                 config.schema = Some(PathBuf::from(

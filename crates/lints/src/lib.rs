@@ -24,6 +24,7 @@ pub mod interpolation_rules;
 pub mod invalid_list_access;
 mod lib_helpers;
 pub mod lib_type_rules;
+pub mod lua_data_rules;
 pub mod missing_attribute;
 pub mod missing_function_argument;
 pub mod module_rules;
@@ -57,7 +58,7 @@ use call_simplification::{
     ManualOptional, OptionalListArgument,
 };
 use cognitive_complexity::CognitiveComplexity;
-use config_file_rules::{HandWrittenConfig, MaskedGenerator};
+use config_file_rules::{HandMaintainedDataFile, HandWrittenConfig, MaskedGenerator};
 use duplicate_attr::DuplicateAttribute;
 use duplicate_formal::DuplicateFormal;
 use duplicate_inherit::DuplicateInherit;
@@ -72,6 +73,7 @@ use ill_typed_unary_op::IllTypedUnaryOp;
 use interpolation_rules::{CoercedInterpolation, RedundantInterpolation, RedundantQuotedAttr};
 use invalid_list_access::InvalidListAccess;
 use lib_type_rules::{DiscouragedLibType, UnknownLibType};
+use lua_data_rules::HandWrittenLuaData;
 use missing_attribute::MissingAttribute;
 use missing_function_argument::MissingFunctionArgument;
 use module_rules::{ConfigDependentImports, MixedModuleSyntax};
@@ -207,5 +209,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         SingletonOptionals,
         MaskedGenerator,
         HandWrittenConfig,
+        HandMaintainedDataFile,
+        HandWrittenLuaData,
     }
 }

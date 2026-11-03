@@ -21,6 +21,9 @@ pub struct LintConfig {
     /// schema turns the schema rules off under that prefix. The longest
     /// matching prefix wins over [Self::schema].
     pub schemas: Vec<(PathBuf, Option<PathBuf>)>,
+    /// Path prefixes of generated data files, exempt from
+    /// `hand-maintained-data-file`.
+    pub generated: Vec<PathBuf>,
 }
 
 impl LintConfig {
@@ -57,6 +60,17 @@ impl LintConfig {
                     .max_by_key(|(prefix, _)| bare(prefix).components().count())
             })
             .map_or(self.schema.as_deref(), |(_, schema)| schema.as_deref())
+    }
+
+    /// Whether `file` lies under a [Self::generated] prefix. A leading
+    /// `./` on either side is ignored.
+    #[must_use]
+    pub fn is_generated(&self, file: &Path) -> bool {
+        let bare = |p: &'_ Path| p.strip_prefix(".").unwrap_or(p).to_path_buf();
+        let file = bare(file);
+        self.generated
+            .iter()
+            .any(|prefix| file.starts_with(bare(prefix)))
     }
 
     /// Builder: set the schema path, enabling the schema rule.
