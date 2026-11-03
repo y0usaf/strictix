@@ -159,3 +159,36 @@ fn patch_layout_the_printer_cannot_reproduce_is_an_error() {
     .contains("not context"));
     assert!(expression("patch", &format!("text\n--- a/x\n+++ b/x\n{hunk}"), &[]).is_err());
 }
+
+#[test]
+fn markdown_blocks_inlines_and_blank_lines() {
+    let source = "# Title\n\n<!-- note -->\n\n- one `x`\n- **two** [a](b)\n\n| A | B |\n|---|---|\n| *c* | d |\n";
+    assert_eq!(
+        expression("markdown", source, &[]).unwrap(),
+        "[\n  (heading 1 \"Title\")\n  blank\n  (comment \" note \")\n  blank\n  (bullets [\n    [\"one \" (code \"x\")]\n    [(strong \"two\") \" \" (link \"a\" \"b\")]\n  ])\n  blank\n  (table [\n    [\"A\" \"B\"]\n    [[(em \"c\")] \"d\"]\n  ])\n]"
+    );
+}
+
+#[test]
+fn markdown_paragraphs_filled_to_the_width_are_wrap() {
+    let words = "word ".repeat(20);
+    let source = format!("{}\n{}\n", words[..74].trim_end(), words[75..].trim_end());
+    assert_eq!(
+        expression("markdown", &source, &[]).unwrap(),
+        format!("[\n  (wrap {:?})\n]", words.trim_end())
+    );
+    assert!(expression("markdown", "a\nb\n", &[])
+        .unwrap_err()
+        .contains("not a fill"));
+}
+
+#[test]
+fn markdown_it_cannot_reproduce_is_an_error() {
+    assert!(expression("markdown", "Title\n=====\n", &[]).is_err());
+    assert!(expression("markdown", "* star\n", &[]).is_err());
+    assert!(expression("markdown", "- a\n\n- b\n", &[])
+        .unwrap_err()
+        .contains("loose"));
+    assert!(expression("markdown", "__a__\n", &[]).is_err());
+    assert!(expression("markdown", "a\n\n\n", &[]).is_err());
+}

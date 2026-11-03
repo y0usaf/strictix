@@ -1,5 +1,6 @@
 mod lisp;
 mod luau;
+mod markdown;
 mod nix;
 mod patch;
 mod shell;
@@ -7,12 +8,13 @@ mod vbs;
 
 pub use nix::HOLE_BASE;
 
-pub const LANGUAGES: [&str; 5] = ["lisp", "luau", "patch", "shell", "vbs"];
+pub const LANGUAGES: [&str; 6] = ["lisp", "luau", "markdown", "patch", "shell", "vbs"];
 
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {
         "lisp" => lisp::import(source, holes),
         "luau" => luau::import(source, holes),
+        "markdown" => markdown::import(source, holes),
         "patch" => patch::import(source, holes),
         "shell" => shell::import(source, holes),
         "vbs" => vbs::import(source, holes),

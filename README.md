@@ -87,12 +87,13 @@ $ strictix split . --merged flake.nix
 
 `strictix import LANGUAGE FILE` parses a source file with the language's
 tree-sitter grammar (`lisp`: tree-sitter-commonlisp, `luau`: tree-sitter-luau,
-`patch`: tree-sitter-diff, `shell`: tree-sitter-bash, `vbs`: jcolozzi's
-tree-sitter-VB6-VBA-VBS, whose `source_file` cannot start with a comment or
-blank line, so the leading run of comment and blank lines is read without it,
-and which parses `Set x = y` as a call of `Set`, read back as the assignment
-it is) and prints it as the Nix syntax tree finix's generators render: a data
-file `{rows, str, ...}: [ ... ]`, a function of the constructors of
+`markdown`: tree-sitter-md, `patch`: tree-sitter-diff, `shell`:
+tree-sitter-bash, `vbs`: jcolozzi's tree-sitter-VB6-VBA-VBS, whose
+`source_file` cannot start with a comment or blank line, so the leading run of
+comment and blank lines is read without it, and which parses `Set x = y` as a
+call of `Set`, read back as the assignment it is) and prints it as the Nix
+syntax tree finix's generators render: a data file
+`{rows, str, ...}: [ ... ]`, a function of the constructors of
 `generators.LANGUAGE` it uses. A `.nix` FILE is read as a line list (one
 string per source line); when it is not a list itself but holds one
 `generators.<name>Source [ ... ]` call, the file is printed back with that
@@ -100,13 +101,14 @@ call replaced by
 `generators.LANGUAGE.render (let inherit (generators.LANGUAGE) ...; in [ ... ])`,
 and the list's interpolations come back as interpolations inside the tree's
 strings. Layout the printer derives (Lisp indentation; shell and Luau nesting;
-a hunk's line counts and new start) is left out; layout it cannot derive is
-kept as `rows`, `inline`, `at` and `blank` nodes, and anything else it would
-not reproduce byte for byte (double spaces, trailing comments, unsupported
-syntax; in a patch, text before the first file, renames,
-`\ No newline at end of file`) is an error naming the line. The Luau importer
-prints every tree back as the printer would and refuses the file at the first
-line that differs from the source.
+a hunk's line counts and new start; a Markdown paragraph filled to 78 columns,
+kept as `wrap`) is left out; layout it cannot derive is kept as `rows`,
+`inline`, `at` and `blank` nodes, and anything else it would not reproduce
+byte for byte (double spaces, trailing comments, unsupported syntax; in a
+patch, text before the first file, renames, `\ No newline at end of file`) is
+an error naming the line. The Luau importer prints every tree back as the
+printer would and refuses the file at the first line that differs from the
+source.
 
 `strictix check` and `strictix fix` lint a merged file binding by binding, as
 the files its manifest names: each binding is restored in memory and linted
