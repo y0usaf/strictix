@@ -90,12 +90,12 @@ tree-sitter grammar (`glsl`: tree-sitter-glsl, `javascript`:
 tree-sitter-javascript, `lisp`: tree-sitter-commonlisp, `lua`:
 tree-sitter-lua, `luau`: tree-sitter-luau, `markdown`: tree-sitter-md,
 `patch`: tree-sitter-diff, `python`: tree-sitter-python, `shell`:
-tree-sitter-bash, `vbs`: jcolozzi's tree-sitter-VB6-VBA-VBS, whose
-`source_file` cannot start with a comment or blank line, so the leading run of
-comment and blank lines is read without it, and which parses `Set x = y` as a
-call of `Set`, read back as the assignment it is) and prints it as the Nix
-syntax tree finix's generators render: a data file
-`{rows, str, ...}: [ ... ]`, a function of the constructors of
+tree-sitter-bash, `ts`: tree-sitter-typescript, `vbs`: jcolozzi's
+tree-sitter-VB6-VBA-VBS, whose `source_file` cannot start with a comment or
+blank line, so the leading run of comment and blank lines is read without it,
+and which parses `Set x = y` as a call of `Set`, read back as the assignment
+it is) and prints it as the Nix syntax tree finix's generators render: a data
+file `{rows, str, ...}: [ ... ]`, a function of the constructors of
 `generators.LANGUAGE` it uses. A `.nix` FILE is read as a line list (one
 string per source line); when it is not a list itself but holds one
 `generators.<name>Source [ ... ]` call, the file is printed back with that
@@ -105,8 +105,9 @@ and the list's interpolations come back as interpolations inside the tree's
 strings. Layout the printer derives (Lisp indentation; shell, Luau and Python
 nesting; Python's spacing; a hunk's line counts and new start; a Markdown
 paragraph filled to 78 columns, kept as `wrap`; GLSL blocks and continuation
-rows under an assignment) is left out; layout it cannot derive is kept as
-`rows`, `inline`, `at` and `blank` nodes (and, for Python, `aligned` and
+rows under an assignment; TypeScript blocks) is left out; layout it cannot
+derive is kept as `rows`, `inline`, `at`, `below` (TypeScript's break after
+`=`, `=>`, `:` or `(`) and `blank` nodes (and, for Python, `aligned` and
 `hang` brackets), and anything else it would not reproduce byte for byte
 (double spaces, trailing comments, unsupported syntax; in a patch, text before
 the first file, renames, `\ No newline at end of file`) is an error naming the

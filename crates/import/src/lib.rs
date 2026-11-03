@@ -8,11 +8,12 @@ mod nix;
 mod patch;
 mod python;
 mod shell;
+mod ts;
 mod vbs;
 
 pub use nix::HOLE_BASE;
 
-pub const LANGUAGES: [&str; 10] = [
+pub const LANGUAGES: [&str; 11] = [
     "glsl",
     "javascript",
     "lisp",
@@ -22,6 +23,7 @@ pub const LANGUAGES: [&str; 10] = [
     "patch",
     "python",
     "shell",
+    "ts",
     "vbs",
 ];
 
@@ -36,6 +38,7 @@ pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<Stri
         "patch" => patch::import(source, holes),
         "python" => python::import(source, holes),
         "shell" => shell::import(source, holes),
+        "ts" => ts::import(source, holes),
         "vbs" => vbs::import(source, holes),
         other => Err(format!(
             "no importer for {other}; known: {}",
