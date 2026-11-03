@@ -1018,6 +1018,11 @@ pub fn merge(options: &MergeOptions) -> Result<MergeReport, String> {
     let entry = join("", &options.entry).ok_or("entry escapes the merge root")?;
     let out_file = join("", &options.out).ok_or("output escapes the merge root")?;
     let out_dir = parent(&out_file).to_string();
+    if std::fs::symlink_metadata(root.join(&out_file)).is_ok() {
+        return Err(format!(
+            "{out_file} already exists; refusing to overwrite it"
+        ));
+    }
 
     let (files, mut analyses) = load(&root, &entry, &out_file, &options.expand)?;
     let expansions = evaluate_expansions(&root, &entry, &analyses[&entry])?;
@@ -1126,7 +1131,12 @@ fn write_merge(
     rewritten: &[(String, String)],
     inlined: &[String],
 ) -> Result<usize, String> {
-    std::fs::write(root.join(out_file), merged).map_err(|e| format!("writing {out_file}: {e}"))?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(root.join(out_file))
+        .and_then(|mut file| std::io::Write::write_all(&mut file, merged.as_bytes()))
+        .map_err(|e| format!("writing {out_file}: {e}"))?;
     for (file, text) in rewritten {
         std::fs::write(root.join(file), text).map_err(|e| format!("writing {file}: {e}"))?;
     }

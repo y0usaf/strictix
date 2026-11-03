@@ -700,13 +700,32 @@ pub fn split(options: &SplitOptions) -> Result<SplitReport, String> {
         }
     }
 
+    if let Some((path, _)) = restored
+        .iter()
+        .find(|(path, _)| std::fs::symlink_metadata(root.join(path)).is_ok())
+    {
+        return Err(format!("{path} already exists; refusing to overwrite it"));
+    }
     if !options.dry_run {
         for (path, text) in restored.iter().chain(&redirected) {
             let full = root.join(path);
             if let Some(dir) = full.parent() {
                 std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
             }
-            std::fs::write(&full, text).map_err(|e| format!("writing {path}: {e}"))?;
+            let write = if restored.iter().any(|(p, _)| p == path) {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&full)
+            } else {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(&full)
+            };
+            write
+                .and_then(|mut file| std::io::Write::write_all(&mut file, text.as_bytes()))
+                .map_err(|e| format!("writing {path}: {e}"))?;
         }
         std::fs::remove_file(root.join(&merged)).map_err(|e| format!("removing {merged}: {e}"))?;
         let touched: Vec<String> = restored
