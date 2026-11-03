@@ -58,3 +58,42 @@ fn a_data_file_takes_the_constructors_it_uses() {
         "{\n  rows,\n  str,\n  ...\n}: [\n  (rows [\n    \"a\"\n    (str \"b\")\n  ])\n]\n"
     );
 }
+
+#[test]
+fn python_statements_expressions_and_layout() {
+    let source = "import os\n\n\ndef f(a, b=1):\n    if a:\n        return os.path.join(a, f\"{b:03d}\")\n    elif b:\n        x = g(a,\n              b)\n    else:\n        pass\n";
+    assert_eq!(
+        expression("python", source, &[]).unwrap(),
+        "[\n  [\"import\" \"os\"]\n  blank\n  blank\n  (def \"f\" [\"a\" (kw \"b\" 1)] [\n    (ifElse \"a\" [\n      [\"return\" (call \"os.path.join\" [\"a\" (str [(spec \"b\" \"03d\")])])]\n    ] (ifElse \"b\" [\n      [\"x\" \"=\" (call \"g\" (aligned [\"a\" \"b\"]))]\n    ] [\n      \"pass\"\n    ]))\n  ])\n]"
+    );
+}
+
+#[test]
+fn python_hanging_brackets_slices_and_continuations() {
+    let source =
+        "x = f(\n    a,\n    b,\n)\ny = g(\n    a, b\n)\nz = s[a + 1 :] + s[1:] \\\n    + t\n";
+    assert_eq!(
+        expression("python", source, &[]).unwrap(),
+        "[\n  [\"x\" \"=\" (call \"f\" (rows [\"a\" \"b\"]))]\n  [\"y\" \"=\" (call \"g\" (rows [[\"a\" \"b\"]]))]\n  (rows [[\"z\" \"=\" (index \"s\" (slice [\"a\" \"+\" 1] null)) \"+\" (index \"s\" (slice 1 null))] [\"+\" \"t\"]])\n]"
+    );
+}
+
+#[test]
+fn python_layout_the_printer_cannot_reproduce_is_an_error() {
+    assert!(expression("python", "x  = 1\n", &[])
+        .unwrap_err()
+        .contains("not one space"));
+    assert!(expression("python", "f(a, b,)\n", &[])
+        .unwrap_err()
+        .contains("trailing comma"));
+    assert!(expression("python", "x = 1  # note\n", &[]).is_err());
+    assert!(expression("python", "s[a+1:]\n", &[]).is_err());
+}
+
+#[test]
+fn python_template_placeholders_stay_names() {
+    assert_eq!(
+        data_file("python", "x = @owners@.get(k, '')\n", &[]).unwrap(),
+        "{\n  call,\n  sq,\n  ...\n}: [\n  [\"x\" \"=\" (call \"@owners@.get\" [\"k\" (sq \"\")])]\n]\n"
+    );
+}

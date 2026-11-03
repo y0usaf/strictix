@@ -86,8 +86,8 @@ $ strictix split . --merged flake.nix
 ```
 
 `strictix import LANGUAGE FILE` parses a source file with the language's
-tree-sitter grammar (`lisp`: tree-sitter-commonlisp, `shell`:
-tree-sitter-bash) and prints it as the Nix syntax tree finix's generators
+tree-sitter grammar (`lisp`: tree-sitter-commonlisp, `python`:
+tree-sitter-python, `shell`: tree-sitter-bash) and prints it as the Nix syntax tree finix's generators
 render: a data file `{rows, str, ...}: [ ... ]`, a function of the
 constructors of `generators.LANGUAGE` it uses. A `.nix` FILE is read as a
 line list (one string per source line); when it is not a list itself but
@@ -96,10 +96,13 @@ with that call replaced by
 `generators.LANGUAGE.render (let inherit (generators.LANGUAGE) ...; in [ ... ])`,
 and the list's interpolations come back as interpolations inside the tree's
 strings. Layout
-the printer derives (Lisp indentation, shell nesting) is left out; layout it
-cannot derive is kept as `rows`, `inline`, `at` and `blank` nodes, and
+the printer derives (Lisp indentation, shell and Python nesting, Python's
+spacing) is left out; layout it
+cannot derive is kept as `rows`, `inline`, `at` and `blank` nodes (and, for
+Python, `aligned` and `hang` brackets), and
 anything else it would not reproduce byte for byte (double spaces, trailing
-comments, unsupported syntax) is an error naming the line.
+comments, unsupported syntax) is an error naming the line. Python's
+`@name@` substitution placeholders are names to the importer.
 
 `strictix check` and `strictix fix` lint a merged file binding by binding, as
 the files its manifest names: each binding is restored in memory and linted
