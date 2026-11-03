@@ -104,8 +104,7 @@ call replaced by
 and the list's interpolations come back as interpolations inside the tree's
 strings. Layout the printer derives (Lisp indentation; shell, Luau and Python
 nesting; Python's spacing; a hunk's line counts and new start; a Markdown
-paragraph filled to 78 columns, kept as `wrap`; GLSL blocks and continuation
-rows under an assignment; TypeScript blocks) is left out; layout it cannot
+paragraph filled to 78 columns, kept as `wrap`; TypeScript blocks) is left out; layout it cannot
 derive is kept as `rows`, `inline`, `at`, `below` (TypeScript's break after
 `=`, `=>`, `:` or `(`) and `blank` nodes (and, for Python, `aligned` and
 `hang` brackets), and anything else it would not reproduce byte for byte
@@ -113,6 +112,13 @@ derive is kept as `rows`, `inline`, `at`, `below` (TypeScript's break after
 the first file, renames, `\ No newline at end of file`) is an error naming the
 line. The Luau and JavaScript importers print every tree back as the printer
 would and refuse the file at the first line that differs from the source.
+GLSL is read for meaning, not layout: `import glsl` prints a shader as
+`{defines, consts, fns}`, attribute sets keyed by name, whose values are native
+Nix numbers and booleans and constructor nodes (`vec2 0.4 0.58`, `call "mix" a
+b t`, infix lists `["a" "*" "b" "+" 1.0]` nested only where precedence needs
+parentheses); layout, blank lines, redundant parentheses and literal spelling
+are dropped, and a global that is not one `const` name, a name declared twice,
+a suffixed float or a bare nested block is an error.
 tree-sitter-glsl reads `(float(x) + y)` as a broken cast, so the importer
 parses a constructor call of a builtin scalar type (`float(`, `int(`, `uint(`,
 `bool(`, `double(`) as a call of an identifier, keeping its source bytes.
@@ -164,9 +170,10 @@ maximum of 5 was calibrated on `~/finix`, which scores at most 5 everywhere.
 `duplicate-literal-list-item` skips a list of only strings that is the whole
 of a `*.data.nix` file (a text kept one line per string, where blank and
 closing lines repeat by nature), and every list of a `*.data.nix` file that is
-a function returning a list (a syntax tree built from a generator's
-constructors, where a symbol repeats as often as the code uses it), including
-such a binding of a merged file. `duplicate-function-argument` skips that
+a function returning a list or, for GLSL's keyed shaders, a function of `...`
+constructors returning an attribute set (a syntax tree built from a generator's constructors, where a symbol repeats as
+often as the code uses it), including such a binding of a merged file; the
+schema rules do not read that file as a module. `duplicate-function-argument` skips that
 syntax-tree file too, where a constructor takes the same name twice as often
 as the code does (Luau's `name = name` is `field "name" "name"`).
 

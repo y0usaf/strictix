@@ -194,32 +194,35 @@ fn markdown_it_cannot_reproduce_is_an_error() {
 }
 
 #[test]
-fn glsl_statements_are_word_lists_and_calls_are_nodes() {
-    let source = "#define SCALE(c) ((c) / 255.0)\nconst float K = -2.0;\n\nfloat f(vec2 p, float k) {\n    float c = cos(k), s = sin(k);\n    if (k < 0.0) return -(p.x + k);\n    else if (k > 1.0) { c = 1.0; s = 0.0; }\n    for (int i = 0; i < 3; i++) {\n        c += p[i] * float(i);\n    }\n    return c * s;\n}\n";
+fn glsl_shaders_are_keyed_declarations_of_native_values() {
+    let source = "#define SCALE(c) ((c) / 255.0)\n#define K -2.0\nconst float A = 0.50;\nconst vec2 P[2] = vec2[2](vec2(0.0), vec2(1.0, -1.0));\nconst float B = A * 2.0;\nconst uint H = 0xffu;\n// the falloff\nfloat f(in vec2 p, float k) {\n    float c = cos(k), s[2];\n    if (k < 0.0) return -(p.x + k);\n    else if (k > 1e-5) { c = 1.0; s[0] = (c - k) - (k - c); }\n    for (int i = 0; i < 3; i++) c += p[i] * float(i) > 0.0 ? f(p.yx, k).x : 1.0;\n    return c * (s[1] / 2.0);\n}\n";
     assert_eq!(
         expression("glsl", source, &[]).unwrap(),
-        "[\n  (define (call \"SCALE\" [\"c\"]) [[[\"c\"] \"/\" \"255.0\"]])\n  [\"const\" \"float\" \"K\" \"=\" \"-2.0\"]\n  blank\n  (fn [\"float\" (call \"f\" [[\"vec2\" \"p\"] [\"float\" \"k\"]])] [\n    [\"float\" \"c\" \"=\" (call \"cos\" [\"k\"]) \",\" \"s\" \"=\" (call \"sin\" [\"k\"])]\n    (ifElse [\"k\" \"<\" \"0.0\"] (bare [\"return\" (unary \"-\" [\"p.x\" \"+\" \"k\"])]) (if' [\"k\" \">\" \"1.0\"] (inline [[\"c\" \"=\" \"1.0\"] [\"s\" \"=\" \"0.0\"]])))\n    (for [\"int\" \"i\" \"=\" 0] [\"i\" \"<\" 3] \"i++\" [\n      [\"c\" \"+=\" (index \"p\" \"i\") \"*\" (call \"float\" [\"i\"])]\n    ])\n    [\"return\" \"c\" \"*\" \"s\"]\n  ])\n]"
+        "{\n  defines = {\n    K = (-2.0);\n    SCALE = (macro [\"c\"] [\"c\" \"/\" 255.0]);\n  };\n  consts = {\n    A = 0.5;\n    B = (typed \"float\" [\"A\" \"*\" 2.0]);\n    H = (unsigned 255);\n    P = (array \"vec2\" [(vec2 0.0) (vec2 1.0 (-1.0))]);\n  };\n  fns = {\n    f = (commented \"the falloff\" (fn \"float\" [[\"in\" \"vec2\" \"p\"] [\"float\" \"k\"]] [\n(var \"float\" \"c\" (call \"cos\" \"k\"))\n(var (sized \"float\" 2) \"s\" null)\n(ifElse [\"k\" \"<\" 0.0] [\n(return (neg [\"p.x\" \"+\" \"k\"]))\n] (if' [\"k\" \">\" 1.0e-5] [\n(assign \"c\" 1.0)\n(assign (index \"s\" 0) [\"c\" \"-\" \"k\" \"-\" [\"k\" \"-\" \"c\"]])\n]))\n(for (var \"int\" \"i\" 0) [\"i\" \"<\" 3] (inc \"i\") [\n(update \"+=\" \"c\" (cond [(index \"p\" \"i\") \"*\" (float \"i\") \">\" 0.0] (field (call \"f\" \"p.yx\" \"k\") \"x\") 1.0))\n])\n(return [\"c\" \"*\" [(index \"s\" 1) \"/\" 2.0]])\n]));\n  };\n}"
     );
 }
 
 #[test]
-fn glsl_broken_lines_are_rows() {
-    let source = "float a = b + c\n        - d;\nvec3 v = mix(x,\n             y);\nconst vec2 P[2] = vec2[2](\n    vec2(0.0), vec2(1.0)\n);\n";
-    assert_eq!(
-        expression("glsl", source, &[]).unwrap(),
-        "[\n  (rows [\n    [\"float\" \"a\" \"=\" \"b\" \"+\" \"c\"]\n    [\"-\" \"d\"]\n  ])\n  [\"vec3\" \"v\" \"=\" (call \"mix\" (rows [\n    [\"x\"]\n    [\"y\"]\n  ]))]\n  [\"const\" \"vec2\" (index \"P\" 2) \"=\" (call (index \"vec2\" 2) (rows [\n    []\n    [(call \"vec2\" [\"0.0\"]) (call \"vec2\" [\"1.0\"])]\n  ]))]\n]"
-    );
-    assert!(expression("glsl", "float a = b\n  + c;\n", &[])
-        .unwrap()
-        .contains("(at 2 [\"+\" \"c\"])"));
+fn glsl_data_file_formals_skip_keys_and_exponents() {
+    let file = data_file("glsl", "const float E = 1e-5;\n", &[]).unwrap();
+    assert_eq!(file, "_: {\n  consts = {\n    E = 1.0e-5;\n  };\n}\n");
 }
 
 #[test]
-fn glsl_layout_the_printer_cannot_reproduce_is_an_error() {
-    assert!(expression("glsl", "float a  = 1.0;\n", &[]).is_err());
-    assert!(expression("glsl", "float f() {\n  return 1.0;\n}\n", &[]).is_err());
-    assert!(expression("glsl", "float a = f(b , c);\n", &[]).is_err());
-    assert!(expression("glsl", "float a = 1.0; // one\n", &[]).is_err());
+fn glsl_what_a_keyed_shader_cannot_express_is_an_error() {
+    assert!(expression("glsl", "uniform float x;\n", &[])
+        .unwrap_err()
+        .contains("const"));
+    assert!(expression(
+        "glsl",
+        "float f(float a) {\n    return a;\n}\nfloat f(int a) {\n    return 1.0;\n}\n",
+        &[]
+    )
+    .unwrap_err()
+    .contains("declared twice"));
+    assert!(expression("glsl", "const float a = 1.0f;\n", &[]).is_err());
+    assert!(expression("glsl", "const float a = 1.0;\n// trailing\n", &[]).is_err());
+    assert!(expression("glsl", "void f() {\n    { a = 1.0; }\n}\n", &[]).is_err());
 }
 
 #[test]

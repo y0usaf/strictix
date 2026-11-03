@@ -114,7 +114,21 @@ pub fn identifiers(expression: &str) -> std::collections::BTreeSet<String> {
                 {
                     at += 1;
                 }
-                names.insert(expression[start..at].to_owned());
+                let rest = expression[at..].trim_start_matches([' ', '\n']);
+                if !(rest.starts_with('=') && !rest.starts_with("==")) {
+                    names.insert(expression[start..at].to_owned());
+                }
+            }
+            b if b.is_ascii_digit() => {
+                while at < bytes.len() && (bytes[at].is_ascii_digit() || bytes[at] == b'.') {
+                    at += 1;
+                }
+                if at < bytes.len() && matches!(bytes[at], b'e' | b'E') {
+                    at += 1;
+                    if at < bytes.len() && matches!(bytes[at], b'+' | b'-') {
+                        at += 1;
+                    }
+                }
             }
             _ => at += 1,
         }

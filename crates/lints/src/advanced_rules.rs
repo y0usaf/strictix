@@ -48,7 +48,7 @@ impl Rule for DuplicateFunctionArgument {
         "Duplicate function argument"
     }
     fn description(&self) -> &'static str {
-        "Flags a function application whose adjacent arguments are identical source expressions. A `*.data.nix` file that is a function returning a list is exempt: it is a syntax tree built from a generator's constructors, where a constructor takes the same name twice as often as the code does (`name = name`)."
+        "Flags a function application whose adjacent arguments are identical source expressions. A `*.data.nix` file that is a function returning a list, or a function of `...` constructors returning an attribute set, is exempt: it is a syntax tree built from a generator's constructors, where a constructor takes the same name twice as often as the code does (`name = name`)."
     }
     fn severity(&self) -> Severity {
         Severity::Warning

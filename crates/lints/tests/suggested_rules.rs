@@ -157,6 +157,11 @@ fn duplicate_literal_list_item_exempts_a_data_file_of_a_syntax_tree() {
         1,
         "a function returning an attribute set is not a syntax tree"
     );
+    assert!(run_at(
+        r#"{ call, ... }: { consts = { A = [ "a" "*" "b" "*" "c" ]; }; }"#,
+        "modules/shaders/x.data.nix"
+    )
+    .is_empty());
 }
 
 #[test]
