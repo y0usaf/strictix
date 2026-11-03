@@ -38,6 +38,20 @@ fn duplicate_function_argument_fires_only_for_adjacent_equal_args() {
 }
 
 #[test]
+fn duplicate_function_argument_exempts_a_data_file_of_a_syntax_tree() {
+    let at = |source: &str, path: &str| {
+        let tree = parse(source);
+        let model = SemanticModel::new(source, &tree).with_path(Some(std::path::Path::new(path)));
+        let mut diags = Vec::new();
+        DuplicateFunctionArgument.check_file(&model, &LintConfig::default(), &mut diags);
+        diags.len()
+    };
+    let tree = r#"{ field, ... }: [ (field "command" "command") ]"#;
+    assert_eq!(at(tree, "modules/window.data.nix"), 0);
+    assert_eq!(at(tree, "modules/window.nix"), 1);
+}
+
+#[test]
 fn unreachable_branch_fires_for_literal_conditions() {
     assert_eq!(
         codes("if true then 1 else 2", one(UnreachableBranch)),

@@ -86,8 +86,8 @@ $ strictix split . --merged flake.nix
 ```
 
 `strictix import LANGUAGE FILE` parses a source file with the language's
-tree-sitter grammar (`lisp`: tree-sitter-commonlisp, `shell`:
-tree-sitter-bash) and prints it as the Nix syntax tree finix's generators
+tree-sitter grammar (`lisp`: tree-sitter-commonlisp, `luau`:
+tree-sitter-luau, `shell`: tree-sitter-bash) and prints it as the Nix syntax tree finix's generators
 render: a data file `{rows, str, ...}: [ ... ]`, a function of the
 constructors of `generators.LANGUAGE` it uses. A `.nix` FILE is read as a
 line list (one string per source line); when it is not a list itself but
@@ -96,10 +96,12 @@ with that call replaced by
 `generators.LANGUAGE.render (let inherit (generators.LANGUAGE) ...; in [ ... ])`,
 and the list's interpolations come back as interpolations inside the tree's
 strings. Layout
-the printer derives (Lisp indentation, shell nesting) is left out; layout it
-cannot derive is kept as `rows`, `inline`, `at` and `blank` nodes, and
-anything else it would not reproduce byte for byte (double spaces, trailing
-comments, unsupported syntax) is an error naming the line.
+the printer derives (Lisp indentation, shell and Luau nesting) is left out;
+layout it cannot derive is kept as `rows`, `inline`, `at` and `blank` nodes,
+and anything else it would not reproduce byte for byte (double spaces, trailing
+comments, unsupported syntax) is an error naming the line. The Luau importer
+prints every tree back as the printer would and refuses the file at the first
+line that differs from the source.
 
 `strictix check` and `strictix fix` lint a merged file binding by binding, as
 the files its manifest names: each binding is restored in memory and linted
@@ -149,7 +151,9 @@ of a `*.data.nix` file (a text kept one line per string, where blank and
 closing lines repeat by nature), and every list of a `*.data.nix` file that is
 a function returning a list (a syntax tree built from a generator's
 constructors, where a symbol repeats as often as the code uses it), including
-such a binding of a merged file.
+such a binding of a merged file. `duplicate-function-argument` skips that
+syntax-tree file too, where a constructor takes the same name twice as often
+as the code does (Luau's `name = name` is `field "name" "name"`).
 
 `singleton-optionals` simplifies `lib.optionals condition [value]` to
 `lib.optional condition value`. Qualified calls have an automatic fix that
