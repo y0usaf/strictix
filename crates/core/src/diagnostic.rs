@@ -32,6 +32,35 @@ pub struct Diagnostic {
     pub help: Option<String>,
     /// Optional automatic fix; `None` when the rule has no safe rewrite.
     pub fix: Option<Fix>,
+    /// Codec conversion target, set only by `codec-candidate`.
+    pub codec: Option<Codec>,
+}
+
+/// What a codec conversion replaces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodecKind {
+    Text,
+    File,
+}
+
+/// How a `kind = file` candidate reads its data file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodecLoader {
+    Import,
+    Source,
+}
+
+/// A `codec-candidate` finding, consumed by an external converter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Codec {
+    pub id: String,
+    pub kind: CodecKind,
+    pub target: Option<String>,
+    pub loader: Option<CodecLoader>,
+    pub replace: TextRange,
+    pub lib: bool,
+    pub pkgs: bool,
+    pub entry: Option<String>,
 }
 
 impl Diagnostic {
@@ -50,6 +79,7 @@ impl Diagnostic {
             range,
             help: None,
             fix: None,
+            codec: None,
         }
     }
 
@@ -65,6 +95,13 @@ impl Diagnostic {
     #[must_use]
     pub fn with_fix(mut self, fix: Fix) -> Self {
         self.fix = Some(fix);
+        self
+    }
+
+    /// Attach a codec conversion target.
+    #[must_use]
+    pub fn with_codec(mut self, codec: Codec) -> Self {
+        self.codec = Some(codec);
         self
     }
 

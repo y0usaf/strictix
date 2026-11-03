@@ -24,6 +24,9 @@ pub struct LintConfig {
     /// Path prefixes of generated data files, exempt from
     /// `hand-maintained-data-file`.
     pub generated: Vec<PathBuf>,
+    /// Codecs from `[codecs.<id>]` as `(id, extensions)`; non-empty
+    /// enables `codec-candidate`.
+    pub codecs: Vec<(String, Vec<String>)>,
 }
 
 impl LintConfig {

@@ -10,6 +10,9 @@
 //! schema = "options.json"
 //! generated = ["modules/data/lock.json"]
 //!
+//! [codecs.json]
+//! extensions = ["json"]
+//!
 //! [schemas]
 //! "modules/phone" = "phone-options.json"
 //! "modules/flake" = ""
@@ -18,7 +21,8 @@
 //! Supported: `#` comments (full line), blank lines, the `[lint]`
 //! section, `disabled`, `enabled` and `generated` (arrays of strings), `schema` (string),
 //! and the `[schemas]` section of `"path prefix" = "options.json"` pairs
-//! (`""` turns the schema rules off under that prefix). Unknown keys in
+//! (`""` turns the schema rules off under that prefix), and
+//! `[codecs.<id>]` sections with an `extensions` string array. Unknown keys in
 //! `[lint]` and unknown sections are ignored; missing keys are fine.
 //!
 //! ponytail: no trailing comments, no multiline arrays, no other TOML
@@ -88,7 +92,8 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
                 .to_owned();
             continue;
         }
-        if section != "lint" && section != "schemas" {
+        let codec = section.strip_prefix("codecs.").map(str::to_owned);
+        if section != "lint" && section != "schemas" && codec.is_none() {
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
@@ -96,6 +101,17 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
         };
         let key = key.trim();
         let value = value.trim();
+        if let Some(id) = codec {
+            if key == "extensions" {
+                let extensions =
+                    parse_string_array(value).map_err(|e| format!("line {}: {e}", line_no + 1))?;
+                match config.codecs.iter_mut().find(|(known, _)| *known == id) {
+                    Some((_, known)) => *known = extensions,
+                    None => config.codecs.push((id, extensions)),
+                }
+            }
+            continue;
+        }
         if section == "schemas" {
             let err = |e: String| format!("line {}: {e}", line_no + 1);
             let prefix = if key.starts_with('"') {

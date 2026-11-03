@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use strictix_core::config::LintConfig;
-use strictix_core::diagnostic::{Diagnostic, Severity};
+use strictix_core::diagnostic::{Codec, CodecKind, CodecLoader, Diagnostic, Severity};
 use strictix_core::fix::Fix;
 use strictix_core::json::JsonValue;
 use strictix_core::project::ProjectContext;
@@ -818,6 +818,161 @@ impl Rule for HandMaintainedDataFile {
                 ),
                 token.range(),
             ));
+        }
+    }
+}
+
+fn codec_of<'c>(name: &str, config: &'c LintConfig) -> Option<&'c str> {
+    let lower = name.to_ascii_lowercase();
+    config
+        .codecs
+        .iter()
+        .find(|(_, extensions)| {
+            extensions.iter().any(|ext| {
+                lower
+                    .strip_suffix(&ext.to_ascii_lowercase())
+                    .and_then(|stem| stem.strip_suffix('.'))
+                    .is_some_and(|stem| !stem.is_empty())
+            })
+        })
+        .map(|(id, _)| id.as_str())
+}
+
+fn plain_literal(value: Expr<'_>, source: &str) -> Option<TextRange> {
+    let mut value = value;
+    while let Some(items) = wrapped(value, source) {
+        let [item] = items.as_slice() else {
+            return None;
+        };
+        value = *item;
+    }
+    let literal = unwrap_parens(value);
+    let parts: Vec<StringPart<'_>> = match literal {
+        Expr::String(string) => string.parts().collect(),
+        Expr::IndString(string) => string.parts().collect(),
+        _ => return None,
+    };
+    (!parts
+        .iter()
+        .any(|part| matches!(part, StringPart::Interp(_))))
+    .then(|| literal.content_range())
+}
+
+fn import_call<'a>(apply: ApplyExpr<'a>, source: &'a str) -> Option<Expr<'a>> {
+    let func = callee_name(apply.func()?, source)?;
+    matches!(func, "importJSON" | "importTOML" | "fromJSON" | "fromTOML")
+        .then(|| data_argument(apply, source))?
+}
+
+pub struct CodecCandidate;
+
+impl Rule for CodecCandidate {
+    fn code(&self) -> &'static str {
+        "codec-candidate"
+    }
+
+    fn name(&self) -> &'static str {
+        "Codec candidate"
+    }
+
+    fn description(&self) -> &'static str {
+        "Runs only when the config declares `[codecs.<id>]` sections with `extensions`. Flags data a codec can convert into a Nix value: a file entry whose name ends in a codec extension and whose `text` is a string literal without interpolations (through `mkForce`/`mkAfter`/... wrappers), and a literal relative path to a file with a codec extension read by `lib.importJSON`, `lib.importTOML`, `builtins.fromJSON (builtins.readFile ./x)`, `builtins.fromTOML (builtins.readFile ./x)` or installed as a `source`. Lock files (names containing `lock`) and paths under the config's `generated` prefixes are skipped. The JSON output carries a `codec` object (id, kind, target, loader, replace range, whether `lib`/`pkgs` are in scope, entry) for `nix run .#lint -- fix` to perform the conversion."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        if config.codecs.is_empty() {
+            return;
+        }
+        let source = model.source();
+        let dir = model.path().and_then(Path::parent).unwrap_or(Path::new(""));
+        let scope = |range: TextRange| {
+            (
+                model.is_bound("lib", range.start()),
+                model.is_bound("pkgs", range.start()),
+            )
+        };
+        for node in model.root().descendants() {
+            if let Some(binding) = Binding::cast(node) {
+                if let Some((name, texts)) = file_texts(binding, source) {
+                    if let Some(id) = codec_of(&name, config) {
+                        for (text, range) in texts {
+                            let Some(replace) = plain_literal(text, source) else {
+                                continue;
+                            };
+                            let (lib, pkgs) = scope(replace);
+                            diags.push(
+                                Diagnostic::new(
+                                    self.code(),
+                                    self.severity(),
+                                    format!("{name} is {id}; nix run .#lint -- fix converts it"),
+                                    range,
+                                )
+                                .with_codec(Codec {
+                                    id: id.to_owned(),
+                                    kind: CodecKind::Text,
+                                    target: None,
+                                    loader: None,
+                                    replace,
+                                    lib,
+                                    pkgs,
+                                    entry: Some(name.clone()),
+                                }),
+                            );
+                        }
+                    }
+                }
+            }
+            let (candidate, loader, call) = match Expr::cast(node) {
+                Some(Expr::Apply(apply)) => (
+                    import_call(apply, source),
+                    CodecLoader::Import,
+                    Some(apply.syntax().content_range()),
+                ),
+                _ => (
+                    Binding::cast(node).and_then(|b| source_value(b, source)),
+                    CodecLoader::Source,
+                    None,
+                ),
+            };
+            let Some(Expr::Path(token)) = candidate.map(unwrap_parens) else {
+                continue;
+            };
+            let text = token.text(source);
+            if !(text.starts_with("./") || text.starts_with("../")) || text.contains("${") {
+                continue;
+            }
+            let file = normalize(&dir.join(text));
+            let name = file.file_name().and_then(|n| n.to_str()).unwrap_or(text);
+            let Some(id) = codec_of(name, config) else {
+                continue;
+            };
+            if name.contains("lock") || config.is_generated(&file) {
+                continue;
+            }
+            let replace = call.unwrap_or_else(|| token.range());
+            let (lib, pkgs) = scope(replace);
+            diags.push(
+                Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!("{text} is {id}; nix run .#lint -- fix converts it"),
+                    token.range(),
+                )
+                .with_codec(Codec {
+                    id: id.to_owned(),
+                    kind: CodecKind::File,
+                    target: Some(file.display().to_string()),
+                    loader: Some(loader),
+                    replace,
+                    lib,
+                    pkgs,
+                    entry: None,
+                }),
+            );
         }
     }
 }

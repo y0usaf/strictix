@@ -58,7 +58,9 @@ use call_simplification::{
     ManualOptional, OptionalListArgument,
 };
 use cognitive_complexity::CognitiveComplexity;
-use config_file_rules::{HandMaintainedDataFile, HandWrittenConfig, MaskedGenerator};
+use config_file_rules::{
+    CodecCandidate, HandMaintainedDataFile, HandWrittenConfig, MaskedGenerator,
+};
 use duplicate_attr::DuplicateAttribute;
 use duplicate_formal::DuplicateFormal;
 use duplicate_inherit::DuplicateInherit;
@@ -210,6 +212,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         MaskedGenerator,
         HandWrittenConfig,
         HandMaintainedDataFile,
+        CodecCandidate,
         HandWrittenLuaData,
     }
 }
