@@ -90,3 +90,25 @@ fn luau_layout_the_printer_cannot_reproduce_is_an_error() {
         .contains("the printer writes"));
     assert_eq!(expression("luau", "\n", &[]).unwrap(), "[blank]");
 }
+
+#[test]
+fn vbs_statements_expressions_and_header_comments() {
+    let source = "' Play.\n\nOption Explicit\nDim a, b\nSet a = CreateObject(\"X.Y\")\nIf a.Count <> 0 Then\n\t' Go.\n\tb = \"say \"\"hi\"\"\" & a.Run(1, True)\nElse\n\tWScript.Quit 1\nEnd If\n";
+    assert_eq!(
+        expression("vbs", source, &[]).unwrap(),
+        "[\n  (comment \"' Play.\")\n  blank\n  (option \"Explicit\")\n  (dim [\"a\" \"b\"])\n  (set \"a\" [\"CreateObject\" (str \"X.Y\")])\n  (ifElse (op [\"a.Count\" \"<>\" \"0\"]) [\n(comment \"' Go.\")\n(assign \"b\" (op [(str \"say \\\"hi\\\"\") \"&\" [\"a.Run\" \"1\" \"True\"]]))\n] [\n[\"WScript.Quit\" \"1\"]\n])\n]"
+    );
+}
+
+#[test]
+fn vbs_layout_the_printer_cannot_reproduce_is_an_error() {
+    assert!(expression("vbs", "x  = 1\n", &[])
+        .unwrap_err()
+        .contains("would not give this layout back"));
+    assert!(expression("vbs", "x = 1 ' one\n", &[])
+        .unwrap_err()
+        .contains("would not give this layout back"));
+    assert!(expression("vbs", "If x Then\n    y\nEnd If\n", &[])
+        .unwrap_err()
+        .contains("line 2"));
+}

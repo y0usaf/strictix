@@ -10,3 +10,4 @@ tree-sitter = "0.25"
 tree-sitter-bash = "0.25"
 tree-sitter-commonlisp = "0.4"
 tree-sitter-luau = "1.2"
+tree-sitter-vbscript = { git = "https://github.com/jcolozzi/tree-sitter-VB6-VBA-VBS", rev = "b4e287e8162bc552802456a31f358a546d6531bd" }

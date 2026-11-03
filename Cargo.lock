@@ -195,6 +195,7 @@ dependencies = [
  "tree-sitter-bash",
  "tree-sitter-commonlisp",
  "tree-sitter-luau",
+ "tree-sitter-vbscript",
 ]
 
 [[package]]
@@ -268,6 +269,15 @@ checksum = "871abeb427d719788bb38094facd7ff082908ef2b93c1d3d6a5f6025330120f4"
 dependencies = [
  "cc",
  "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-vbscript"
+version = "0.0.1"
+source = "git+https://github.com/jcolozzi/tree-sitter-VB6-VBA-VBS?rev=b4e287e8162bc552802456a31f358a546d6531bd#b4e287e8162bc552802456a31f358a546d6531bd"
+dependencies = [
+ "cc",
+ "tree-sitter",
 ]
 
 [[package]]
