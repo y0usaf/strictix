@@ -87,7 +87,7 @@ $ strictix split . --merged flake.nix
 
 `strictix import LANGUAGE FILE` parses a source file with the language's
 tree-sitter grammar (`lisp`: tree-sitter-commonlisp, `shell`:
-tree-sitter-bash) and prints it as the Nix syntax tree finix's generators
+tree-sitter-bash, `ts`: tree-sitter-typescript) and prints it as the Nix syntax tree finix's generators
 render: a data file `{rows, str, ...}: [ ... ]`, a function of the
 constructors of `generators.LANGUAGE` it uses. A `.nix` FILE is read as a
 line list (one string per source line); when it is not a list itself but
@@ -96,8 +96,9 @@ with that call replaced by
 `generators.LANGUAGE.render (let inherit (generators.LANGUAGE) ...; in [ ... ])`,
 and the list's interpolations come back as interpolations inside the tree's
 strings. Layout
-the printer derives (Lisp indentation, shell nesting) is left out; layout it
-cannot derive is kept as `rows`, `inline`, `at` and `blank` nodes, and
+the printer derives (Lisp indentation, shell nesting, TypeScript blocks) is
+left out; layout it cannot derive is kept as `rows`, `inline`, `at`, `below`
+(TypeScript's break after `=`, `=>`, `:` or `(`) and `blank` nodes, and
 anything else it would not reproduce byte for byte (double spaces, trailing
 comments, unsupported syntax) is an error naming the line.
 

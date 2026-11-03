@@ -1,15 +1,17 @@
 mod lisp;
 mod nix;
 mod shell;
+mod ts;
 
 pub use nix::HOLE_BASE;
 
-pub const LANGUAGES: [&str; 2] = ["lisp", "shell"];
+pub const LANGUAGES: [&str; 3] = ["lisp", "shell", "ts"];
 
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {
         "lisp" => lisp::import(source, holes),
         "shell" => shell::import(source, holes),
+        "ts" => ts::import(source, holes),
         other => Err(format!(
             "no importer for {other}; known: {}",
             LANGUAGES.join(", ")
@@ -30,7 +32,10 @@ pub fn data_file(language: &str, source: &str, holes: &[String]) -> Result<Strin
 }
 
 pub fn constructors(expression: &str) -> Vec<String> {
-    nix::identifiers(expression).into_iter().collect()
+    nix::identifiers(expression)
+        .into_iter()
+        .filter(|name| !matches!(name.as_str(), "null" | "true" | "false"))
+        .collect()
 }
 
 fn parse(language: &tree_sitter::Language, source: &str) -> Result<tree_sitter::Tree, String> {
