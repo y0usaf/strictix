@@ -1,0 +1,11 @@
+[package]
+name = "strictix-import"
+description = "Source-to-Nix-AST importers for strictix, built on tree-sitter grammars"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tree-sitter = "0.25"
+tree-sitter-bash = "0.25"
+tree-sitter-commonlisp = "0.4"

@@ -14,6 +14,7 @@
 
 mod args;
 mod config;
+mod import;
 mod merge;
 mod merged;
 mod render;
@@ -58,7 +59,7 @@ fn main() -> ExitCode {
     }
     let Some(command) = parsed.command else {
         return usage_error(
-            "no command given (expected check, fix, explain, list, merge, or split)",
+            "no command given (expected check, fix, explain, list, merge, split, or import)",
         );
     };
     match command {
@@ -68,6 +69,23 @@ fn main() -> ExitCode {
         Command::List => run_list(),
         Command::Merge => run_merge(&parsed),
         Command::Split => run_split(&parsed),
+        Command::Import => run_import(&parsed),
+    }
+}
+
+fn run_import(args: &Args) -> ExitCode {
+    let [language, path] = args.paths.as_slice() else {
+        return usage_error("import requires LANGUAGE and FILE");
+    };
+    match import::run(&language.to_string_lossy(), path) {
+        Ok(nix) => {
+            print!("{nix}");
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("error: {}: {message}", path.display());
+            ExitCode::FAILURE
+        }
     }
 }
 

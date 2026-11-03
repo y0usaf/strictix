@@ -24,6 +24,7 @@ pub enum Command {
     Merge,
     /// Write a merged file's bindings back to their original files.
     Split,
+    Import,
 }
 
 /// Output format for diagnostics.
@@ -187,6 +188,7 @@ fn parse_command(word: &str) -> Result<Command, String> {
         "list" => Ok(Command::List),
         "merge" => Ok(Command::Merge),
         "split" => Ok(Command::Split),
+        "import" => Ok(Command::Import),
         other => Err(format!("unknown command '{other}'")),
     }
 }
@@ -208,6 +210,11 @@ COMMANDS:
               (path: merge root, default .)
     split     Write the bindings of --merged back to their original files
               (path: merge root, default .)
+    import    Print LANGUAGE FILE as the Nix syntax tree finix's generators
+              render (LANGUAGE: lisp, shell); a .nix FILE is read as a
+              line list, or as a file holding one generators.<name>Source
+              call on a line list, which is printed back with the call
+              replaced
 
 OPTIONS:
     -h, --help            Print this help

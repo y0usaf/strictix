@@ -13,3 +13,4 @@ path = "src/main.rs"
 strictix-core = { path = "../core" }
 strictix-syntax = { path = "../syntax" }
 strictix-lints = { path = "../lints" }
+strictix-import = { path = "../import" }

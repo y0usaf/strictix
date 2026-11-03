@@ -85,6 +85,20 @@ files; a new binding needs its path added to `merge_manifest.files`:
 $ strictix split . --merged flake.nix
 ```
 
+`strictix import LANGUAGE FILE` parses a source file with the language's
+tree-sitter grammar (`lisp`: tree-sitter-commonlisp, `shell`:
+tree-sitter-bash) and prints it as the Nix syntax tree finix's generators
+render: a data file `{generators}: with generators.LANGUAGE; [ ... ]`. A
+`.nix` FILE is read as a line list (one string per source line); when it is
+not a list itself but holds one `generators.<name>Source [ ... ]` call, the
+file is printed back with that call replaced by
+`generators.LANGUAGE.render (with generators.LANGUAGE; ...)`, and the list's
+interpolations come back as interpolations inside the tree's strings. Layout
+the printer derives (Lisp indentation, shell nesting) is left out; layout it
+cannot derive is kept as `rows`, `inline`, `at` and `blank` nodes, and
+anything else it would not reproduce byte for byte (double spaces, trailing
+comments, unsupported syntax) is an error naming the line.
+
 `strictix check` and `strictix fix` lint a merged file binding by binding, as
 the files its manifest names: each binding is restored in memory and linted
 at its manifest path, so `[schemas]` prefixes, `lint.generated`,
