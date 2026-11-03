@@ -102,7 +102,9 @@ pub(crate) fn ini(body: &str, interps: &[Interp<'_>], indent: &str) -> Option<St
             continue;
         }
         if let Some(header) = line.strip_prefix('[') {
-            let name = header.strip_suffix(']')?;
+            let name = header
+                .strip_suffix(']')
+                .filter(|n| !n.contains(['[', ']']))?;
             names.push(name);
             sections.push((attr_name(name)?, Node::Set(Vec::new())));
             continue;
