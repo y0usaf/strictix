@@ -192,3 +192,32 @@ fn markdown_it_cannot_reproduce_is_an_error() {
     assert!(expression("markdown", "__a__\n", &[]).is_err());
     assert!(expression("markdown", "a\n\n\n", &[]).is_err());
 }
+
+#[test]
+fn glsl_statements_are_word_lists_and_calls_are_nodes() {
+    let source = "#define SCALE(c) ((c) / 255.0)\nconst float K = -2.0;\n\nfloat f(vec2 p, float k) {\n    float c = cos(k), s = sin(k);\n    if (k < 0.0) return -(p.x + k);\n    else if (k > 1.0) { c = 1.0; s = 0.0; }\n    for (int i = 0; i < 3; i++) {\n        c += p[i] * float(i);\n    }\n    return c * s;\n}\n";
+    assert_eq!(
+        expression("glsl", source, &[]).unwrap(),
+        "[\n  (define (call \"SCALE\" [\"c\"]) [[[\"c\"] \"/\" \"255.0\"]])\n  [\"const\" \"float\" \"K\" \"=\" \"-2.0\"]\n  blank\n  (fn [\"float\" (call \"f\" [[\"vec2\" \"p\"] [\"float\" \"k\"]])] [\n    [\"float\" \"c\" \"=\" (call \"cos\" [\"k\"]) \",\" \"s\" \"=\" (call \"sin\" [\"k\"])]\n    (ifElse [\"k\" \"<\" \"0.0\"] (bare [\"return\" (unary \"-\" [\"p.x\" \"+\" \"k\"])]) (if' [\"k\" \">\" \"1.0\"] (inline [[\"c\" \"=\" \"1.0\"] [\"s\" \"=\" \"0.0\"]])))\n    (for [\"int\" \"i\" \"=\" 0] [\"i\" \"<\" 3] \"i++\" [\n      [\"c\" \"+=\" (index \"p\" \"i\") \"*\" (call \"float\" [\"i\"])]\n    ])\n    [\"return\" \"c\" \"*\" \"s\"]\n  ])\n]"
+    );
+}
+
+#[test]
+fn glsl_broken_lines_are_rows() {
+    let source = "float a = b + c\n        - d;\nvec3 v = mix(x,\n             y);\nconst vec2 P[2] = vec2[2](\n    vec2(0.0), vec2(1.0)\n);\n";
+    assert_eq!(
+        expression("glsl", source, &[]).unwrap(),
+        "[\n  (rows [\n    [\"float\" \"a\" \"=\" \"b\" \"+\" \"c\"]\n    [\"-\" \"d\"]\n  ])\n  [\"vec3\" \"v\" \"=\" (call \"mix\" (rows [\n    [\"x\"]\n    [\"y\"]\n  ]))]\n  [\"const\" \"vec2\" (index \"P\" 2) \"=\" (call (index \"vec2\" 2) (rows [\n    []\n    [(call \"vec2\" [\"0.0\"]) (call \"vec2\" [\"1.0\"])]\n  ]))]\n]"
+    );
+    assert!(expression("glsl", "float a = b\n  + c;\n", &[])
+        .unwrap()
+        .contains("(at 2 [\"+\" \"c\"])"));
+}
+
+#[test]
+fn glsl_layout_the_printer_cannot_reproduce_is_an_error() {
+    assert!(expression("glsl", "float a  = 1.0;\n", &[]).is_err());
+    assert!(expression("glsl", "float f() {\n  return 1.0;\n}\n", &[]).is_err());
+    assert!(expression("glsl", "float a = f(b , c);\n", &[]).is_err());
+    assert!(expression("glsl", "float a = 1.0; // one\n", &[]).is_err());
+}
