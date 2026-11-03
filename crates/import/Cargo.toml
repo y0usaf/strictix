@@ -9,3 +9,4 @@ license.workspace = true
 tree-sitter = "0.25"
 tree-sitter-bash = "0.25"
 tree-sitter-commonlisp = "0.4"
+tree-sitter-luau = "1.2"
