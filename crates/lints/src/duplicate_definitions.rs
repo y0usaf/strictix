@@ -493,6 +493,10 @@ impl Rule for DuplicateDefinitions {
         Severity::Warning
     }
 
+    fn default_enabled(&self) -> bool {
+        false
+    }
+
     fn check_file_project(
         &self,
         model: &SemanticModel,
