@@ -58,3 +58,50 @@ fn a_data_file_takes_the_constructors_it_uses() {
         "{\n  rows,\n  str,\n  ...\n}: [\n  (rows [\n    \"a\"\n    (str \"b\")\n  ])\n]\n"
     );
 }
+
+#[test]
+fn patch_files_hunks_and_changes() {
+    let source =
+        "--- a/x.c\n+++ b/x.c\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n@@ -9 +9,2 @@ int f() {\n \n+d\n";
+    assert_eq!(
+        data_file("patch", source, &[]).unwrap(),
+        "{\n  add,\n  del,\n  file,\n  hunk,\n  section,\n  ...\n}: [\n  (file \"x.c\" [\n    (hunk 1 [\n      \"a\"\n      (del \"b\")\n      (add \"c\")\n    ])\n    (section 9 \"int f() {\" [\n      \"\"\n      (add \"d\")\n    ])\n  ])\n]\n"
+    );
+}
+
+#[test]
+fn patch_git_headers_are_kept() {
+    let source = "diff --git a/y b/y\nindex 0123abc..4567def 100644\n--- a/y\n+++ b/y\n@@ -3 +3 @@\n-a\n+b\n";
+    assert_eq!(
+        expression("patch", source, &[]).unwrap(),
+        "[\n  (git \"y\" \"0123abc..4567def 100644\" [\n    (hunk 3 [\n      (del \"a\")\n      (add \"b\")\n    ])\n  ])\n]"
+    );
+}
+
+#[test]
+fn patch_layout_the_printer_cannot_reproduce_is_an_error() {
+    let hunk = "@@ -1 +1 @@\n-a\n+b\n";
+    assert!(
+        expression("patch", &format!("--- a/x\n+++ b/y\n{hunk}"), &[])
+            .unwrap_err()
+            .contains("paths differ")
+    );
+    assert!(
+        expression("patch", "--- a/x\n+++ b/x\n@@ -1,1 +1 @@\n-a\n+b\n", &[])
+            .unwrap_err()
+            .contains("counts")
+    );
+    assert!(
+        expression("patch", "--- a/x\n+++ b/x\n@@ -1 +2 @@\n-a\n+b\n", &[])
+            .unwrap_err()
+            .contains("new start")
+    );
+    assert!(expression(
+        "patch",
+        "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b\n",
+        &[]
+    )
+    .unwrap_err()
+    .contains("not context"));
+    assert!(expression("patch", &format!("text\n--- a/x\n+++ b/x\n{hunk}"), &[]).is_err());
+}
