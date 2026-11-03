@@ -83,8 +83,23 @@ $ strictix split . --merged finix.nix
 `cognitive-complexity` warns when a lambda scores above **5**. It counts
 control-flow nesting, conditional helpers (`lib.mkIf`, `lib.optional*`),
 and boolean operator sequences, measuring nested lambdas separately. Ordinary
-attribute-set nesting adds no cost. It has no automatic fix. See [scoring and default calibration](docs/cognitive-complexity.md) for the
-Nix-specific algorithm and measurements from `~/finix`.
+attribute-set nesting adds no cost. It has no automatic fix.
+
+| Construct | Cost |
+| --- | --- |
+| `if` | 1 plus enclosing conditional depth |
+| Final `else` | 1 |
+| Direct `else if` | 1; stays at the preceding `if`'s depth |
+| `lib.mkIf`, `lib.optional`, `lib.optionals`, `lib.optionalAttrs`, `lib.optionalString` (fully applied) | 1 plus enclosing conditional depth |
+| Run of the same `&&`, `||` or `->` | 1 |
+| Nested lambda | scored on its own, from depth zero |
+
+Conditions and branches raise the depth for their children, so
+`x: if a then (if b then 1 else 2) else 3` scores 5 and passes, one more
+nested `if` scores 9, and a flat three-condition `else if` chain scores 4.
+Helpers are recognised through the module's `lib`, its local aliases,
+`inherit (lib)` and `with lib;`; the linter does not evaluate imports. The
+maximum of 5 was calibrated on `~/finix`, which scores at most 5 everywhere.
 
 `singleton-optionals` simplifies `lib.optionals condition [value]` to
 `lib.optional condition value`. Qualified calls have an automatic fix that
