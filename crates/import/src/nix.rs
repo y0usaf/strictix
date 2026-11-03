@@ -97,3 +97,52 @@ pub fn int(text: &str) -> Option<String> {
         }
     })
 }
+
+pub fn identifiers(expression: &str) -> std::collections::BTreeSet<String> {
+    let mut names = std::collections::BTreeSet::new();
+    let bytes = expression.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'"' => at = skip_quoted(bytes, at + 1),
+            b'\'' if bytes.get(at + 1) == Some(&b'\'') => at = skip_indented(bytes, at + 2),
+            b if b.is_ascii_alphabetic() || b == b'_' => {
+                let start = at;
+                while at < bytes.len()
+                    && (bytes[at].is_ascii_alphanumeric()
+                        || matches!(bytes[at], b'_' | b'\'' | b'-'))
+                {
+                    at += 1;
+                }
+                names.insert(expression[start..at].to_owned());
+            }
+            _ => at += 1,
+        }
+    }
+    names
+}
+
+fn skip_quoted(bytes: &[u8], mut at: usize) -> usize {
+    while at < bytes.len() {
+        match bytes[at] {
+            b'\\' => at += 2,
+            b'"' => return at + 1,
+            _ => at += 1,
+        }
+    }
+    at
+}
+
+fn skip_indented(bytes: &[u8], mut at: usize) -> usize {
+    while at < bytes.len() {
+        if bytes[at] == b'\'' && bytes.get(at + 1) == Some(&b'\'') {
+            match bytes.get(at + 2) {
+                Some(b'\'' | b'$' | b'\\') => at += 3,
+                _ => return at + 2,
+            }
+        } else {
+            at += 1;
+        }
+    }
+    at
+}

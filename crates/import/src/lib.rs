@@ -18,10 +18,19 @@ pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<Stri
 }
 
 pub fn data_file(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
-    Ok(format!(
-        "{{generators}}:\nwith generators.{language}; {}\n",
-        expression(language, source, holes)?
-    ))
+    let expression = expression(language, source, holes)?;
+    let names = constructors(&expression);
+    let formals = if names.is_empty() {
+        "_".to_owned()
+    } else {
+        let names: String = names.iter().map(|name| format!("  {name},\n")).collect();
+        format!("{{\n{names}  ...\n}}")
+    };
+    Ok(format!("{formals}: {expression}\n"))
+}
+
+pub fn constructors(expression: &str) -> Vec<String> {
+    nix::identifiers(expression).into_iter().collect()
 }
 
 fn parse(language: &tree_sitter::Language, source: &str) -> Result<tree_sitter::Tree, String> {

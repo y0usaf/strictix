@@ -43,6 +43,18 @@ fn holes_become_interpolations() {
     let source = format!("printf '{hole}'\n");
     assert_eq!(
         data_file("shell", &source, &["values.foreground".to_owned()]).unwrap(),
-        "{generators}:\nwith generators.shell; [\n  [\"printf\" (sq \"${values.foreground}\")]\n]\n"
+        "{\n  sq,\n  ...\n}: [\n  [\"printf\" (sq \"${values.foreground}\")]\n]\n"
+    );
+}
+
+#[test]
+fn a_data_file_takes_the_constructors_it_uses() {
+    assert_eq!(
+        data_file("lisp", "(a b)\n", &[]).unwrap(),
+        "_: [\n  [\"a\" \"b\"]\n]\n"
+    );
+    assert_eq!(
+        data_file("lisp", "(a\n \"b\")\n", &[]).unwrap(),
+        "{\n  rows,\n  str,\n  ...\n}: [\n  (rows [\n    \"a\"\n    (str \"b\")\n  ])\n]\n"
     );
 }

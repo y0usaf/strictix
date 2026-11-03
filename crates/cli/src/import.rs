@@ -56,9 +56,18 @@ fn nix_file(language: &str, source: &str) -> Result<String, String> {
     };
     let (text, holes) = lines(list, source)?;
     let expression = strictix_import::expression(language, &text, &holes)?;
+    let names = strictix_import::constructors(&expression);
+    let tree = if names.is_empty() {
+        expression
+    } else {
+        format!(
+            "(let inherit (generators.{language}) {}; in {expression})",
+            names.join(" ")
+        )
+    };
     let range = call.syntax().content_range();
     Ok(format!(
-        "{}generators.{language}.render (with generators.{language}; {expression}){}",
+        "{}generators.{language}.render {tree}{}",
         &source[..range.start() as usize],
         &source[range.end() as usize..]
     ))
