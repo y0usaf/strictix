@@ -301,3 +301,34 @@ fn python_template_placeholders_stay_names() {
         "{\n  call,\n  sq,\n  ...\n}: [\n  [\"x\" \"=\" (call \"@owners@.get\" [\"k\" (sq \"\")])]\n]\n"
     );
 }
+
+#[test]
+fn javascript_statements_expressions_and_layout() {
+    let source = "#!/usr/bin/env node\n\nimport { join } from \"node:path\";\n\nconst { a, b } = x;\nlet n;\nasync function f(s) {\n  if (!s) return;\n  try { n = await g(s, -1); } catch {}\n  const o = { k: [1, \"v\"], \"q-r\": {\n    m: (n = s.t?.u) >= 0\n  }};\n  return o.k.length +\n    typeof n;\n}\n";
+    assert_eq!(
+        expression("javascript", source, &[]).unwrap(),
+        "[\n  (comment \"#!/usr/bin/env node\")\n  blank\n  (import' [\"join\"] \"node:path\")\n  blank\n  (const (obj [\"a\" \"b\"]) \"x\")\n  (let' \"n\" null)\n  (async (function \"f\" [\"s\"] [\n(if' (not \"s\") (return null))\n(try' (inline [(op [\"n\" \"=\" (await [\"g\" \"s\" (-1)])])]) null (inline []))\n(const \"o\" (obj [[\"k\" (array [1 (str \"v\")])] [(str \"q-r\") (obj (rows [\n[\"m\" (op [(paren (op [\"n\" \"=\" \"s.t?.u\"])) \">=\" 0])]\n]))]]))\n(return (op (rows [\n\"o.k.length\"\n\"+\"\n(typeof \"n\")\n])))\n]))\n]"
+    );
+}
+
+#[test]
+fn javascript_layout_the_printer_cannot_reproduce_is_an_error() {
+    assert!(expression("javascript", "f(a,b);\n", &[])
+        .unwrap_err()
+        .contains("line 1"));
+    assert!(expression("javascript", "const o = {a: 1};\n", &[]).is_err());
+    assert!(expression("javascript", "if (a) f();\n", &[])
+        .unwrap_err()
+        .contains("without braces"));
+    assert!(expression("javascript", "const s = 'x';\n", &[])
+        .unwrap_err()
+        .contains("single-quoted"));
+}
+
+#[test]
+fn javascript_data_file_leaves_null_to_nix() {
+    assert_eq!(
+        data_file("javascript", "let n;\n", &[]).unwrap(),
+        "{\n  let',\n  ...\n}: [\n  (let' \"n\" null)\n]\n"
+    );
+}

@@ -86,8 +86,9 @@ $ strictix split . --merged flake.nix
 ```
 
 `strictix import LANGUAGE FILE` parses a source file with the language's
-tree-sitter grammar (`glsl`: tree-sitter-glsl, `lisp`: tree-sitter-commonlisp,
-`lua`: tree-sitter-lua, `luau`: tree-sitter-luau, `markdown`: tree-sitter-md,
+tree-sitter grammar (`glsl`: tree-sitter-glsl, `javascript`:
+tree-sitter-javascript, `lisp`: tree-sitter-commonlisp, `lua`:
+tree-sitter-lua, `luau`: tree-sitter-luau, `markdown`: tree-sitter-md,
 `patch`: tree-sitter-diff, `python`: tree-sitter-python, `shell`:
 tree-sitter-bash, `vbs`: jcolozzi's tree-sitter-VB6-VBA-VBS, whose
 `source_file` cannot start with a comment or blank line, so the leading run of
@@ -109,8 +110,8 @@ rows under an assignment) is left out; layout it cannot derive is kept as
 `hang` brackets), and anything else it would not reproduce byte for byte
 (double spaces, trailing comments, unsupported syntax; in a patch, text before
 the first file, renames, `\ No newline at end of file`) is an error naming the
-line. The Luau importer prints every tree back as the printer would and
-refuses the file at the first line that differs from the source.
+line. The Luau and JavaScript importers print every tree back as the printer
+would and refuse the file at the first line that differs from the source.
 tree-sitter-glsl reads `(float(x) + y)` as a broken cast, so the importer
 parses a constructor call of a builtin scalar type (`float(`, `int(`, `uint(`,
 `bool(`, `double(`) as a call of an identifier, keeping its source bytes.

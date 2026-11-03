@@ -196,6 +196,7 @@ dependencies = [
  "tree-sitter-commonlisp",
  "tree-sitter-diff",
  "tree-sitter-glsl",
+ "tree-sitter-javascript",
  "tree-sitter-lua",
  "tree-sitter-luau",
  "tree-sitter-md",
@@ -275,6 +276,16 @@ name = "tree-sitter-glsl"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df0ee57cbf4c2b35d3a7f17a01bf33c0ef2e85987cb85e516ac8c6904c4e62ac"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-javascript"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68204f2abc0627a90bdf06e605f5c470aa26fdcb2081ea553a04bdad756693f5"
 dependencies = [
  "cc",
  "tree-sitter-language",

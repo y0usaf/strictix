@@ -1,4 +1,5 @@
 mod glsl;
+mod javascript;
 mod lisp;
 mod lua;
 mod luau;
@@ -11,13 +12,23 @@ mod vbs;
 
 pub use nix::HOLE_BASE;
 
-pub const LANGUAGES: [&str; 9] = [
-    "glsl", "lisp", "lua", "luau", "markdown", "patch", "python", "shell", "vbs",
+pub const LANGUAGES: [&str; 10] = [
+    "glsl",
+    "javascript",
+    "lisp",
+    "lua",
+    "luau",
+    "markdown",
+    "patch",
+    "python",
+    "shell",
+    "vbs",
 ];
 
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {
         "glsl" => glsl::import(source, holes),
+        "javascript" => javascript::import(source, holes),
         "lisp" => lisp::import(source, holes),
         "lua" => lua::import(source, holes),
         "luau" => luau::import(source, holes),
