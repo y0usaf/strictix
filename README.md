@@ -87,7 +87,10 @@ $ strictix split . --merged flake.nix
 
 `strictix import LANGUAGE FILE` parses a source file with the language's
 tree-sitter grammar (`lisp`: tree-sitter-commonlisp, `shell`:
-tree-sitter-bash) and prints it as the Nix syntax tree finix's generators
+tree-sitter-bash, `vbs`: jcolozzi's tree-sitter-VB6-VBA-VBS, whose
+`source_file` cannot start with a comment or blank line, so the leading run of
+comment and blank lines is read without it, and which parses `Set x = y` as a
+call of `Set`, read back as the assignment it is) and prints it as the Nix syntax tree finix's generators
 render: a data file `{rows, str, ...}: [ ... ]`, a function of the
 constructors of `generators.LANGUAGE` it uses. A `.nix` FILE is read as a
 line list (one string per source line); when it is not a list itself but

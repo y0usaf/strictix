@@ -1,15 +1,17 @@
 mod lisp;
 mod nix;
 mod shell;
+mod vbs;
 
 pub use nix::HOLE_BASE;
 
-pub const LANGUAGES: [&str; 2] = ["lisp", "shell"];
+pub const LANGUAGES: [&str; 3] = ["lisp", "shell", "vbs"];
 
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {
         "lisp" => lisp::import(source, holes),
         "shell" => shell::import(source, holes),
+        "vbs" => vbs::import(source, holes),
         other => Err(format!(
             "no importer for {other}; known: {}",
             LANGUAGES.join(", ")
