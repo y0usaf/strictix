@@ -5,12 +5,15 @@ mod luau;
 mod markdown;
 mod nix;
 mod patch;
+mod python;
 mod shell;
 mod vbs;
 
 pub use nix::HOLE_BASE;
 
-pub const LANGUAGES: [&str; 8] = ["glsl", "lisp", "lua", "luau", "markdown", "patch", "shell", "vbs"];
+pub const LANGUAGES: [&str; 9] = [
+    "glsl", "lisp", "lua", "luau", "markdown", "patch", "python", "shell", "vbs",
+];
 
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {
@@ -20,6 +23,7 @@ pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<Stri
         "luau" => luau::import(source, holes),
         "markdown" => markdown::import(source, holes),
         "patch" => patch::import(source, holes),
+        "python" => python::import(source, holes),
         "shell" => shell::import(source, holes),
         "vbs" => vbs::import(source, holes),
         other => Err(format!(
@@ -42,7 +46,10 @@ pub fn data_file(language: &str, source: &str, holes: &[String]) -> Result<Strin
 }
 
 pub fn constructors(expression: &str) -> Vec<String> {
-    nix::identifiers(expression).into_iter().collect()
+    nix::identifiers(expression)
+        .into_iter()
+        .filter(|name| !matches!(name.as_str(), "null" | "true" | "false"))
+        .collect()
 }
 
 fn parse(language: &tree_sitter::Language, source: &str) -> Result<tree_sitter::Tree, String> {
