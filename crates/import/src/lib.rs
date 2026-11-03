@@ -1,13 +1,15 @@
+mod javascript;
 mod lisp;
 mod nix;
 mod shell;
 
 pub use nix::HOLE_BASE;
 
-pub const LANGUAGES: [&str; 2] = ["lisp", "shell"];
+pub const LANGUAGES: [&str; 3] = ["javascript", "lisp", "shell"];
 
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {
+        "javascript" => javascript::import(source, holes),
         "lisp" => lisp::import(source, holes),
         "shell" => shell::import(source, holes),
         other => Err(format!(
@@ -30,7 +32,10 @@ pub fn data_file(language: &str, source: &str, holes: &[String]) -> Result<Strin
 }
 
 pub fn constructors(expression: &str) -> Vec<String> {
-    nix::identifiers(expression).into_iter().collect()
+    nix::identifiers(expression)
+        .into_iter()
+        .filter(|name| !matches!(name.as_str(), "null" | "true" | "false"))
+        .collect()
 }
 
 fn parse(language: &tree_sitter::Language, source: &str) -> Result<tree_sitter::Tree, String> {
