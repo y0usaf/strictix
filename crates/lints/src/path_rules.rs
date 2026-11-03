@@ -12,6 +12,7 @@ use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
     fix::Fix,
+    project::ProjectContext,
     rules::Rule,
     semantic::SemanticModel,
 };
@@ -32,7 +33,7 @@ impl Rule for DanglingPath {
     }
 
     fn description(&self) -> &'static str {
-        "Flags a path literal that does not exist on disk relative to the linted file — a hallucinated `imports = [ ./missing.nix ]` fails at evaluation. Paths probed with pathExists in the same file are skipped."
+        "Flags a path literal that does not exist on disk relative to the linted file — a hallucinated `imports = [ ./missing.nix ]` fails at evaluation. Paths probed with pathExists in the same file are skipped, and a file or directory of the linted project counts as existing (the files of a merged file live only in memory)."
     }
 
     fn severity(&self) -> Severity {
@@ -40,7 +41,32 @@ impl Rule for DanglingPath {
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        self.check_paths(model, None, diags);
+    }
+
+    fn check_file_project(
+        &self,
+        model: &SemanticModel,
+        _config: &LintConfig,
+        project: Option<&ProjectContext>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        self.check_paths(model, project, diags);
+    }
+}
+
+impl DanglingPath {
+    fn check_paths(
+        &self,
+        model: &SemanticModel,
+        project: Option<&ProjectContext>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
         let Some(file) = model.path() else { return };
+        let is_file = |path: &std::path::Path| {
+            std::fs::metadata(path).is_ok_and(|meta| !meta.is_dir())
+                || project.is_some_and(|p| p.contains(path))
+        };
         let source = model.source();
         let root = model.root();
         let guarded = path_exists_arguments(root, source);
@@ -62,8 +88,14 @@ impl Rule for DanglingPath {
                 let Some(dir) = file.parent() else { continue };
                 dir.join(text)
             };
-            match std::fs::metadata(&resolved) {
-                Err(_) => {
+            let is_dir = match std::fs::metadata(&resolved) {
+                Ok(meta) => Some(meta.is_dir()),
+                Err(_) if project.is_some_and(|p| p.contains(&resolved)) => Some(false),
+                Err(_) if project.is_some_and(|p| p.contains_dir(&resolved)) => Some(true),
+                Err(_) => None,
+            };
+            match is_dir {
+                None => {
                     diags.push(
                         Diagnostic::new(
                             "dangling-path",
@@ -77,10 +109,10 @@ impl Rule for DanglingPath {
                         .with_help("create the file or correct the path"),
                     );
                 }
-                Ok(meta) => {
-                    if meta.is_dir()
+                Some(is_dir) => {
+                    if is_dir
                         && is_import_target(model, tok)
-                        && std::fs::metadata(resolved.join("default.nix")).is_err()
+                        && !is_file(&resolved.join("default.nix"))
                     {
                         diags.push(
                             Diagnostic::new(

@@ -18,6 +18,8 @@ pub struct ProjectContext {
     files: BTreeSet<PathBuf>,
     imports: BTreeMap<PathBuf, Vec<(PathBuf, u32)>>,
     sources: Vec<ProjectFile>,
+    /// Files that exist without being linted (excluded from the run).
+    present: BTreeSet<PathBuf>,
     /// Per-type project indexes built on first use by [Self::memo].
     memo: Mutex<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
 }
@@ -47,8 +49,17 @@ impl ProjectContext {
             files: all,
             imports,
             sources,
+            present: BTreeSet::new(),
             memo: Mutex::default(),
         }
+    }
+
+    /// Builder: files that exist for [Self::contains] and
+    /// [Self::contains_dir] without being part of the linted sources.
+    #[must_use]
+    pub fn with_present(mut self, paths: impl IntoIterator<Item = PathBuf>) -> Self {
+        self.present = paths.into_iter().map(|path| normalize(&path)).collect();
+        self
     }
 
     /// Every supplied file with its source, in input order.
@@ -70,7 +81,20 @@ impl ProjectContext {
     }
 
     pub fn contains(&self, path: &Path) -> bool {
-        self.files.contains(&normalize(path))
+        let path = normalize(path);
+        self.files.contains(&path) || self.present.contains(&path)
+    }
+
+    /// Whether some supplied file lies strictly under `path`, so the
+    /// directory exists for the project even when no disk entry does
+    /// (the files of a merged file live only in memory).
+    pub fn contains_dir(&self, path: &Path) -> bool {
+        let dir = normalize(path);
+        [&self.files, &self.present].into_iter().any(|set| {
+            set.range(dir.clone()..)
+                .find(|file| **file != dir)
+                .is_some_and(|file| file.starts_with(&dir))
+        })
     }
 
     pub fn imports(&self, path: &Path) -> &[(PathBuf, u32)] {

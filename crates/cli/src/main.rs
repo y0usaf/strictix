@@ -15,6 +15,7 @@
 mod args;
 mod config;
 mod merge;
+mod merged;
 mod render;
 mod split;
 mod walk;
@@ -118,14 +119,23 @@ fn run_merge(args: &Args) -> ExitCode {
     for file in &report.rewritten {
         println!("rewrote {file}: entry reference now points at {out}");
     }
+    for file in &report.verbatim {
+        println!("recorded {file} verbatim: the flake formatter would change it");
+    }
+    for file in &report.unreached {
+        println!("left {file} as a file: not reached from {entry}");
+    }
+    if !args.dry_run && !report.formatted {
+        println!("{out} not formatted: the root has no flake formatter for this system");
+    }
     let verb = if args.dry_run {
         "would delete"
     } else {
         "deleted"
     };
+    let deleted = report.inlined.iter().filter(|file| *file != out).count();
     println!(
-        "{verb} {} inlined files; {} other .nix files untouched",
-        report.inlined.len(),
+        "{verb} {deleted} inlined files; {} other .nix files untouched",
         report.untouched
     );
     ExitCode::SUCCESS
@@ -231,8 +241,8 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
     } else {
         args.paths.clone()
     };
-    let files = match walk::collect_files(&paths, ignore_file.as_deref()) {
-        Ok(files) => files,
+    let (files, filter) = match walk::collect_files(&paths, ignore_file.as_deref()) {
+        Ok(found) => found,
         Err(message) => {
             eprintln!("error: {message}");
             return ExitCode::FAILURE;
@@ -249,29 +259,66 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
 
     let color = render::color_enabled();
     let rules = strictix_lints::all_rules();
-    let project_files: Vec<strictix_core::project::ProjectFile> = files
+    let inputs: Vec<Input> = files
         .iter()
-        .filter_map(|path| {
-            std::fs::read_to_string(path)
-                .ok()
-                .map(|source| strictix_core::project::ProjectFile {
-                    path: path.clone(),
-                    source,
-                })
+        .map(|path| {
+            let source =
+                std::fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()));
+            let virtuals = match source.as_deref().map(|s| merged::expand(path, s, &filter)) {
+                Ok(Ok(virtuals)) => virtuals,
+                Ok(Err(message)) => {
+                    eprintln!(
+                        "warning: {}: linted as one file, not per merged binding: {message}",
+                        path.display()
+                    );
+                    None
+                }
+                Err(_) => None,
+            };
+            Input {
+                path: path.clone(),
+                source,
+                virtuals,
+            }
         })
         .collect();
-    let project = strictix_core::project::ProjectContext::new(project_files);
+    let project_files: Vec<strictix_core::project::ProjectFile> = inputs
+        .iter()
+        .flat_map(|input| match (&input.source, &input.virtuals) {
+            (Ok(_), Some(virtuals)) => virtuals
+                .iter()
+                .filter(|file| !file.skipped)
+                .map(|file| strictix_core::project::ProjectFile {
+                    path: file.path.clone(),
+                    source: file.mapped.text.clone(),
+                })
+                .collect(),
+            (Ok(source), None) => vec![strictix_core::project::ProjectFile {
+                path: input.path.clone(),
+                source: source.clone(),
+            }],
+            (Err(_), _) => Vec::new(),
+        })
+        .collect();
+    let skipped = inputs
+        .iter()
+        .flat_map(|input| input.virtuals.iter().flatten())
+        .filter(|file| file.skipped)
+        .map(|file| file.path.clone());
+    let project = strictix_core::project::ProjectContext::new(project_files).with_present(skipped);
     let results: Vec<FileResult> = std::thread::scope(|scope| {
         let mut handles = Vec::new();
-        for file in &files {
-            handles.push(scope.spawn(|| {
+        for input in &inputs {
+            let (rules, config, project, filter) = (&rules, &config, &project, &filter);
+            handles.push(scope.spawn(move || {
                 process_file(
-                    file,
-                    &rules,
-                    &config,
+                    input,
+                    rules,
+                    config,
                     fix_mode,
                     !args.dry_run,
-                    Some(&project),
+                    project,
+                    filter,
                 )
             }));
         }
@@ -416,28 +463,40 @@ struct FileResult {
     apply_error: Option<String>,
 }
 
-/// Lint one file: read, parse, build the (lazy) semantic model, run
-/// every enabled rule, sort findings by range start, and, in fix mode,
+/// One walked file: its text (or the read error) and, for a merged
+/// file, the files its bindings stand for.
+struct Input {
+    path: PathBuf,
+    source: Result<String, String>,
+    virtuals: Option<Vec<merged::Virtual>>,
+}
+
+/// Lint one file: parse, build the (lazy) semantic model, run every
+/// enabled rule, sort findings by range start, and, in fix mode,
 /// splice the fixes, write the file back when it changed, and count
-/// what was applied. A read failure is reported and the file is
-/// skipped; a fix-application failure leaves the file untouched and is
-/// reported as a warning.
+/// what was applied. A merged file is linted binding by binding as the
+/// files its manifest names, with positions and fixes mapped back into
+/// it. A read failure is reported and the file is skipped; a
+/// fix-application failure leaves the file untouched and is reported
+/// as a warning.
 fn process_file(
-    path: &Path,
+    input: &Input,
     rules: &[Box<dyn Rule>],
     config: &LintConfig,
     fix_mode: bool,
     write: bool,
-    project: Option<&strictix_core::project::ProjectContext>,
+    project: &strictix_core::project::ProjectContext,
+    filter: &walk::Filter,
 ) -> FileResult {
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
+    let path = &input.path;
+    let source = match &input.source {
+        Ok(source) => source.clone(),
         Err(err) => {
             return FileResult {
-                path: path.to_path_buf(),
+                path: path.clone(),
                 source: String::new(),
                 diagnostics: Vec::new(),
-                read_error: Some(format!("{}: {err}", path.display())),
+                read_error: Some(err.clone()),
                 fixes_applied: 0,
                 fixed: None,
                 write_error: None,
@@ -447,33 +506,57 @@ fn process_file(
     };
 
     let mut fixes_applied = 0usize;
-    let mut fixed = None;
     let mut write_error = None;
     let mut apply_error = None;
 
-    let run =
-        strictix_core::rules::lint_project(rules, &source, Some(path), config, fix_mode, project);
-    let diagnostics = run.diagnostics;
+    let (diagnostics, fixed, error) = match &input.virtuals {
+        Some(virtuals) => {
+            let run = merged::lint(
+                path,
+                &source,
+                virtuals,
+                rules,
+                config,
+                fix_mode,
+                Some(project),
+                filter,
+            );
+            (run.diagnostics, run.fixed, run.error)
+        }
+        None => {
+            let run = strictix_core::rules::lint_project(
+                rules,
+                &source,
+                Some(path),
+                config,
+                fix_mode,
+                Some(project),
+            );
+            (
+                run.diagnostics,
+                run.fixed,
+                run.error.map(|err| format!("{err:?}")),
+            )
+        }
+    };
+    let fixed = if fix_mode { fixed } else { None };
     if fix_mode {
         let fix_count = diagnostics.iter().filter(|d| d.fix.is_some()).count();
-        if let Some(result) = run.fixed {
+        if let Some(result) = &fixed {
             if write {
-                match std::fs::write(path, &result) {
+                match std::fs::write(path, result) {
                     Ok(()) => fixes_applied = fix_count,
                     Err(err) => write_error = Some(err.to_string()),
                 }
             } else {
                 fixes_applied = fix_count;
             }
-            fixed = Some(result);
         }
-        if let Some(err) = run.error {
-            apply_error = Some(format!("{err:?}"));
-        }
+        apply_error = error;
     }
 
     FileResult {
-        path: path.to_path_buf(),
+        path: path.clone(),
         source,
         diagnostics,
         read_error: None,

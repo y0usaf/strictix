@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use strictix_core::{
-    config::LintConfig, diagnostic::Diagnostic, fix::apply_fixes, rules::Rule,
+    config::LintConfig,
+    diagnostic::Diagnostic,
+    fix::apply_fixes,
+    project::{ProjectContext, ProjectFile},
+    rules::Rule,
     semantic::SemanticModel,
 };
 use strictix_lints::path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
@@ -201,4 +205,27 @@ fn search_path_reference_flags_every_search_path() {
 #[test]
 fn search_path_reference_is_silent_for_comparisons() {
     assert!(check(&SearchPathReference {}, "a < b", None).is_empty());
+}
+
+#[test]
+fn dangling_path_counts_project_files_and_their_directories_as_existing() {
+    let anchor = lintme();
+    let dir = anchor.parent().unwrap();
+    let project = ProjectContext::new([ProjectFile {
+        path: dir.join("merged-only/module.nix"),
+        source: "{}".to_string(),
+    }])
+    .with_present([dir.join("merged-only/skipped/default.nix")]);
+    let source =
+        "[ ./merged-only/module.nix ./merged-only (import ./merged-only/skipped) ./absent.nix ]";
+    let tree = parse(source);
+    let model = SemanticModel::new(source, &tree).with_path(Some(&anchor));
+    let mut diags = Vec::new();
+    DanglingPath {}.check_file_project(&model, &LintConfig::default(), Some(&project), &mut diags);
+    let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(diags.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].starts_with("path './absent.nix' does not exist"),
+        "{messages:?}"
+    );
 }

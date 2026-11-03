@@ -39,32 +39,59 @@ $ strictix fix slop.nix
 
 `strictix merge` collapses a tree into one file. Starting from `--entry`,
 every `.nix` file reached through a relative path literal given to
-`import`/`callPackage` or listed in a module list becomes one `let` binding
-of `--out`, named after its path; other relative paths are rebased to the
-output's directory. `--expand NAME` evaluates calls of `NAME` (e.g. a
-`listFilesRecursive` helper) with `nix eval` in the entry's own scope and
-replaces them with explicit lists. A file that is still named by a string or
-path, or imported by a file that is not merged, stays a file and the merged
-file refers to it by path; every other merged file is deleted, so each file
-exists exactly once. The merged file ends in a `merge_manifest` binding of
-plain data recording each binding's path, the expanded calls, and any
-reference spelled differently from the default, and is formatted with the
-flake's formatter:
+`import`/`callPackage`, listed in a module list, bound as a module value
+(`nixosModules.x = ./x.nix;`, or a `let` name used only in module lists), or
+named by a string (`"modules/x.nix"`, `"${self}/modules/x.nix"`) becomes one
+`let` binding named after its path; other relative paths are rebased to the
+output's directory, and strings are kept as written: the manifest path names
+the binding. `--expand NAME` evaluates, with `nix eval`, calls of a
+discovery function `NAME` (e.g. a `listFilesRecursive` helper) bound in the
+top-level `let` of any reached file shaped `[ARG:] let ... in BODY`, in that
+`let`'s scope with paths relative to that file and `ARG` given the flake
+inputs, replaces each call with the explicit module list and drops the
+binding once nothing uses it. A module listed more than once is wrapped in a
+keyer that adds `key = "path"` without nesting it, so the module system keeps
+deduplicating it at the same depth. A file still named by a path outside
+those positions (`${./x.nix}` in a string), or imported by a file that is not
+merged, stays a file and merge says why; every other merged file is deleted,
+so each file exists exactly once.
+
+`--out` may equal `--entry`, which is then replaced. A flake entry (an
+attribute set with `outputs`) stays an attribute set, as Nix requires: its
+`description` and `inputs` are kept and the bindings go into a `let` inside
+`outputs`, under its lambda (`outputs = inputs: let ... in builtins.seq
+merge_manifest (...)`, since Nix rejects an `outputs` that is not
+syntactically a function). Every other entry becomes `let ... in builtins.seq
+merge_manifest ENTRY`. `merge_manifest` is plain data recording each binding's
+path, the expanded calls and removed bindings per file, module values, any
+reference spelled differently from the default, and the original text of any
+file the flake's formatter would change. The output is formatted with the
+flake's formatter when the root has one:
 
 ```
-$ strictix merge . --entry modules/outputs.nix --out finix.nix --expand nixFiles
+$ strictix merge . --entry flake.nix --out flake.nix --expand nixFiles
 ```
 
 `strictix split` is the inverse: it writes every binding of `--merged` back to
-its path in the manifest, restores `import ./x.nix`, `./x.nix` in module lists,
-`./dir` for `dir/default.nix` and the expanded calls, points the entry's
-referrers back at it, deletes the merged file and formats what it wrote. Edits
-made in the merged file land in the original files; a new binding needs its
-path added to `merge_manifest.files`:
+its path in the manifest, restores `import ./x.nix`, `./x.nix` in module lists
+and module values, `./dir` for `dir/default.nix`, the flake shell, the
+expanded calls and removed bindings, points the entry's referrers back at it,
+replaces the merged file (or deletes it when it is not the entry), and
+formats what it wrote; a file recorded verbatim comes back byte for byte
+unless it was edited. Edits made in the merged file land in the original
+files; a new binding needs its path added to `merge_manifest.files`:
 
 ```
-$ strictix split . --merged finix.nix
+$ strictix split . --merged flake.nix
 ```
+
+`strictix check` and `strictix fix` lint a merged file binding by binding, as
+the files its manifest names: each binding is restored in memory and linted
+at its manifest path, so `[schemas]` prefixes, `lint.generated`,
+`.strictixignore`, path existence (`dangling-path`, `missing-import`) and the
+project-wide rules see the same tree as before the merge. Diagnostics point
+into the merged file; a fix is applied there when every edit falls inside text
+the binding copies verbatim, and is withheld otherwise.
 
 ## Rules
 

@@ -110,6 +110,39 @@ impl IgnoreSet {
     }
 }
 
+/// The exclusions of one walk, reusable for paths the walk never saw
+/// on disk (the files a merged file holds in memory).
+pub struct Filter {
+    ignore: IgnoreSet,
+    roots: Vec<PathBuf>,
+}
+
+impl Filter {
+    /// Whether the walk would have skipped `file`: under the first
+    /// walked directory containing it, any ancestor directory or the
+    /// file itself is default-skipped or matches an ignore pattern.
+    pub fn skips(&self, file: &Path) -> bool {
+        let Some(rel) = self
+            .roots
+            .iter()
+            .find_map(|root| file.strip_prefix(root).ok())
+        else {
+            return false;
+        };
+        let parts: Vec<String> = rel
+            .components()
+            .filter_map(|c| match c {
+                std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect();
+        (1..=parts.len()).any(|len| {
+            is_default_skipped(&parts[len - 1])
+                || self.ignore.matches(&parts[..len], len < parts.len())
+        })
+    }
+}
+
 /// Collect every `.nix` file under `paths`, sorted.
 ///
 /// Directories are walked recursively. `ignore_file` is the parsed
@@ -126,7 +159,7 @@ impl IgnoreSet {
 pub fn collect_files(
     paths: &[PathBuf],
     ignore_file: Option<&Path>,
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<(Vec<PathBuf>, Filter), String> {
     let ignore = match ignore_file {
         Some(path) => {
             let text = fs::read_to_string(path)
@@ -147,7 +180,8 @@ pub fn collect_files(
         }
     }
     out.sort();
-    Ok(out)
+    let roots = paths.iter().filter(|path| path.is_dir()).cloned().collect();
+    Ok((out, Filter { ignore, roots }))
 }
 
 /// Recursively collect `.nix` files under `dir` (the walk root is

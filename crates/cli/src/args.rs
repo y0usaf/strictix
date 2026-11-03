@@ -220,9 +220,10 @@ OPTIONS:
     --schema FILE         options.json path, enabling the unknown-option rule
     --dry-run             (fix, merge, split) show what would change without writing
     --entry FILE          (merge) root-relative entry file
-    --out FILE            (merge) root-relative output file
-    --expand NAME         (merge) evaluate calls of NAME in the entry's scope
-                          into explicit module lists (repeatable)
+    --out FILE            (merge) root-relative output file (may be the entry)
+    --expand NAME         (merge) evaluate calls of NAME, bound in the top-level
+                          let of a merged file, into explicit module lists
+                          (repeatable)
     --merged FILE         (split) root-relative merged file
 "
 }

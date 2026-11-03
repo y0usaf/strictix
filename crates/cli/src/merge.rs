@@ -26,7 +26,10 @@ pub struct MergeReport {
     pub partial_paths: Vec<String>,
     pub dropped_bindings: Vec<String>,
     pub untouched: usize,
+    pub unreached: Vec<String>,
     pub out_lines: usize,
+    pub formatted: bool,
+    pub verbatim: Vec<String>,
 }
 
 enum Edit {
@@ -45,6 +48,7 @@ struct Site {
 }
 
 struct Dropped {
+    file: String,
     name: String,
     source: String,
     before: Option<String>,
@@ -56,6 +60,8 @@ struct Analysis {
     strings: Vec<String>,
     idents: HashMap<String, usize>,
     expansions: Vec<String>,
+    named: Vec<String>,
+    module_values: Vec<String>,
 }
 
 impl Analysis {
@@ -71,6 +77,8 @@ struct Analyzer<'a> {
     expand: &'a [String],
     consumed: HashSet<u32>,
     partial: HashSet<u32>,
+    listed: HashMap<String, usize>,
+    let_values: Vec<(String, String, TextRange, String, String)>,
     out: Analysis,
     error: Option<String>,
 }
@@ -242,9 +250,60 @@ impl<'a> Analyzer<'a> {
             return;
         };
         for item in list.items() {
+            if let Expr::Ident(token) = item {
+                *self
+                    .listed
+                    .entry(self.text(token.range()).to_string())
+                    .or_default() += 1;
+            }
             if let Some((path, target, literal)) = self.target_of(Some(item)) {
                 self.push(path, path, Edit::Module { target, literal });
             }
+        }
+    }
+
+    fn visit_binding(&mut self, node: &'a SyntaxNode, in_let: bool) {
+        let Some(binding) = Binding::cast(node) else {
+            return;
+        };
+        let Some(attrpath) = binding.attrpath() else {
+            return;
+        };
+        let Some((path, target, literal)) = self.target_of(binding.value()) else {
+            return;
+        };
+        let attr = self.text(attrpath.syntax().content_range()).to_string();
+        let module_attr = attrpath.elements().any(|element| {
+            let name = match element {
+                AttrName::Ident(token) => self.text(token.range()),
+                _ => return false,
+            };
+            name == "module" || name.ends_with("Modules") || name == "modules"
+        });
+        if module_attr {
+            self.out.module_values.push(attr);
+            self.push(path, path, Edit::Module { target, literal });
+        } else if in_let {
+            if let Some(name) = binding_name(binding, self.source) {
+                self.let_values
+                    .push((name.to_string(), attr, path, target, literal));
+            }
+        }
+    }
+
+    fn settle_let_values(&mut self) {
+        for (name, attr, path, target, literal) in std::mem::take(&mut self.let_values) {
+            let listed = self.listed.get(&name).copied().unwrap_or(0);
+            if listed == 0 || self.out.idents.get(&name) != Some(&(listed + 1)) {
+                continue;
+            }
+            self.out.sites.retain(|site| site.range != path);
+            self.out.module_values.push(attr);
+            self.out.sites.push(Site {
+                range: path,
+                path,
+                edit: Edit::Module { target, literal },
+            });
         }
     }
 
@@ -299,6 +358,14 @@ impl<'a> Analyzer<'a> {
             K::BinExpr => self.visit_bin(node),
             _ => {}
         }
+        if matches!(
+            node.kind(),
+            K::LetBindings | K::AttrsetExpr | K::RecAttrsetExpr
+        ) {
+            for child in node.child_nodes().filter(|n| n.kind() == K::Binding) {
+                self.visit_binding(child, node.kind() == K::LetBindings);
+            }
+        }
         for child in node.children() {
             match child {
                 NodeOrToken::Node(n) => self.walk(n),
@@ -325,23 +392,34 @@ fn analyze(root: &Path, rel: &str, expand: &[String]) -> Result<Analysis, String
     if tree.error_nodes().next().is_some() {
         return Err(format!("{rel}: parse error"));
     }
+    let bound = root_let_names(&tree, &source);
+    let expand: Vec<String> = expand
+        .iter()
+        .filter(|name| bound.contains(name.as_str()))
+        .cloned()
+        .collect();
     let mut analyzer = Analyzer {
         root,
         dir: parent(rel),
         source: &source,
-        expand,
+        expand: &expand,
         consumed: HashSet::new(),
         partial: HashSet::new(),
+        listed: HashMap::new(),
+        let_values: Vec::new(),
         out: Analysis {
             source: String::new(),
             sites: Vec::new(),
             strings: Vec::new(),
             idents: HashMap::new(),
             expansions: Vec::new(),
+            named: Vec::new(),
+            module_values: Vec::new(),
         },
         error: None,
     };
     analyzer.walk(&tree);
+    analyzer.settle_let_values();
     if let Some(error) = analyzer.error {
         return Err(format!("{rel}: {error}"));
     }
@@ -390,6 +468,38 @@ fn entry_let(tree: &SyntaxNode) -> Option<(bool, LetExpr<'_>)> {
     let_of(Root::cast(tree)?.expr()?)
 }
 
+fn root_let_names<'s>(tree: &SyntaxNode, source: &'s str) -> HashSet<&'s str> {
+    entry_let(tree)
+        .and_then(|(_, let_expr)| let_expr.bindings())
+        .into_iter()
+        .flat_map(|bindings| bindings.items())
+        .filter_map(|item| match item {
+            AttrItem::Binding(binding) => binding_name(binding, source),
+            AttrItem::Inherit(_) => None,
+        })
+        .collect()
+}
+
+pub(crate) fn outputs_binding<'a>(tree: &'a SyntaxNode, source: &str) -> Option<Binding<'a>> {
+    let Expr::Attrset(set) = Root::cast(tree)?.expr()? else {
+        return None;
+    };
+    set.items().find_map(|item| match item {
+        AttrItem::Binding(binding) if binding_name(binding, source) == Some("outputs") => {
+            Some(binding)
+        }
+        _ => None,
+    })
+}
+
+fn flake_outputs(source: &str) -> Option<TextRange> {
+    let tree = parse(source);
+    match outputs_binding(&tree, source)?.value()? {
+        Expr::Lambda(lambda) => Some(lambda.body()?.content_range()),
+        value => Some(value.content_range()),
+    }
+}
+
 fn line_start(source: &str, at: usize) -> usize {
     let before = &source[..at];
     let trimmed = before.trim_end_matches([' ', '\t']);
@@ -400,7 +510,7 @@ fn line_start(source: &str, at: usize) -> usize {
     }
 }
 
-fn drop_dead_expanders(analysis: &mut Analysis, names: &[String]) -> Vec<Dropped> {
+fn drop_dead_expanders(file: &str, analysis: &mut Analysis, names: &[String]) -> Vec<Dropped> {
     let tree = parse(&analysis.source);
     let Some(bindings) = entry_let(&tree).and_then(|(_, let_expr)| let_expr.bindings()) else {
         return Vec::new();
@@ -431,6 +541,7 @@ fn drop_dead_expanders(analysis: &mut Analysis, names: &[String]) -> Vec<Dropped
             .find_map(|next| binding_name(*next, &analysis.source))
             .map(str::to_string);
         dropped.push(Dropped {
+            file: file.to_string(),
             name: name.to_string(),
             source: analysis.text(content).to_string(),
             before,
@@ -450,7 +561,7 @@ fn drop_dead_expanders(analysis: &mut Analysis, names: &[String]) -> Vec<Dropped
 
 fn evaluate_expansions(
     root: &Path,
-    entry: &str,
+    file: &str,
     analysis: &Analysis,
 ) -> Result<Vec<Vec<String>>, String> {
     if analysis.expansions.is_empty() {
@@ -459,9 +570,7 @@ fn evaluate_expansions(
     let tree = parse(&analysis.source);
     let (is_lambda, body) = entry_let(&tree)
         .and_then(|(is_lambda, let_expr)| Some((is_lambda, let_expr.body()?.content_range())))
-        .ok_or_else(|| {
-            format!("{entry}: --expand needs the entry to be `[ARG:] let ... in BODY`")
-        })?;
+        .ok_or_else(|| format!("{file}: --expand needs `[ARG:] let ... in BODY`"))?;
     let mut calls = String::new();
     for call in &analysis.expansions {
         let _ = writeln!(calls, "(map toString ({call}))");
@@ -486,12 +595,12 @@ fn evaluate_expansions(
     };
     let output = Command::new("nix")
         .args(["eval", "--impure", "--json", "--expr", &expr])
-        .current_dir(root.join(parent(entry)))
+        .current_dir(root.join(parent(file)))
         .output()
         .map_err(|e| format!("running nix eval: {e}"))?;
     if !output.status.success() {
         return Err(format!(
-            "evaluating expansions failed:\n{}",
+            "evaluating the expansions in {file} failed:\n{}",
             String::from_utf8_lossy(&output.stderr)
         ));
     }
@@ -518,21 +627,37 @@ fn evaluate_expansions(
         .collect()
 }
 
-pub(crate) fn format_files(root: &Path, files: &[String]) -> Result<(), String> {
-    if files.is_empty() || !root.join("flake.nix").is_file() {
-        return Ok(());
+fn formatter_system(root: &Path) -> Result<Option<String>, String> {
+    if !root.join("flake.nix").is_file() {
+        return Ok(None);
     }
-    let system = Command::new("nix")
+    let flake = nix_string(&format!("path:{}", root.display()));
+    let probe = Command::new("nix")
         .args([
             "eval",
             "--impure",
             "--raw",
             "--expr",
-            "builtins.currentSystem",
+            &format!(
+                "let flake = builtins.getFlake {flake}; system = builtins.currentSystem; in if flake ? formatter && flake.formatter ? ${{system}} then system else \"\""
+            ),
         ])
-        .output()
-        .map_err(|e| format!("running nix eval: {e}"))?;
-    let system = String::from_utf8_lossy(&system.stdout).trim().to_string();
+        .output();
+    match probe {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("running nix eval: {e}")),
+        Ok(output) if !output.status.success() => Err(format!(
+            "evaluating the flake's formatter failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        )),
+        Ok(output) => {
+            let system = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Ok((!system.is_empty()).then_some(system))
+        }
+    }
+}
+
+fn run_formatter(root: &Path, system: &str, files: &[String]) -> Result<(), String> {
     let output = Command::new("nix")
         .arg("run")
         .arg(format!("path:{}#formatter.{system}", root.display()))
@@ -549,6 +674,52 @@ pub(crate) fn format_files(root: &Path, files: &[String]) -> Result<(), String> 
         ));
     }
     Ok(())
+}
+
+pub(crate) fn format_files(root: &Path, files: &[String]) -> Result<bool, String> {
+    if files.is_empty() {
+        return Ok(false);
+    }
+    let Some(system) = formatter_system(root)? else {
+        return Ok(false);
+    };
+    run_formatter(root, &system, files)?;
+    Ok(true)
+}
+
+pub(crate) fn formatted_texts(
+    root: &Path,
+    texts: &[(&str, &str)],
+) -> Result<Option<Vec<String>>, String> {
+    if texts.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let Some(system) = formatter_system(root)? else {
+        return Ok(None);
+    };
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let dir = std::env::temp_dir().join(format!("strictix-format-{}-{nanos}", std::process::id()));
+    let result = (|| {
+        let mut paths = Vec::new();
+        for (rel, text) in texts {
+            let path = dir.join(rel);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("{}: {e}", parent.display()))?;
+            }
+            std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+            paths.push(path.display().to_string());
+        }
+        run_formatter(root, &system, &paths)?;
+        paths
+            .iter()
+            .map(|path| std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}")))
+            .collect::<Result<Vec<_>, _>>()
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    result.map(Some)
 }
 
 const KEYWORDS: &[&str] = &[
@@ -585,21 +756,30 @@ fn string_refs(analysis: &Analysis, files: &BTreeSet<String>) -> Vec<String> {
         .collect()
 }
 
-fn path_refs(analysis: &Analysis, files: &BTreeSet<String>) -> Vec<String> {
+fn path_refs(analysis: &Analysis, file: &str, files: &BTreeSet<String>) -> Vec<(String, String)> {
     let mut found = Vec::new();
     for site in &analysis.sites {
         let Edit::Rebase { target, whole } = &site.edit else {
             continue;
         };
+        let literal = analysis.text(site.path);
         if files.contains(target) {
-            found.push(target.clone());
+            found.push((
+                target.clone(),
+                format!("named by the path `{literal}` in {file} outside import, callPackage and module lists, so the file has to exist"),
+            ));
         } else if *whole {
             let prefix = if target.is_empty() {
                 String::new()
             } else {
                 format!("{target}/")
             };
-            found.extend(files.iter().filter(|f| f.starts_with(&prefix)).cloned());
+            found.extend(files.iter().filter(|f| f.starts_with(&prefix)).map(|f| {
+                (
+                    f.clone(),
+                    format!("inside the directory `{literal}` that {file} names by path, so the directory has to keep it"),
+                )
+            }));
         }
     }
     found
@@ -652,11 +832,13 @@ pub(crate) fn nix_string(text: &str) -> String {
     out
 }
 
+type Expanded = HashMap<String, Vec<Vec<String>>>;
+
 struct Renderer<'a> {
     names: &'a HashMap<String, String>,
     keyed: &'a BTreeSet<String>,
     keyer: &'a str,
-    expansions: &'a [Vec<String>],
+    expanded: &'a Expanded,
     out_dir: &'a str,
 }
 
@@ -671,11 +853,19 @@ impl Renderer<'_> {
         }
     }
 
-    fn render(&self, analysis: &Analysis) -> String {
+    fn render(&self, file: &str, analysis: &Analysis) -> String {
+        let end = u32::try_from(analysis.source.len()).unwrap_or(u32::MAX);
+        self.render_range(file, analysis, TextRange::new(0, end))
+    }
+
+    fn render_range(&self, file: &str, analysis: &Analysis, range: TextRange) -> String {
         let source = &analysis.source;
         let mut out = String::with_capacity(source.len());
-        let mut cursor = 0usize;
+        let mut cursor = range.start() as usize;
         for site in &analysis.sites {
+            if site.range.start() < range.start() || site.range.end() > range.end() {
+                continue;
+            }
             out.push_str(&source[cursor..site.range.start() as usize]);
             match &site.edit {
                 Edit::Import { target, literal } => {
@@ -706,7 +896,7 @@ impl Renderer<'_> {
                 Edit::Remove => {}
                 Edit::Expand(index) => {
                     out.push('[');
-                    for target in &self.expansions[*index] {
+                    for target in &self.expanded[file][*index] {
                         out.push('\n');
                         out.push_str(&self.module_element(target));
                     }
@@ -715,7 +905,7 @@ impl Renderer<'_> {
             }
             cursor = site.range.end() as usize;
         }
-        out.push_str(&source[cursor..]);
+        out.push_str(&source[cursor..range.end() as usize]);
         out
     }
 }
@@ -789,10 +979,45 @@ fn redirect_entry(
     changed.then_some((text, original))
 }
 
+fn next_targets<'a>(file: &str, analysis: &'a Analysis, expanded: &'a Expanded) -> Vec<&'a String> {
+    inline_targets(analysis)
+        .chain(&analysis.named)
+        .chain(expanded.get(file).into_iter().flatten().flatten())
+        .collect()
+}
+
+fn expand_reachable(
+    root: &Path,
+    entry: &str,
+    analyses: &HashMap<String, Analysis>,
+) -> Result<Expanded, String> {
+    let mut expanded = Expanded::new();
+    let mut order = vec![entry.to_string()];
+    let mut seen: HashSet<String> = order.iter().cloned().collect();
+    let mut index = 0;
+    while index < order.len() {
+        let current = order[index].clone();
+        index += 1;
+        let Some(analysis) = analyses.get(&current) else {
+            continue;
+        };
+        let lists = evaluate_expansions(root, &current, analysis)?;
+        if !lists.is_empty() {
+            expanded.insert(current.clone(), lists);
+        }
+        for target in next_targets(&current, analysis, &expanded) {
+            if seen.insert(target.clone()) {
+                order.push(target.clone());
+            }
+        }
+    }
+    Ok(expanded)
+}
+
 fn reach(
     entry: &str,
     analyses: &HashMap<String, Analysis>,
-    expansions: &[Vec<String>],
+    expanded: &Expanded,
     kept: &BTreeMap<String, String>,
 ) -> Vec<String> {
     let mut order = vec![entry.to_string()];
@@ -801,12 +1026,14 @@ fn reach(
     while index < order.len() {
         let current = order[index].clone();
         index += 1;
-        let mut next: Vec<&String> = inline_targets(&analyses[&current]).collect();
-        if current == entry {
-            next.extend(expansions.iter().flatten());
-        }
-        for target in next {
-            if !kept.contains_key(target) && seen.insert(target.clone()) {
+        let Some(analysis) = analyses.get(&current) else {
+            continue;
+        };
+        for target in next_targets(&current, analysis, expanded) {
+            if !kept.contains_key(target)
+                && analyses.contains_key(target)
+                && seen.insert(target.clone())
+            {
                 order.push(target.clone());
             }
         }
@@ -818,21 +1045,16 @@ fn partition(
     entry: &str,
     files: &BTreeSet<String>,
     analyses: &HashMap<String, Analysis>,
-    expansions: &[Vec<String>],
+    expanded: &Expanded,
 ) -> Result<(Vec<String>, BTreeMap<String, String>), String> {
     let mut kept: BTreeMap<String, String> = BTreeMap::new();
-    for (file, analysis) in analyses {
-        for target in string_refs(analysis, files) {
-            kept.entry(target)
-                .or_insert_with(|| format!("named by a string in {file}"));
-        }
-        for target in path_refs(analysis, files) {
-            kept.entry(target)
-                .or_insert_with(|| format!("named by a path in {file}"));
+    for file in files {
+        for (target, reason) in path_refs(&analyses[file], file, files) {
+            kept.entry(target).or_insert(reason);
         }
     }
     loop {
-        let inlined = reach(entry, analyses, expansions, &kept);
+        let inlined = reach(entry, analyses, expanded, &kept);
         let set: HashSet<&String> = inlined.iter().collect();
         let mut added = Vec::new();
         for file in files.iter().filter(|file| !set.contains(file)) {
@@ -859,17 +1081,24 @@ fn partition(
 
 struct Manifest<'a> {
     entry: &'a str,
+    out: &'a str,
     keyer: Option<&'a str>,
     names: &'a HashMap<String, String>,
     overrides: BTreeMap<String, BTreeMap<String, String>>,
     redirected: Vec<String>,
-    expansions: Vec<(&'a str, &'a [String])>,
+    expansions: Vec<(&'a str, &'a str, &'a [String])>,
     dropped: &'a [Dropped],
+    module_values: Vec<(&'a str, &'a str)>,
+    verbatim: Vec<(&'a str, &'a str)>,
 }
 
 impl Manifest<'_> {
     fn render(&self, name: &str) -> String {
-        let mut out = format!("  {name} = {{\n    entry = {};\n", nix_string(self.entry));
+        let mut out = format!(
+            "  {name} = {{\n    entry = {};\n    out = {};\n",
+            nix_string(self.entry),
+            nix_string(self.out)
+        );
         if let Some(keyer) = self.keyer {
             let _ = writeln!(out, "    keyer = {};", nix_string(keyer));
         }
@@ -906,8 +1135,13 @@ impl Manifest<'_> {
         }
         if !self.expansions.is_empty() {
             out.push_str("    expansions = [\n");
-            for (source, modules) in &self.expansions {
-                let _ = writeln!(out, "      {{\n        source = {};", nix_string(source));
+            for (file, source, modules) in &self.expansions {
+                let _ = writeln!(
+                    out,
+                    "      {{\n        file = {};\n        source = {};",
+                    nix_string(file),
+                    nix_string(source)
+                );
                 out.push_str("        modules = [\n");
                 for module in *modules {
                     let _ = writeln!(out, "          {}", nix_string(module));
@@ -921,13 +1155,33 @@ impl Manifest<'_> {
             for dropped in self.dropped {
                 let _ = writeln!(
                     out,
-                    "      {{\n        source = {};",
+                    "      {{\n        file = {};\n        source = {};",
+                    nix_string(&dropped.file),
                     nix_string(&dropped.source)
                 );
                 if let Some(before) = &dropped.before {
                     let _ = writeln!(out, "        before = {};", nix_string(before));
                 }
                 out.push_str("      }\n");
+            }
+            out.push_str("    ];\n");
+        }
+        if !self.verbatim.is_empty() {
+            out.push_str("    verbatim = {\n");
+            for (file, text) in &self.verbatim {
+                let _ = writeln!(out, "      {} = {};", nix_string(file), nix_string(text));
+            }
+            out.push_str("    };\n");
+        }
+        if !self.module_values.is_empty() {
+            out.push_str("    module_values = [\n");
+            for (file, attr) in &self.module_values {
+                let _ = writeln!(
+                    out,
+                    "      {{\n        file = {};\n        attr = {};\n      }}",
+                    nix_string(file),
+                    nix_string(attr)
+                );
             }
             out.push_str("    ];\n");
         }
@@ -939,7 +1193,7 @@ impl Manifest<'_> {
 fn keyed_modules(
     inlined: &[String],
     analyses: &HashMap<String, Analysis>,
-    expansions: &[Vec<String>],
+    expanded: &Expanded,
 ) -> BTreeSet<String> {
     let set: HashSet<&String> = inlined.iter().collect();
     let mut uses: HashMap<&String, usize> = HashMap::new();
@@ -949,9 +1203,9 @@ fn keyed_modules(
                 *uses.entry(target).or_default() += 1;
             }
         }
-    }
-    for target in expansions.iter().flatten() {
-        *uses.entry(target).or_default() += 1;
+        for target in expanded.get(file).into_iter().flatten().flatten() {
+            *uses.entry(target).or_default() += 1;
+        }
     }
     uses.into_iter()
         .filter(|(target, count)| *count > 1 && set.contains(target))
@@ -982,19 +1236,24 @@ type Loaded = (BTreeSet<String>, HashMap<String, Analysis>);
 fn load(root: &Path, entry: &str, out_file: &str, expand: &[String]) -> Result<Loaded, String> {
     let mut files = BTreeSet::new();
     collect_nix(root, "", &mut files)?;
-    files.remove(out_file);
+    if out_file != entry {
+        files.remove(out_file);
+    }
     if !files.contains(entry) {
         return Err(format!("entry {entry} is not a .nix file under the root"));
     }
     let mut analyses = HashMap::new();
     for file in &files {
-        let expand: &[String] = if file == entry { expand } else { &[] };
         analyses.insert(file.clone(), analyze(root, file, expand)?);
+    }
+    for analysis in analyses.values_mut() {
+        analysis.named = string_refs(analysis, &files);
     }
     Ok((files, analyses))
 }
 
 fn bind_names(
+    bound: &[&String],
     inlined: &[String],
     analyses: &HashMap<String, Analysis>,
 ) -> (HashMap<String, String>, String, String) {
@@ -1004,8 +1263,11 @@ fn bind_names(
         .collect();
     let mut names = HashMap::new();
     let mut used = HashSet::new();
-    for file in inlined {
-        names.insert(file.clone(), fresh_name(&mangle(file), &taken, &mut used));
+    for file in bound {
+        names.insert(
+            (*file).clone(),
+            fresh_name(&mangle(file), &taken, &mut used),
+        );
     }
     let keyer = fresh_name("merge_keyed_module", &taken, &mut used);
     let manifest = fresh_name("merge_manifest", &taken, &mut used);
@@ -1018,44 +1280,68 @@ pub fn merge(options: &MergeOptions) -> Result<MergeReport, String> {
     let entry = join("", &options.entry).ok_or("entry escapes the merge root")?;
     let out_file = join("", &options.out).ok_or("output escapes the merge root")?;
     let out_dir = parent(&out_file).to_string();
-    if std::fs::symlink_metadata(root.join(&out_file)).is_ok() {
+    let in_place = out_file == entry;
+    if !in_place && std::fs::symlink_metadata(root.join(&out_file)).is_ok() {
         return Err(format!(
             "{out_file} already exists; refusing to overwrite it"
         ));
     }
 
     let (files, mut analyses) = load(&root, &entry, &out_file, &options.expand)?;
-    let expansions = evaluate_expansions(&root, &entry, &analyses[&entry])?;
-    let dropped = match analyses.get_mut(&entry) {
-        Some(entry_analysis) => drop_dead_expanders(entry_analysis, &options.expand),
-        None => Vec::new(),
-    };
-    let (inlined, kept) = partition(&entry, &files, &analyses, &expansions)?;
+    let expanded = expand_reachable(&root, &entry, &analyses)?;
+    let mut dropped = Vec::new();
+    let mut expanding: Vec<&String> = expanded.keys().collect();
+    expanding.sort();
+    for file in expanding {
+        if let Some(analysis) = analyses.get_mut(file) {
+            dropped.extend(drop_dead_expanders(file, analysis, &options.expand));
+        }
+    }
+    let (inlined, kept) = partition(&entry, &files, &analyses, &expanded)?;
+    let inlined_set: HashSet<&String> = inlined.iter().collect();
+    dropped.retain(|d| inlined_set.contains(&d.file));
 
-    let (names, keyer_name, manifest_name) = bind_names(&inlined, &analyses);
-    let keyed = keyed_modules(&inlined, &analyses, &expansions);
+    let shell = flake_outputs(&analyses[&entry].source);
+    let bound: Vec<&String> = inlined
+        .iter()
+        .filter(|file| shell.is_none() || **file != entry)
+        .collect();
+    let (names, keyer_name, manifest_name) = bind_names(&bound, &inlined, &analyses);
+    let keyed = keyed_modules(&inlined, &analyses, &expanded);
 
     let renderer = Renderer {
         names: &names,
         keyed: &keyed,
         keyer: &keyer_name,
-        expansions: &expansions,
+        expanded: &expanded,
         out_dir: &out_dir,
     };
-    let mut merged = String::from("let\n");
+    let mut bindings = String::new();
     if !keyed.is_empty() {
-        let _ = writeln!(merged, "  {keyer_name} = {KEYER_BODY};");
+        let _ = writeln!(bindings, "  {keyer_name} = {KEYER_BODY};");
     }
-    let mut bound: Vec<&String> = inlined.iter().collect();
-    bound.sort_by_key(|f| &names[*f]);
-    for file in bound {
-        let body = renderer.render(&analyses[file]);
-        let _ = write!(merged, "  {} =\n{}\n  ;\n", names[file], body.trim());
+    let mut sorted = bound.clone();
+    sorted.sort_by_key(|f| &names[*f]);
+    for file in sorted {
+        let body = renderer.render(file, &analyses[file]);
+        let _ = write!(bindings, "  {} =\n{}\n  ;\n", names[file], body.trim());
     }
 
     let mut rewritten = Vec::new();
+    let mut manifest_expansions = Vec::new();
+    for file in &inlined {
+        let analysis = &analyses[file];
+        for (source, modules) in analysis
+            .expansions
+            .iter()
+            .zip(expanded.get(file).into_iter().flatten())
+        {
+            manifest_expansions.push((file.as_str(), source.as_str(), modules.as_slice()));
+        }
+    }
     let mut manifest = Manifest {
         entry: &entry,
+        out: &out_file,
         keyer: (!keyed.is_empty()).then_some(keyer_name.as_str()),
         names: &names,
         overrides: inlined
@@ -1064,92 +1350,138 @@ pub fn merge(options: &MergeOptions) -> Result<MergeReport, String> {
             .filter(|(_, map)| !map.is_empty())
             .collect(),
         redirected: Vec::new(),
-        expansions: analyses[&entry]
-            .expansions
-            .iter()
-            .map(String::as_str)
-            .zip(expansions.iter().map(Vec::as_slice))
-            .collect(),
+        expansions: manifest_expansions,
         dropped: &dropped,
+        module_values: inlined
+            .iter()
+            .flat_map(|file| {
+                analyses[file]
+                    .module_values
+                    .iter()
+                    .map(move |attr| (file.as_str(), attr.as_str()))
+            })
+            .collect(),
+        verbatim: Vec::new(),
     };
-    let inlined_set: HashSet<&String> = inlined.iter().collect();
-    for file in files.iter().filter(|file| !inlined_set.contains(file)) {
-        if let Some((text, original)) = redirect_entry(&analyses[file], file, &entry, &out_file) {
-            if let Some(original) = original {
-                let canonical = module_literal(parent(file), &entry);
-                manifest
-                    .overrides
-                    .insert(file.clone(), BTreeMap::from([(canonical, original)]));
-            }
-            manifest.redirected.push(file.clone());
-            rewritten.push((file.clone(), text));
+    if !options.dry_run {
+        let texts: Vec<(&str, &str)> = inlined
+            .iter()
+            .map(|file| (file.as_str(), analyses[file].source.as_str()))
+            .collect();
+        if let Some(formatted) = formatted_texts(&root, &texts)? {
+            manifest.verbatim = texts
+                .into_iter()
+                .zip(formatted)
+                .filter(|((_, text), formatted)| text != formatted)
+                .map(|(pair, _)| pair)
+                .collect();
         }
     }
-    merged.push_str(&manifest.render(&manifest_name));
-    let _ = writeln!(
-        merged,
-        "in\n  builtins.seq {manifest_name} {}",
-        names[&entry]
-    );
-
-    let out_lines = if options.dry_run {
-        merged.lines().count()
-    } else {
-        write_merge(&root, &out_file, &merged, &rewritten, &inlined)?
+    if !in_place {
+        for file in files.iter().filter(|file| !inlined_set.contains(file)) {
+            if let Some((text, original)) = redirect_entry(&analyses[file], file, &entry, &out_file)
+            {
+                if let Some(original) = original {
+                    let canonical = module_literal(parent(file), &entry);
+                    manifest
+                        .overrides
+                        .insert(file.clone(), BTreeMap::from([(canonical, original)]));
+                }
+                manifest.redirected.push(file.clone());
+                rewritten.push((file.clone(), text));
+            }
+        }
+    }
+    bindings.push_str(&manifest.render(&manifest_name));
+    let merged = match shell {
+        None => format!(
+            "let\n{bindings}in\n  builtins.seq {manifest_name} {}\n",
+            names[&entry]
+        ),
+        Some(core) => {
+            let analysis = &analyses[&entry];
+            let end = u32::try_from(analysis.source.len()).unwrap_or(u32::MAX);
+            format!(
+                "{}let\n{bindings}in\n  builtins.seq {manifest_name} ({}){}",
+                renderer.render_range(&entry, analysis, TextRange::new(0, core.start())),
+                renderer.render_range(&entry, analysis, core),
+                renderer.render_range(&entry, analysis, TextRange::new(core.end(), end)),
+            )
+        }
     };
 
-    let reported: BTreeSet<&String> = inlined
+    let (out_lines, formatted) = if options.dry_run {
+        (merged.lines().count(), false)
+    } else {
+        let deleted: Vec<&String> = inlined.iter().filter(|f| **f != out_file).collect();
+        write_merge(&root, &out_file, in_place, &merged, &rewritten, &deleted)?
+    };
+
+    let verbatim = manifest
+        .verbatim
         .iter()
-        .flat_map(|file| inline_targets(&analyses[file]))
-        .chain(expansions.iter().flatten())
-        .filter(|target| kept.contains_key(*target))
+        .map(|(file, _)| (*file).to_string())
+        .collect();
+    let unreached = files
+        .iter()
+        .filter(|file| !inlined_set.contains(file) && !kept.contains_key(*file))
+        .cloned()
         .collect();
     Ok(MergeReport {
         untouched: files.len() - inlined.len(),
+        unreached,
         partial_paths: partial_paths(&inlined, &analyses),
-        kept: reported
-            .into_iter()
-            .map(|file| (file.clone(), kept[file].clone()))
-            .collect(),
+        kept: kept.into_iter().collect(),
         rewritten: rewritten.into_iter().map(|(f, _)| f).collect(),
         keyed_modules: keyed.into_iter().collect(),
         expansions: manifest
             .expansions
             .iter()
-            .map(|(call, targets)| ((*call).to_string(), targets.len()))
+            .map(|(file, call, targets)| (format!("{file}: {call}"), targets.len()))
             .collect(),
-        dropped_bindings: dropped.into_iter().map(|d| d.name).collect(),
+        dropped_bindings: dropped
+            .into_iter()
+            .map(|d| format!("{}: {}", d.file, d.name))
+            .collect(),
         inlined,
         out_lines,
+        formatted,
+        verbatim,
     })
 }
 
 fn write_merge(
     root: &Path,
     out_file: &str,
+    in_place: bool,
     merged: &str,
     rewritten: &[(String, String)],
-    inlined: &[String],
-) -> Result<usize, String> {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(root.join(out_file))
+    deleted: &[&String],
+) -> Result<(usize, bool), String> {
+    let mut open = std::fs::OpenOptions::new();
+    open.write(true);
+    if in_place {
+        open.truncate(true);
+    } else {
+        open.create_new(true);
+    }
+    open.open(root.join(out_file))
         .and_then(|mut file| std::io::Write::write_all(&mut file, merged.as_bytes()))
         .map_err(|e| format!("writing {out_file}: {e}"))?;
     for (file, text) in rewritten {
         std::fs::write(root.join(file), text).map_err(|e| format!("writing {file}: {e}"))?;
     }
-    for file in inlined {
+    for file in deleted {
         remove_with_empty_parents(root, file)?;
     }
     let mut touched = vec![out_file.to_string()];
     touched.extend(rewritten.iter().map(|(file, _)| file.clone()));
-    format_files(root, &touched)?;
-    Ok(std::fs::read_to_string(root.join(out_file))
+    let formatted = format_files(root, &touched)?;
+    let lines = std::fs::read_to_string(root.join(out_file))
         .map_err(|e| format!("reading {out_file}: {e}"))?
         .lines()
-        .count())
+        .count();
+    Ok((lines, formatted))
 }
 
 fn remove_with_empty_parents(root: &Path, rel: &str) -> Result<(), String> {

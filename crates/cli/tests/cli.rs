@@ -307,3 +307,374 @@ fn shallow_merge_requires_opt_in_and_disable_wins() {
     )));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+fn temp_tree(name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "strictix-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    for (rel, text) in files {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(path, text).expect("write");
+    }
+    dir
+}
+
+fn read_tree(dir: &Path) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        for entry in std::fs::read_dir(&current).expect("read dir") {
+            let path = entry.expect("entry").path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                let rel = path.strip_prefix(dir).expect("under dir");
+                out.insert(
+                    rel.display().to_string(),
+                    std::fs::read_to_string(&path).expect("read"),
+                );
+            }
+        }
+    }
+    out
+}
+
+fn nix_available() -> bool {
+    Command::new("nix")
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success())
+}
+
+fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+const FLAKE_TREE: &[(&str, &str)] = &[
+    (
+        "flake.nix",
+        "{\n  description = \"t\";\n  outputs = inputs: import ./modules/outputs.nix inputs;\n}\n",
+    ),
+    (
+        "modules/outputs.nix",
+        "inputs: let\n  shared = ./shared.nix;\n  hosts = {\n    a = [./a.nix ./shared.nix];\n    b = [./b.nix ./shared.nix];\n  };\nin {\n  inherit hosts;\n  nixosModules.a = ./a.nix;\n  lint = import ./lint.nix;\n  modules = [shared];\n}\n",
+    ),
+    ("modules/a.nix", "{...}: {}\n"),
+    ("modules/b.nix", "{config = {};}\n"),
+    ("modules/shared.nix", "{}\n"),
+    ("modules/lint.nix", "{schemas = {\"modules/named.nix\" = \"\";};}\n"),
+    ("modules/named.nix", "{x = 1;}\n"),
+];
+
+#[test]
+fn merge_flake_in_place_keeps_an_attrset_and_split_restores_it() {
+    let dir = temp_tree("merge-flake", FLAKE_TREE);
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report = stdout(&out);
+    assert!(report.contains("inlined 7 files"), "{report}");
+    assert!(
+        report.contains("keyed module modules/shared.nix"),
+        "{report}"
+    );
+    let after = read_tree(&dir);
+    assert_eq!(
+        after.keys().collect::<Vec<_>>(),
+        ["flake.nix"],
+        "one file left"
+    );
+    let merged = &after["flake.nix"];
+    assert!(merged.starts_with("{\n  description = \"t\";"), "{merged}");
+    assert!(merged.contains("outputs = inputs: let"), "{merged}");
+    assert!(
+        merged.contains("merge_keyed_module \"modules/shared.nix\""),
+        "{merged}"
+    );
+    assert!(
+        merged.contains("nixosModules.a = (merge_keyed_module \"modules/a.nix\" modules_a);"),
+        "{merged}"
+    );
+    assert!(merged.contains("\"modules/named.nix\" = \"\""), "{merged}");
+
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        read_tree(&dir),
+        before,
+        "split restores every file byte for byte"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn merge_reports_why_a_path_named_file_stays() {
+    let dir = temp_tree(
+        "merge-kept",
+        &[
+            ("default.nix", "import ./lint.nix\n"),
+            ("lint.nix", "{text = \"${./lint.nix}\";}\n"),
+        ],
+    );
+    let out = run_in(
+        &dir,
+        &[
+            "merge",
+            ".",
+            "--entry",
+            "default.nix",
+            "--out",
+            "merged.nix",
+            "--dry-run",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout(&out).contains("kept lint.nix as a file: named by the path `./lint.nix` in lint.nix outside import, callPackage and module lists"),
+        "{}",
+        stdout(&out)
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn merge_expands_a_discovery_call_bound_in_a_reachable_file() {
+    if !nix_available() {
+        return;
+    }
+    let dir = temp_tree(
+        "merge-expand",
+        &[
+            ("default.nix", "import ./modules/outputs.nix\n"),
+            (
+                "modules/outputs.nix",
+                "let\n  found = dir: map (name: dir + \"/${name}\") (builtins.attrNames (builtins.readDir dir));\n  other = 1;\nin {\n  imports = found ./mods ++ [./mods/b.nix];\n  inherit other;\n}\n",
+            ),
+            ("modules/mods/a.nix", "{}\n"),
+            ("modules/mods/b.nix", "{}\n"),
+        ],
+    );
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &[
+            "merge",
+            ".",
+            "--entry",
+            "default.nix",
+            "--out",
+            "default.nix",
+            "--expand",
+            "found",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report = stdout(&out);
+    assert!(
+        report.contains("expanded `modules/outputs.nix: found ./mods` into 2 modules"),
+        "{report}"
+    );
+    assert!(
+        report.contains("removed let binding modules/outputs.nix: found"),
+        "{report}"
+    );
+    assert!(
+        report.contains("keyed module modules/mods/b.nix"),
+        "{report}"
+    );
+    assert_eq!(read_tree(&dir).len(), 1, "one file left");
+    let out = run_in(&dir, &["split", ".", "--merged", "default.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout(&out).contains("restored 1 expanded calls"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(
+        read_tree(&dir),
+        before,
+        "split restores the call and the binding"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+const LINT_TREE: &[(&str, &str)] = &[
+    (
+        "default.nix",
+        "let\n  modules = [./modules/a.nix ./modules/b.nix ./vendor/c.nix];\nin\n  import ./modules/eval.nix modules\n",
+    ),
+    ("modules/eval.nix", "modules: {imports = modules;}\n"),
+    (
+        "modules/a.nix",
+        "{lib, ...}: {\n  options.foo.enable = lib.mkEnableOption \"foo\";\n  config = {};\n}\n",
+    ),
+    (
+        "modules/b.nix",
+        "{...}: {\n  config = let\n    unused = 1;\n  in {};\n}\n",
+    ),
+    ("vendor/c.nix", "{...}: let\n  unused = 1;\nin {}\n"),
+    ("strictix.toml", "[schemas]\n\"modules/b.nix\" = \"\"\n"),
+    (".strictixignore", "vendor/\n"),
+];
+
+fn diagnostics(dir: &Path) -> Vec<(String, String)> {
+    let out = run_in(
+        dir,
+        &[
+            "check",
+            ".",
+            "--format",
+            "json",
+            "--enable",
+            "never-enabled-option",
+        ],
+    );
+    let value = JsonValue::parse(&stdout(&out)).expect("json");
+    let mut found: Vec<(String, String)> = value
+        .get("files")
+        .and_then(JsonValue::as_array)
+        .expect("files")
+        .iter()
+        .flat_map(|file| {
+            file.get("diagnostics")
+                .and_then(JsonValue::as_array)
+                .unwrap_or_default()
+        })
+        .map(|diag| {
+            let field = |key: &str| {
+                diag.get(key)
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            (field("code"), field("message"))
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn check_and_fix_lint_a_merged_file_as_the_files_it_holds() {
+    if !rules_available() {
+        return;
+    }
+    let plain = temp_tree("lint-plain", LINT_TREE);
+    let merged = temp_tree("lint-merged", LINT_TREE);
+    let out = run_in(
+        &merged,
+        &[
+            "merge",
+            ".",
+            "--entry",
+            "default.nix",
+            "--out",
+            "default.nix",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!merged.join("modules").exists(), "the modules were inlined");
+
+    let expected = diagnostics(&plain);
+    assert!(
+        expected
+            .iter()
+            .any(|(code, _)| code == "unused-let-binding"),
+        "{expected:?}"
+    );
+    assert!(
+        expected
+            .iter()
+            .any(|(code, _)| code == "never-enabled-option"),
+        "{expected:?}"
+    );
+    assert!(
+        !expected.iter().any(|(code, _)| code == "dangling-path"),
+        "{expected:?}"
+    );
+    assert_eq!(
+        diagnostics(&merged),
+        expected,
+        "same findings merged and unmerged"
+    );
+
+    let out = run_in(&merged, &["check", "default.nix"]);
+    assert!(
+        stdout(&out).contains("default.nix:"),
+        "diagnostics point into the merged file: {}",
+        stdout(&out)
+    );
+
+    for dir in [&plain, &merged] {
+        let out = run_in(dir, &["fix", "."]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let out = run_in(&merged, &["split", ".", "--merged", "default.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let fixed = read_tree(&plain);
+    assert!(
+        !fixed["modules/b.nix"].contains("unused"),
+        "{}",
+        fixed["modules/b.nix"]
+    );
+    assert!(
+        fixed["vendor/c.nix"].contains("unused"),
+        "ignored file untouched"
+    );
+    assert_eq!(
+        read_tree(&merged),
+        fixed,
+        "fixing the merged file fixes the same files"
+    );
+    std::fs::remove_dir_all(plain).unwrap();
+    std::fs::remove_dir_all(merged).unwrap();
+}
