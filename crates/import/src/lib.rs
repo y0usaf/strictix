@@ -1,13 +1,15 @@
+mod glsl;
 mod lisp;
 mod nix;
 mod shell;
 
 pub use nix::HOLE_BASE;
 
-pub const LANGUAGES: [&str; 2] = ["lisp", "shell"];
+pub const LANGUAGES: [&str; 3] = ["glsl", "lisp", "shell"];
 
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {
+        "glsl" => glsl::import(source, holes),
         "lisp" => lisp::import(source, holes),
         "shell" => shell::import(source, holes),
         other => Err(format!(
