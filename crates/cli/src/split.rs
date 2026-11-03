@@ -440,15 +440,11 @@ impl<'a> Splitter<'a> {
                 continue;
             };
             let (range, items) = candidates.remove(index);
-            for item in items.iter().filter(|item| !modules.contains(item)) {
+            if items != *modules {
                 notes.push(format!(
-                    "{item} was added to the list `{source}` replaced; it is included only if that call discovers it"
+                    "the list `{source}` produced was edited (items added, removed or reordered); kept as an explicit list instead of restoring the call"
                 ));
-            }
-            for module in modules.iter().filter(|module| !items.contains(module)) {
-                notes.push(format!(
-                    "{module} was removed from the list `{source}` replaced; that call will discover it again"
-                ));
+                continue;
             }
             self.skip.insert(range.start());
             self.edits.push((range, source.clone()));
@@ -626,7 +622,9 @@ fn restore_bindings(
         };
         if *path == manifest.entry {
             expansions = splitter.restore_expansions(value, notes);
-            splitter.restore_removed(value)?;
+            if expansions > 0 {
+                splitter.restore_removed(value)?;
+            }
         }
         splitter.walk_value(value);
         if let Some(error) = splitter.error {
