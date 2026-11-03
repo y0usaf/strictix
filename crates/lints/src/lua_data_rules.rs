@@ -554,24 +554,24 @@ fn assignment_runs(parser: &Parser<'_, '_>, source: &str, out: &mut Vec<Finding>
         if run.len() >= 3 {
             let (start, stop) = (parser.tokens[i].start, parser.tokens[next - 1].end);
             let range = parser.lua.source_range(start, stop);
-            let mut seen = HashSet::new();
             let generated = run
                 .iter()
                 .map(|(name, value)| {
-                    seen.insert(*name)
-                        .then(|| Some((attr_name(name)?, value.nix(false)?)))
-                        .flatten()
+                    Some(Node::List(vec![
+                        Node::Raw(format!("\"{name}\"")),
+                        value.nix(true)?,
+                    ]))
                 })
                 .collect::<Option<Vec<_>>>()
                 .map(|items| {
-                    let mut out = String::from("for k, v in pairs(${lib.generators.toLua { } ");
+                    let mut out = String::from("for _, o in ipairs(${lib.generators.toLua { } ");
                     render(
-                        &Node::Set(items),
+                        &Node::List(items),
                         indent_of(source, range.start()),
                         0,
                         &mut out,
                     );
-                    out.push_str(&format!("}}) do vim.{prefix}[k] = v end"));
+                    out.push_str(&format!("}}) do vim.{prefix}[o[1]] = o[2] end"));
                     out
                 });
             out.push(Finding {
@@ -695,7 +695,7 @@ impl Rule for HandWrittenLuaData {
     }
 
     fn description(&self) -> &'static str {
-        "Flags Lua data spelled by hand inside a `.lua` file's text (a file entry's `text`, or `pkgs.writeText \"*.lua\"`): runs of three or more `vim.opt`/`vim.o`/`vim.g`/`vim.wo`/`vim.bo` assignments of literal values (strings, numbers, booleans, tables of literals) with only blank lines between them, and the table constructor passed to `require(\"X\").setup`. Such data is a Nix value; generate it with `lib.generators.toLua`. The fix rewrites an assignment run as `for k, v in pairs(${lib.generators.toLua { } { ... }}) do vim.opt[k] = v end` (assignment order is not kept) and a setup table as `${lib.generators.toLua { } { ... }}`, keeping whole-value interpolations as `lib.generators.mkLuaInline`. It is withheld without `lib` in scope, for setup tables holding functions, variables or calls, tables mixing array and hash parts, non-string keys, duplicate names, Lua escapes other than `\\n \\t \\r \\\\ \\\" \\'`, long strings, floats in exponent or hex form, numbers beyond 2^53, interpolations inside strings or keys, comments, `''`/`$$` escapes, or when the edit would change the string's indentation."
+        "Flags Lua data spelled by hand inside a `.lua` file's text (a file entry's `text`, or `pkgs.writeText \"*.lua\"`): runs of three or more `vim.opt`/`vim.o`/`vim.g`/`vim.wo`/`vim.bo` assignments of literal values (strings, numbers, booleans, tables of literals) with only blank lines between them, and the table constructor passed to `require(\"X\").setup`. Such data is a Nix value; generate it with `lib.generators.toLua`. The fix rewrites an assignment run as `for _, o in ipairs(${lib.generators.toLua { } [ [ \"name\" value ] ... ]}) do vim.opt[o[1]] = o[2] end`, keeping assignment order (aliases like `sw`/`shiftwidth` depend on it) and a setup table as `${lib.generators.toLua { } { ... }}`, keeping whole-value interpolations as `lib.generators.mkLuaInline`. It is withheld without `lib` in scope, for setup tables holding functions, variables or calls, tables mixing array and hash parts, non-string keys, duplicate names, Lua escapes other than `\\n \\t \\r \\\\ \\\" \\'`, long strings, floats in exponent or hex form, numbers beyond 2^53, interpolations inside strings or keys, comments, `''`/`$$` escapes, or when the edit would change the string's indentation."
     }
 
     fn severity(&self) -> Severity {
