@@ -128,6 +128,10 @@ Helpers are recognised through the module's `lib`, its local aliases,
 `inherit (lib)` and `with lib;`; the linter does not evaluate imports. The
 maximum of 5 was calibrated on `~/finix`, which scores at most 5 everywhere.
 
+`duplicate-literal-list-item` skips a list of only strings that is the whole
+of a `*.data.nix` file (a text kept one line per string, where blank and
+closing lines repeat by nature), including such a binding of a merged file.
+
 `singleton-optionals` simplifies `lib.optionals condition [value]` to
 `lib.optional condition value`. Qualified calls have an automatic fix that
 preserves comments and expression grouping. Inherited or aliased calls are

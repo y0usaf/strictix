@@ -122,6 +122,31 @@ fn duplicate_literal_list_item_flags_repeated_primitives() {
     assert!(diagnostics.iter().all(|d| d.fix.is_none()));
 }
 
+fn run_at(source: &str, path: &str) -> Vec<Diagnostic> {
+    let tree = parse(source);
+    let model = SemanticModel::new(source, &tree).with_path(Some(std::path::Path::new(path)));
+    let mut diagnostics = Vec::new();
+    DuplicateLiteralListItem {}.check_file(&model, &LintConfig::default(), &mut diagnostics);
+    diagnostics
+}
+
+#[test]
+fn duplicate_literal_list_item_exempts_a_data_file_of_lines() {
+    let lines = r#"[ "local x = 1" "" "end" "" "end" ]"#;
+    assert!(run_at(lines, "modules/init.lua.data.nix").is_empty());
+    assert_eq!(run_at(lines, "modules/init.nix").len(), 2);
+    assert_eq!(
+        run_at(r#"[ "a" "a" true ]"#, "modules/x.data.nix").len(),
+        1,
+        "a list with non-string items is not a line list"
+    );
+    assert_eq!(
+        run_at(r#"{ x = [ "a" "a" ]; }"#, "modules/x.data.nix").len(),
+        1,
+        "only the root list is exempt"
+    );
+}
+
 #[test]
 fn duplicate_literal_list_item_exempts_numeric_vectors() {
     assert!(run(r#"[ 0 0 1.5 1.5 ]"#, Box::new(DuplicateLiteralListItem {}),).is_empty());

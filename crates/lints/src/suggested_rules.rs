@@ -13,8 +13,8 @@ use strictix_core::{
     semantic::{BindingKind, SemanticModel},
 };
 use strictix_syntax::{
-    AssertExpr, AstNode, BinExpr, Expr, ListExpr, RecAttrsetExpr, StringPart, SyntaxKind as K,
-    SyntaxNode, TextRange,
+    AssertExpr, AstNode, BinExpr, Expr, ListExpr, RecAttrsetExpr, Root, StringPart,
+    SyntaxKind as K, SyntaxNode, TextRange,
 };
 
 /// Flags a recursive attrset that has no intra-set references.
@@ -311,16 +311,37 @@ impl Rule for DuplicateLiteralListItem {
         "Duplicate literal list item"
     }
     fn description(&self) -> &'static str {
-        "Flags a repeated string, boolean, or null literal in one list — usually a copy-paste slip in an imports or package list. Numeric literals are exempt (coordinate and dimension vectors repeat them legitimately), and duplicates may still be intentional, so the rule is warning-only and offers no fix."
+        "Flags a repeated string, boolean, or null literal in one list — usually a copy-paste slip in an imports or package list. Numeric literals are exempt (coordinate and dimension vectors repeat them legitimately), as is a list of only strings that is the whole of a `*.data.nix` file (text kept one line per string, where blank lines and closing lines repeat by nature); duplicates may still be intentional, so the rule is warning-only and offers no fix."
     }
     fn severity(&self) -> Severity {
         Severity::Warning
     }
-    fn node_kind(&self) -> Option<K> {
-        Some(K::ListExpr)
-    }
 
-    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let lines = model
+            .path()
+            .is_some_and(|path| path.to_string_lossy().ends_with(".data.nix"))
+            .then(|| line_list(model.root()))
+            .flatten();
+        for node in model.root().descendants() {
+            if node.kind() == K::ListExpr && Some(node.range()) != lines {
+                self.check_list(node, model.source(), diags);
+            }
+        }
+    }
+}
+
+fn line_list(root: &SyntaxNode) -> Option<TextRange> {
+    let Expr::List(list) = Root::cast(root)?.expr()? else {
+        return None;
+    };
+    list.items()
+        .all(|item| matches!(item, Expr::String(_) | Expr::IndString(_)))
+        .then(|| list.syntax().range())
+}
+
+impl DuplicateLiteralListItem {
+    fn check_list(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
         let Some(list) = ListExpr::cast(node) else {
             return;
         };
