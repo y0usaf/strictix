@@ -121,6 +121,11 @@ derive is kept as `rows`, `inline`, `at`, `below` (TypeScript's break after
 the first file, renames, `\ No newline at end of file`) is an error naming the
 line. The Luau and JavaScript importers print every tree back as the printer
 would and refuse the file at the first line that differs from the source.
+`nix flake check` runs `checks.<system>.import-roundtrip`: every file in
+`checks/import`, one per language and named after it, is imported and its data
+file rendered by `generators.LANGUAGE.render` of the real generator library
+(the `nix-generators` input) under both Nix and iets, and both renders must
+equal the file byte for byte.
 Lisp names are Nix bindings too: `import lisp` prints the whole data file,
 `{defun, getf, kw, ...}: ({f, g}: [ ... ])`, its formals the constructors and
 the `generators.lisp` globals the file uses (Common Lisp symbols, `loop`

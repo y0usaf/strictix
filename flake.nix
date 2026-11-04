@@ -1,10 +1,27 @@
 {
   description = "strictix — strict lints and suggestions for the Nix language";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    nix-generators = {
+      url = "git+file:///home/y0usaf/dev/developing/nix-generators";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    iets = {
+      url = "github:numtide/iets";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      nix-generators,
+      iets,
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -40,6 +57,37 @@
 
       checks = forAll (pkgs: {
         build = self.packages.${pkgs.system}.default;
+
+        import-roundtrip =
+          pkgs.runCommand "strictix-import-roundtrip"
+            {
+              nativeBuildInputs = [
+                self.packages.${pkgs.system}.default
+                iets.packages.${pkgs.system}.default
+                pkgs.nix
+                pkgs.diffutils
+              ];
+            }
+            ''
+              export HOME=$TMPDIR NIX_CONFIG="experimental-features = nix-command"
+              mkdir -p nixpkgs work
+              cp -r ${nixpkgs}/lib ${nixpkgs}/.version nixpkgs/
+              cp ${nix-generators}/lib.nix work/generators.nix
+              lib=$PWD/nixpkgs/lib
+              generators=$PWD/work/generators.nix
+              for source in ${./checks/import}/*; do
+                file=$(basename "$source")
+                language=''${file%%.*}
+                strictix import "$language" "$source" > "work/$file.nix"
+                expression="let generators = import $generators { lib = import $lib; }; in generators.$language.render (import $PWD/work/$file.nix generators.$language)"
+                nix eval --store dummy:// --impure --raw --expr "$expression" > "work/$file.nix-out"
+                iets eval --no-cache --impure --raw -E "$expression" > "work/$file.iets-out"
+                diff -u "$source" "work/$file.nix-out"
+                diff -u "$source" "work/$file.iets-out"
+                echo "$file: nix and iets render the import byte for byte"
+              done
+              touch $out
+            '';
       });
     };
 }
