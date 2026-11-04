@@ -7,6 +7,7 @@ use strictix_syntax::{AttrItem, Expr, StringPart};
 
 use crate::never_enabled_option::{declarations, display, is_enable_option, project_writes};
 use crate::schema::{callee_name, static_segments, unwrap_parens};
+use crate::unused_option::project_reads;
 
 fn literal(model: &SemanticModel<'_>, expr: Expr<'_>) -> bool {
     match unwrap_parens(expr) {
@@ -76,7 +77,7 @@ impl Rule for ConstantOption {
     }
 
     fn description(&self) -> &'static str {
-        "Flags `mkOption` declarations with a literal default that no file in the linted project ever defines, so every configuration uses the default: a constant dressed as an option. Definitions are matched as in `never-enabled-option`, which already covers bool options defaulting to false. Opt-in, and only meaningful when the whole project is linted in one run."
+        "Flags `mkOption` declarations with a literal default that no file in the linted project ever defines, so every configuration uses the default: a constant dressed as an option. Definitions are matched as in `never-enabled-option`, which already covers bool options defaulting to false. The `readers` setting keeps an option that at least that many files read, and the `defined` list names options a configuration defines outside the linted files. Opt-in, and only meaningful when the whole project is linted in one run."
     }
 
     fn severity(&self) -> Severity {
@@ -90,7 +91,7 @@ impl Rule for ConstantOption {
     fn check_file_project(
         &self,
         model: &SemanticModel,
-        _config: &LintConfig,
+        config: &LintConfig,
         project: Option<&ProjectContext>,
         diags: &mut Vec<Diagnostic>,
     ) {
@@ -102,16 +103,33 @@ impl Rule for ConstantOption {
             return;
         }
         let writes = project.memo(project_writes);
+        let keep = config.setting_usize(self.code(), "readers");
+        let reads = keep.map(|_| project.memo(project_reads));
         for (path, range) in declared {
-            if writes.reach(&path) {
+            let shown = display(&path);
+            if writes.reach(&path)
+                || config
+                    .setting_list(self.code(), "defined")
+                    .any(|defined| defined == shown)
+            {
                 continue;
             }
+            let read = match (keep, &reads) {
+                (Some(keep), Some(reads)) => {
+                    let count = reads.readers(&path);
+                    if count >= keep {
+                        continue;
+                    }
+                    format!(", and {count} file(s) read it where {keep} would justify an option")
+                }
+                _ => String::new(),
+            };
             diags.push(Diagnostic::new(
                 self.code(),
                 self.severity(),
                 format!(
-                    "option '{}' is never set anywhere in the project, so it always has its default; replace it with a let value in the module that reads it, or delete it if nothing does",
-                    display(&path)
+                    "option '{}' is never set anywhere in the project, so it always has its default{read}; replace it with a let value in the module that reads it, or delete it if nothing does",
+                    shown
                 ),
                 range,
             ));

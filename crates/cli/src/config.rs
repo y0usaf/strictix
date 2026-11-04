@@ -24,7 +24,8 @@
 //! (`""` turns the schema rules off under that prefix), and
 //! `[codecs.<id>]` sections with an `extensions` string array and an optional
 //! `generator` string, and `[lint.<rule-code>]` sections of per-rule settings
-//! (a string value is unquoted, any other value kept as written). Unknown keys in
+//! (a string value is unquoted, an array of strings is a list setting, any other
+//! value is kept as written). Unknown keys in
 //! `[lint]` and unknown sections are ignored; missing keys are fine.
 //!
 //! ponytail: no trailing comments, no multiline arrays, no other TOML
@@ -107,15 +108,22 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
         let key = key.trim();
         let value = value.trim();
         if let Some(code) = rule {
-            let setting = if value.starts_with('"') {
-                parse_toml_string(value).map_err(|e| format!("line {}: {e}", line_no + 1))?
+            let err = |e: String| format!("line {}: {e}", line_no + 1);
+            let values = if value.starts_with('[') {
+                parse_string_array(value).map_err(err)?
+            } else if value.starts_with('"') {
+                vec![parse_toml_string(value).map_err(err)?]
             } else {
-                value.to_owned()
+                vec![value.to_owned()]
             };
             config
                 .settings
                 .retain(|(c, k, _)| !(*c == code && k == key));
-            config.settings.push((code, key.to_owned(), setting));
+            for setting in values {
+                config
+                    .settings
+                    .push((code.clone(), key.to_owned(), setting));
+            }
             continue;
         }
         if let Some(id) = codec {
@@ -228,7 +236,7 @@ mod tests {
     #[test]
     fn rule_sections_hold_settings() {
         let config = parse_config(
-            "[lint]\nenabled = [\"constant-option\"]\n\n[lint.constant-option]\nreaders = 3\n\n[lint.\"scattered-documentation\"]\nfile = \"modules/README.md\"\n",
+            "[lint]\nenabled = [\"constant-option\"]\n\n[lint.constant-option]\nreaders = 3\ndefined = [\"a.b\", \"c\"]\n\n[lint.\"scattered-documentation\"]\nfile = \"modules/README.md\"\n",
         )
         .unwrap();
         assert_eq!(config.enabled, ["constant-option"]);
@@ -238,5 +246,11 @@ mod tests {
             Some("modules/README.md")
         );
         assert_eq!(config.setting_str("constant-option", "file"), None);
+        assert_eq!(
+            config
+                .setting_list("constant-option", "defined")
+                .collect::<Vec<_>>(),
+            ["a.b", "c"]
+        );
     }
 }

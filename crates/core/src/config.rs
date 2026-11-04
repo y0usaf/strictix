@@ -103,4 +103,15 @@ impl LintConfig {
     pub fn setting_usize(&self, code: &str, key: &str) -> Option<usize> {
         self.setting_str(code, key)?.parse().ok()
     }
+
+    pub fn setting_list<'s>(
+        &'s self,
+        code: &'s str,
+        key: &'s str,
+    ) -> impl Iterator<Item = &'s str> {
+        self.settings
+            .iter()
+            .filter(move |(c, k, _)| c == code && k == key)
+            .map(|(_, _, value)| value.as_str())
+    }
 }

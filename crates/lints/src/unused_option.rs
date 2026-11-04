@@ -31,9 +31,18 @@ use crate::schema::{callee_name, module_attrset, static_segments, unwrap_parens}
 /// How many `cfg = config.a; sub = cfg.b;` hops an alias is followed.
 const ALIAS_DEPTH: usize = 4;
 
-/// Every option path read anywhere in the project. A read covers the
-/// subtree below it and every declaration above it.
-struct OptionReads(Vec<Vec<String>>);
+/// Every option path each project file reads, one sorted list per file.
+/// A read covers the subtree below it and every declaration above it.
+pub(crate) struct OptionReads(Vec<Vec<Vec<String>>>);
+
+impl OptionReads {
+    pub(crate) fn readers(&self, declared: &[String]) -> usize {
+        self.0
+            .iter()
+            .filter(|reads| reads.iter().any(|read| covers(read, declared)))
+            .count()
+    }
+}
 
 /// Whether read `read` can reach declaration `declared`: one is a
 /// prefix of the other.
@@ -265,19 +274,21 @@ impl<'m, 'a> FileReads<'m, 'a> {
     }
 }
 
-fn project_reads(project: &ProjectContext) -> OptionReads {
-    let mut reads = Vec::new();
+pub(crate) fn project_reads(project: &ProjectContext) -> OptionReads {
+    let mut files = Vec::new();
     for file in project.sources() {
         let tree = parse(&file.source);
         if tree.error_nodes().next().is_some() {
             continue;
         }
         let model = SemanticModel::new(&file.source, &tree);
+        let mut reads = Vec::new();
         FileReads::new(&model).collect(&mut reads);
+        reads.sort();
+        reads.dedup();
+        files.push(reads);
     }
-    reads.sort();
-    reads.dedup();
-    OptionReads(reads)
+    OptionReads(files)
 }
 
 /// Every option leaf this module declares: `options.<path>` bindings at
@@ -384,7 +395,7 @@ impl Rule for UnusedOption {
         }
         let reads = project.memo(project_reads);
         for (path, range) in declared {
-            if reads.0.iter().any(|read| covers(read, &path)) {
+            if reads.readers(&path) > 0 {
                 continue;
             }
             diags.push(Diagnostic::new(

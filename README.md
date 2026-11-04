@@ -407,7 +407,14 @@ matching definitions exactly as `never-enabled-option` does, so every
 configuration uses the default. Replace such an option with a `let` value
 in the module that reads it, or delete it if nothing reads it. Modules
 from flake inputs are not linted, so an option they define is still
-reported.
+reported unless the `defined` list below names it.
+The `readers` setting (`[lint.constant-option] readers = 3`) keeps such an
+option when at least that many linted files read it, counting reads as
+`unused-option` finds them (the declaring module counts), for a project
+whose convention is that a value several modules share stays an option.
+The `defined` list (`defined = ["a.b"]`) names options that something outside
+the linted files defines, such as a module from a flake input that a linted
+module imports, so an evaluation of the configurations can supply them.
 
 `discouraged-lib-type` flags `types.attrs`, which merges definitions
 shallowly and does not discharge `mkIf`/`mkDefault`, and fixes it to
