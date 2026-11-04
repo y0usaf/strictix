@@ -567,6 +567,7 @@ impl<'a> Splitter<'a> {
         }
         let mut param = node.kind() == K::LambdaExpr;
         let mut default = false;
+        let mut inherit_source = false;
         for child in node.children() {
             match child {
                 NodeOrToken::Node(n) => self.walk(n),
@@ -574,10 +575,14 @@ impl<'a> Splitter<'a> {
                     K::Colon => param = false,
                     K::Question => default = true,
                     K::Comma => default = false,
+                    K::LParen | K::RParen if node.kind() == K::InheritStmt => {
+                        inherit_source = t.kind() == K::LParen;
+                    }
                     K::Ident => {
                         let binder = param
                             || node.kind() == K::Formals && !default
-                            || matches!(node.kind(), K::Attrpath | K::InheritStmt);
+                            || node.kind() == K::Attrpath
+                            || node.kind() == K::InheritStmt && !inherit_source;
                         if !binder && !self.handled.contains(&t.range().start()) {
                             if let Some(target) = self.target(t) {
                                 let text = self.import(target, false);

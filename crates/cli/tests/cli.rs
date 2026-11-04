@@ -500,6 +500,65 @@ fn merge_flake_in_place_keeps_an_attrset_and_split_restores_it() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A data file imported as an inherit's source, `inherit (import ./x.nix) a b;`,
+/// is a bare name in the merged file's inherit parentheses and comes back as
+/// the import, not as the merged binding's name.
+#[test]
+fn split_restores_an_import_inherited_from() {
+    let dir = temp_tree(
+        "split-inherit-import",
+        &[
+            (
+                "flake.nix",
+                "{\n  description = \"t\";\n  outputs = inputs: import ./modules/outputs.nix inputs;\n}\n",
+            ),
+            (
+                "modules/outputs.nix",
+                "inputs: {\n  a = import ./a.nix;\n  b = import ./sub/b.nix;\n}\n",
+            ),
+            (
+                "modules/a.nix",
+                "let\n  inherit (import ./x.data.nix) model vocabulary;\nin {\n  inherit model vocabulary;\n}\n",
+            ),
+            (
+                "modules/sub/b.nix",
+                "let\n  inherit (import ../x.data.nix) model;\nin\n  model\n",
+            ),
+            ("modules/x.data.nix", "{\n  model = \"m\";\n  vocabulary = [\"v\"];\n}\n"),
+        ],
+    );
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let merged = read_tree(&dir)["flake.nix"].clone();
+    assert!(
+        merged.contains("inherit (modules_x_data) model vocabulary;"),
+        "{merged}"
+    );
+
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        read_tree(&dir),
+        before,
+        "split restores every file byte for byte"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn merge_reports_why_a_path_named_file_stays() {
     let dir = temp_tree(
