@@ -335,7 +335,10 @@ maximum of 5 was calibrated on `~/finix`, which scores at most 5 everywhere.
 comparison, since a generator repeats a lockfile's package records by nature:
 such a file is neither reported nor named as another file's twin, and neither
 is a binding of a `strictix merge` file whose `merge_manifest` path lies under
-a generated prefix.
+a generated prefix. Its threshold is the setting `min-leaves` (default 8):
+`[lint.duplicate-definitions] min-leaves = 6` reports subtrees of six
+identical leaves and root attrsets sharing six. `~/finix` holds none at 6;
+at 5 its only overlaps are coincidences (two models of one context window).
 
 `duplicate-literal-list-item` skips a list of only strings that is the whole
 of a `*.data.nix` file (a text kept one line per string, where blank and

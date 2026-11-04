@@ -94,3 +94,29 @@ fn a_merged_binding_whose_manifest_path_is_generated_is_left_out() {
         "{one:?}"
     );
 }
+
+#[test]
+fn min_leaves_sets_the_threshold() {
+    let small = "{ a = 1; b = 2; c = 3; d = 4; e = 5; }";
+    let files = [("./a.nix", small), ("./b.nix", small)];
+    assert!(diagnostics(&files, &LintConfig::default()).is_empty());
+    let five = LintConfig::default().with_setting("duplicate-definitions", "min-leaves", "5");
+    assert_eq!(diagnostics(&files, &five).len(), 2);
+    let nine = LintConfig::default().with_setting("duplicate-definitions", "min-leaves", "9");
+    assert!(diagnostics(&[("./a.nix", RECORD), ("./b.nix", RECORD)], &nine).is_empty());
+}
+
+#[test]
+fn min_leaves_applies_to_overlapping_records() {
+    let a = "{ a = 1; b = 2; c = 3; d = 4; e = 5; f = 6; x = 0; }";
+    let b = "{ a = 1; b = 2; c = 3; d = 4; e = 5; f = 6; y = 0; }";
+    let files = [("./a.nix", a), ("./b.nix", b)];
+    assert!(diagnostics(&files, &LintConfig::default()).is_empty());
+    let six = LintConfig::default().with_setting("duplicate-definitions", "min-leaves", "6");
+    let found = diagnostics(&files, &six);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found[0].1.message.starts_with("6 key/value leaves"),
+        "{found:?}"
+    );
+}

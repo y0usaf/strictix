@@ -14,6 +14,7 @@ use strictix_syntax::{
 use crate::config_file_rules::relative;
 
 const MIN_LEAVES: usize = 8;
+const CODE: &str = "duplicate-definitions";
 
 type Leaf = (Box<[u32]>, u32);
 
@@ -260,6 +261,7 @@ struct Findings(Vec<Vec<(TextRange, String)>>);
 
 struct Index<'p> {
     project: &'p ProjectContext,
+    min_leaves: usize,
     lines: Vec<Vec<u32>>,
     modules: Vec<Module>,
     sets: Vec<Set>,
@@ -356,6 +358,9 @@ fn index(project: &ProjectContext, config: &LintConfig) -> Findings {
     }
     let index = Index {
         project,
+        min_leaves: config
+            .setting_usize(CODE, "min-leaves")
+            .unwrap_or(MIN_LEAVES),
         lines,
         modules,
         sets,
@@ -376,7 +381,7 @@ fn identical(index: &Index<'_>, findings: &mut [Vec<(TextRange, String)>]) {
     let mut classes: Vec<Vec<usize>> = Vec::new();
     let mut class_of = vec![None; sets.len()];
     for (i, set) in sets.iter().enumerate() {
-        if set.leaves.len() < MIN_LEAVES {
+        if set.leaves.len() < index.min_leaves {
             continue;
         }
         let id = *ids.entry(&set.leaves).or_insert_with(|| {
@@ -467,7 +472,7 @@ fn overlapping(index: &Index<'_>, findings: &mut [Vec<(TextRange, String)>]) {
     }
     let mut pairs: Vec<(usize, usize)> = counts
         .into_iter()
-        .filter(|&(_, count)| count >= MIN_LEAVES)
+        .filter(|&(_, count)| count >= index.min_leaves)
         .map(|(pair, _)| pair)
         .collect();
     pairs.sort_unstable();
@@ -539,7 +544,7 @@ pub struct DuplicateDefinitions;
 
 impl Rule for DuplicateDefinitions {
     fn code(&self) -> &'static str {
-        "duplicate-definitions"
+        CODE
     }
 
     fn name(&self) -> &'static str {
@@ -547,7 +552,7 @@ impl Rule for DuplicateDefinitions {
     }
 
     fn description(&self) -> &'static str {
-        "Flags attrset subtrees with at least 8 leaf bindings that are identical (every relative key path and whitespace-normalized value) in two or more modules: different files, or different top-level bindings of a `strictix merge` file. Each group is reported once at every site, naming the others. When whole subtrees differ, two root attrsets (a module body, a `let` value, a list element; never one nested under a different key) that still share at least 8 identical key-path/value leaves are reported at the deepest pair holding all of them, with the count and a per-key breakdown. Keys are compared by full path, so a setting under a different section never matches. Files under a `lint.generated` prefix (and bindings of a `strictix merge` file whose manifest path is under one) are left out, since a generator, not a person, repeats their records."
+        "Flags attrset subtrees with at least `min-leaves` (default 8) leaf bindings that are identical (every relative key path and whitespace-normalized value) in two or more modules: different files, or different top-level bindings of a `strictix merge` file. Each group is reported once at every site, naming the others. When whole subtrees differ, two root attrsets (a module body, a `let` value, a list element; never one nested under a different key) that still share at least `min-leaves` identical key-path/value leaves are reported at the deepest pair holding all of them, with the count and a per-key breakdown. Keys are compared by full path, so a setting under a different section never matches. Files under a `lint.generated` prefix (and bindings of a `strictix merge` file whose manifest path is under one) are left out, since a generator, not a person, repeats their records."
     }
 
     fn severity(&self) -> Severity {
