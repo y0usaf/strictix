@@ -20,6 +20,7 @@ pub mod duplicate_formal;
 pub mod duplicate_inherit;
 pub mod duplicate_list_to_attrs_name;
 pub mod file_rules;
+pub mod flake_inputs;
 pub mod ill_typed_binop;
 pub mod ill_typed_unary_op;
 pub mod interpolation_rules;
@@ -27,6 +28,7 @@ pub mod invalid_list_access;
 mod lib_helpers;
 pub mod lib_type_rules;
 pub mod lua_data_rules;
+pub mod machine_local_default;
 pub mod missing_attribute;
 pub mod missing_function_argument;
 pub mod module_rules;
@@ -86,6 +88,8 @@ use interpolation_rules::{CoercedInterpolation, RedundantInterpolation, Redundan
 use invalid_list_access::InvalidListAccess;
 use lib_type_rules::{DiscouragedLibType, UnknownLibType};
 use lua_data_rules::HandWrittenLuaData;
+use flake_inputs::FlakeInputWithoutNixpkgsFollows;
+use machine_local_default::MachineLocalDefault;
 use missing_attribute::MissingAttribute;
 use missing_function_argument::MissingFunctionArgument;
 use module_rules::{ConfigDependentImports, MixedModuleSyntax};
@@ -237,6 +241,8 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         HandWrittenLuaData,
         ScatteredDocumentation,
         UnformattedFile,
+        FlakeInputWithoutNixpkgsFollows,
+        MachineLocalDefault,
         WrappedProse,
     }
 }

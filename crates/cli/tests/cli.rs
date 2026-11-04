@@ -500,6 +500,87 @@ fn merge_flake_in_place_keeps_an_attrset_and_split_restores_it() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// The manifest is 288 entries in a real system repo, where short names
+/// collide across directories; the round trip must still restore every
+/// file byte for byte.
+#[test]
+fn a_large_tree_round_trips_byte_for_byte() {
+    let count = 150usize;
+    let mut owned: Vec<(String, String)> = Vec::new();
+    let mut listed = String::new();
+    for i in 0..count {
+        for dir in ["alpha", "beta"] {
+            owned.push((
+                format!("modules/{dir}/m{i}.nix"),
+                format!("{{...}}: {{ x = {i}; }}\n"),
+            ));
+            listed.push_str(&format!("    ./{dir}/m{i}.nix\n"));
+        }
+    }
+    owned.push((
+        "modules/outputs.nix".into(),
+        format!("inputs: {{\n  modules = [\n{listed}  ];\n}}\n"),
+    ));
+    owned.push((
+        "flake.nix".into(),
+        "{ description = \"t\"; outputs = inputs: import ./modules/outputs.nix inputs; }\n".into(),
+    ));
+    let files: Vec<(&str, &str)> = owned
+        .iter()
+        .map(|(path, text)| (path.as_str(), text.as_str()))
+        .collect();
+    let dir = temp_tree("roundtrip-large", &files);
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        read_tree(&dir),
+        before,
+        "split restores every file byte for byte"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A manifest entry whose binding was deleted from the merged file is
+/// reported, not silently skipped: split writes every other file and names
+/// the entry that has nowhere to go.
+#[test]
+fn split_notes_a_manifest_entry_whose_binding_is_gone() {
+    let dir = temp_tree("split-unused-entry", FLAKE_TREE);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let merged = std::fs::read_to_string(dir.join("flake.nix")).unwrap();
+    let stripped = merged.replace("  modules_b =\n{config = {};}\n  ;\n", "");
+    assert_ne!(merged, stripped, "the merged fixture holds modules_b");
+    std::fs::write(dir.join("flake.nix"), stripped).unwrap();
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let report = stdout(&out);
+    assert!(
+        report.contains("the manifest names modules_b for modules/b.nix"),
+        "{report}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// A data file imported as an inherit's source, `inherit (import ./x.nix) a b;`,
 /// is a bare name in the merged file's inherit parentheses and comes back as
 /// the import, not as the merged binding's name.

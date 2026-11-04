@@ -310,14 +310,14 @@ the binding copies verbatim, and is withheld otherwise.
 
 ## Rules
 
-106 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
+108 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
 | Dead code | unused-let-binding, unused-lambda-param, unused-formal, unused-inherit, unused-rec-binding, redundant-with, unnecessary-rec, unreachable-branch |
 | Certain evaluation errors | self-referential-let, circular-let, undefined-variable, non-boolean-condition, ill-typed-binop, ill-typed-unary-op, non-callable-application, literal-division-by-zero, coerced-interpolation, assert-false, duplicate-attribute, duplicate-formal, dangling-path, missing-import, import-cycle, missing-function-argument, unexpected-function-argument, missing-attribute, builtin-argument-type, builtin-arity, invalid-list-access, invalid-list-to-attrs-entry, replace-strings-length-mismatch, invalid-builtin-range |
 | Hallucination checks | unknown-option, option-type-mismatch, unknown-builtin, unknown-lib-type |
-| Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, duplicate-function-argument, dynamic-import, suspicious-import-argument, suspicious-recursion, unsafe-with-shadowing, shallow-merge-overwrite (opt-in), discouraged-lib-type, masked-generator |
+| Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, duplicate-function-argument, dynamic-import, suspicious-import-argument, suspicious-recursion, unsafe-with-shadowing, shallow-merge-overwrite (opt-in), discouraged-lib-type, masked-generator, flake-input-without-nixpkgs-follows, machine-local-default |
 | Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in), constant-option (opt-in) |
 | Layout | scattered-documentation (opt-in), unformatted-file (opt-in), wrapped-prose (opt-in) |
 | Maintainability | cyclomatic-complexity, cognitive-complexity |
@@ -514,6 +514,22 @@ with `//` can be intentional. Enable it with
 ```toml
 [lint]
 enabled = ["shallow-merge-overwrite"]
+```
+
+`flake-input-without-nixpkgs-follows` flags a flake input that would build
+its exported packages from a second package set; the fix is
+`inputs.<name>.inputs.nixpkgs.follows = "nixpkgs"`, and an input marked
+`flake = false` is a source tree only and exempt. `machine-local-default`
+flags an option whose `default` is an absolute path under /home, /Users or
+/root: it evaluates anywhere and only works on the machine that wrote it.
+Both read an `allow` list, matched by exact input name and by path prefix:
+
+```toml
+[lint.flake-input-without-nixpkgs-follows]
+allow = ["tomoe"]
+
+[lint.machine-local-default]
+allow = ["/home/y0usaf/Tokens/"]
 ```
 
 `--enable` is repeatable. `disabled` / `--disable` takes precedence over explicit

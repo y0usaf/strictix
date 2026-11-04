@@ -947,6 +947,23 @@ pub(crate) fn restore(source: &str, out_dir: Option<&str>) -> Result<Option<Rest
     if !files.iter().any(|(path, _)| *path == manifest.entry) {
         return Err(format!("no binding holds the entry {}", manifest.entry));
     }
+    let written: std::collections::HashSet<&str> = files
+        .iter()
+        .map(|(path, _)| path.as_str())
+        .chain(manifest.redirected.iter().map(String::as_str))
+        .collect();
+    let mut unused: Vec<(&str, &str)> = manifest
+        .files
+        .iter()
+        .map(|(binding, path)| (binding.as_str(), path.as_str()))
+        .filter(|(_, path)| !written.contains(path))
+        .collect();
+    unused.sort_unstable();
+    for (binding, path) in unused {
+        notes.push(format!(
+            "the manifest names {binding} for {path}, but the merged file has no such binding; nothing was restored there"
+        ));
+    }
     Ok(Some(Restored {
         entry: manifest.entry,
         out: manifest.out,
