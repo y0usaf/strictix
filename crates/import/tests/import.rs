@@ -194,18 +194,18 @@ fn markdown_it_cannot_reproduce_is_an_error() {
 }
 
 #[test]
-fn glsl_shaders_are_keyed_declarations_of_native_values() {
-    let source = "#define SCALE(c) ((c) / 255.0)\n#define K -2.0\nconst float A = 0.50;\nconst vec2 P[2] = vec2[2](vec2(0.0), vec2(1.0, -1.0));\nconst float B = A * 2.0;\nconst uint H = 0xffu;\n// the falloff\nfloat f(in vec2 p, float k) {\n    float c = cos(k), s[2];\n    if (k < 0.0) return -(p.x + k);\n    else if (k > 1e-5) { c = 1.0; s[0] = (c - k) - (k - c); }\n    for (int i = 0; i < 3; i++) c += p[i] * float(i) > 0.0 ? f(p.yx, k).x : 1.0;\n    return c * (s[1] / 2.0);\n}\n";
+fn glsl_locals_and_parameters_are_nix_bindings() {
+    let source = "#define SCALE(c) ((c) / 255.0)\nconst float A = 0.50;\nconst vec2 P[2] = vec2[2](vec2(0.0), vec2(1.0, -1.0));\nconst float B = A * 2.0;\n// the falloff\nfloat f(in vec2 p, float k) {\n    float c = cos(k), s[2];\n    if (k < 0.0) return -(p.x + k);\n    else if (k > 1e-5) { float d = c - k; s[0] = d - (k - c); }\n    for (int i = 0; i < 3; i++) c += P[i].x * float(i) > 0.0 ? f(p.yx, k) : SCALE(1.0);\n    return c * (s[1] / 2.0);\n}\n";
     assert_eq!(
         expression("glsl", source, &[]).unwrap(),
-        "{\n  defines = {\n    K = (-2.0);\n    SCALE = (macro [\"c\"] [\"c\" \"/\" 255.0]);\n  };\n  consts = {\n    A = 0.5;\n    B = (typed \"float\" [\"A\" \"*\" 2.0]);\n    H = (unsigned 255);\n    P = (array \"vec2\" [(vec2 0.0) (vec2 1.0 (-1.0))]);\n  };\n  fns = {\n    f = (commented \"the falloff\" (fn \"float\" [[\"in\" \"vec2\" \"p\"] [\"float\" \"k\"]] [\n(var \"float\" \"c\" (call \"cos\" \"k\"))\n(var (sized \"float\" 2) \"s\" null)\n(ifElse [\"k\" \"<\" 0.0] [\n(return (neg [\"p.x\" \"+\" \"k\"]))\n] (if' [\"k\" \">\" 1.0e-5] [\n(assign \"c\" 1.0)\n(assign (index \"s\" 0) [\"c\" \"-\" \"k\" \"-\" [\"k\" \"-\" \"c\"]])\n]))\n(for (var \"int\" \"i\" 0) [\"i\" \"<\" 3] (inc \"i\") [\n(update \"+=\" \"c\" (cond [(index \"p\" \"i\") \"*\" (float \"i\") \">\" 0.0] (field (call \"f\" \"p.yx\" \"k\") \"x\") 1.0))\n])\n(return [\"c\" \"*\" [(index \"s\" 1) \"/\" 2.0]])\n]));\n  };\n}"
+        "{\n  array,\n  commented,\n  cond,\n  cos,\n  float,\n  fn,\n  for,\n  if',\n  ifElse,\n  in',\n  inc,\n  index,\n  int,\n  local,\n  macro,\n  neg,\n  return,\n  set,\n  sized,\n  typed,\n  update,\n  vec2,\n  ...\n}: self: let\n  inherit (self) A P SCALE f;\nin {\n  defines = {\n    SCALE = (macro ({c}: [c \"/\" 255.0]));\n  };\n  consts = {\n    A = 0.5;\n    B = (typed float [A \"*\" 2.0]);\n    P = (array vec2 [(vec2 0.0) (vec2 1.0 (-1.0))]);\n  };\n  fns = {\n    f = (commented \"the falloff\" (fn float [{p = (in' vec2);} {k = float;}] ({p, k, c, s}: [\n(local c float (cos k))\n(local s (sized float 2) null)\n(ifElse [k \"<\" 0.0] [\n(return (neg [p.x \"+\" k]))\n] (if' [k \">\" 1.0e-5] ({d}: [\n(local d float [c \"-\" k])\n(set (index s 0) [d \"-\" [k \"-\" c]])\n])))\n(for ({i}: {\n init = (local i int 0);\n test = [i \"<\" 3];\n step = (inc i);\n body = [\n(update c \"+=\" (cond [(index P i).x \"*\" (float i) \">\" 0.0] (f p.yx k) (SCALE 1.0)))\n];\n}))\n(return [c \"*\" [(index s 1) \"/\" 2.0]])\n])));\n  };\n}"
     );
 }
 
 #[test]
-fn glsl_data_file_formals_skip_keys_and_exponents() {
+fn glsl_data_file_is_the_shader_function() {
     let file = data_file("glsl", "const float E = 1e-5;\n", &[]).unwrap();
-    assert_eq!(file, "_: {\n  consts = {\n    E = 1.0e-5;\n  };\n}\n");
+    assert_eq!(file, "_: _: {\n  consts = {\n    E = 1.0e-5;\n  };\n}\n");
 }
 
 #[test]
@@ -223,6 +223,18 @@ fn glsl_what_a_keyed_shader_cannot_express_is_an_error() {
     assert!(expression("glsl", "const float a = 1.0f;\n", &[]).is_err());
     assert!(expression("glsl", "const float a = 1.0;\n// trailing\n", &[]).is_err());
     assert!(expression("glsl", "void f() {\n    { a = 1.0; }\n}\n", &[]).is_err());
+    assert!(
+        expression("glsl", "float f() {\n    return undeclared;\n}\n", &[])
+            .unwrap_err()
+            .contains("neither bound")
+    );
+    assert!(expression(
+        "glsl",
+        "float f() {\n    float set = 1.0;\n    return set;\n}\n",
+        &[]
+    )
+    .unwrap_err()
+    .contains("already gives a meaning"));
 }
 
 #[test]

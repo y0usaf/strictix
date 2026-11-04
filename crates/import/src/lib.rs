@@ -49,6 +49,9 @@ pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<Stri
 
 pub fn data_file(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     let expression = expression(language, source, holes)?;
+    if language == "glsl" {
+        return Ok(format!("{expression}\n"));
+    }
     let names = constructors(&expression);
     let formals = if names.is_empty() {
         "_".to_owned()

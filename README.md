@@ -112,13 +112,19 @@ derive is kept as `rows`, `inline`, `at`, `below` (TypeScript's break after
 the first file, renames, `\ No newline at end of file`) is an error naming the
 line. The Luau and JavaScript importers print every tree back as the printer
 would and refuse the file at the first line that differs from the source.
-GLSL is read for meaning, not layout: `import glsl` prints a shader as
-`{defines, consts, fns}`, attribute sets keyed by name, whose values are native
-Nix numbers and booleans and constructor nodes (`vec2 0.4 0.58`, `call "mix" a
-b t`, infix lists `["a" "*" "b" "+" 1.0]` nested only where precedence needs
-parentheses); layout, blank lines, redundant parentheses and literal spelling
-are dropped, and a global that is not one `const` name, a name declared twice,
-a suffixed float or a bare nested block is an error.
+GLSL is read for meaning, not layout: `import glsl` prints a shader as a
+function of the generator's constructors and of the shader itself, `{fn,
+vec2, mix, ...}: self: let inherit (self) PAL hash; in {defines, consts,
+fns}`, attribute sets keyed by name. A parameter or local is a Nix binding: a
+function body or a block that declares names is a lambda whose formals are its
+parameters and locals (`({c, v}: [(local v uvec2 ...) ...])`), a global is
+inherited from `self`, and a builtin, type or prelude uniform is a formal, so
+every name is a Nix variable. Numbers and booleans are native Nix values,
+operators infix lists nested only where precedence needs parentheses;
+layout, blank lines, redundant parentheses and literal spelling are dropped,
+and a global that is not one `const` name, a name declared twice, a name the
+generator or Nix already uses, a name nothing declares, a suffixed float or a
+bare nested block is an error.
 tree-sitter-glsl reads `(float(x) + y)` as a broken cast, so the importer
 parses a constructor call of a builtin scalar type (`float(`, `int(`, `uint(`,
 `bool(`, `double(`) as a call of an identifier, keeping its source bytes.

@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{line_of, nix};
 
@@ -8,11 +9,65 @@ const MASKED: [&str; 5] = ["bool", "double", "float", "int", "uint"];
 
 const SCALARS: [&str; 4] = ["bool", "int", "uint", "float"];
 
-const KEYWORDS: [&str; 9] = [
-    "assert", "else", "if", "in", "inherit", "let", "or", "rec", "then",
+const NIX_KEYWORDS: [&str; 11] = [
+    "assert", "else", "if", "in", "inherit", "let", "or", "rec", "then", "with", "self",
 ];
 
+const CONSTRUCTORS: [&str; 37] = [
+    "fn",
+    "local",
+    "set",
+    "update",
+    "return",
+    "break",
+    "continue",
+    "if'",
+    "ifElse",
+    "for",
+    "while",
+    "comment",
+    "commented",
+    "neg",
+    "not",
+    "bitNot",
+    "preInc",
+    "preDec",
+    "inc",
+    "dec",
+    "cond",
+    "unsigned",
+    "sized",
+    "out",
+    "in'",
+    "inout",
+    "typed",
+    "macro",
+    "array",
+    "index",
+    "swizzle",
+    "math",
+    "rgb",
+    "render",
+    "atan2",
+    "step",
+    "smoothstep",
+];
+
+const EXTERNALS: [&str; 5] = ["iResolution", "iTime", "iFrame", "iMouse", "iChannel0"];
+
 const ASSIGNMENTS: [&str; 10] = ["+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|="];
+
+fn arity(name: &str) -> Option<usize> {
+    Some(match name {
+        "abs" | "sign" | "floor" | "ceil" | "fract" | "round" | "trunc" | "sin" | "cos" | "tan"
+        | "asin" | "acos" | "atan" | "exp" | "log" | "exp2" | "log2" | "sqrt" | "inversesqrt"
+        | "normalize" | "radians" | "degrees" | "fwidth" | "dFdx" | "dFdy" | "length" => 1,
+        "min" | "max" | "mod" | "pow" | "reflect" | "atan2" | "distance" | "dot" | "step"
+        | "cross" | "texture" => 2,
+        "clamp" | "mix" | "smoothstep" => 3,
+        _ => return None,
+    })
+}
 
 fn precedence(operator: &str) -> Option<u8> {
     Some(match operator {
@@ -32,7 +87,7 @@ fn precedence(operator: &str) -> Option<u8> {
 }
 
 fn is_type(name: &str) -> bool {
-    if SCALARS.contains(&name) {
+    if SCALARS.contains(&name) || name == "sampler2D" || name == "void" {
         return true;
     }
     let shape = |rest: &str| matches!(rest, "2" | "3" | "4");
@@ -47,9 +102,21 @@ fn is_type(name: &str) -> bool {
         })
 }
 
+fn reserved(name: &str) -> bool {
+    NIX_KEYWORDS.contains(&name)
+        || CONSTRUCTORS.contains(&name)
+        || EXTERNALS.contains(&name)
+        || is_type(name)
+        || arity(name).is_some()
+}
+
 struct Emitter<'s> {
     source: &'s str,
     holes: &'s [String],
+    globals: BTreeSet<String>,
+    scopes: RefCell<Vec<Vec<String>>>,
+    used: RefCell<BTreeSet<String>>,
+    selves: RefCell<BTreeSet<String>>,
 }
 
 #[derive(Default)]
@@ -61,10 +128,43 @@ struct Shader {
 
 pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
     let tree = crate::parse(&tree_sitter_glsl::LANGUAGE_GLSL.into(), &mask(source))?;
-    let emitter = Emitter { source, holes };
+    let mut emitter = Emitter {
+        source,
+        holes,
+        globals: BTreeSet::new(),
+        scopes: RefCell::new(Vec::new()),
+        used: RefCell::new(BTreeSet::new()),
+        selves: RefCell::new(BTreeSet::new()),
+    };
+    let items = named(tree.root_node());
+    for node in &items {
+        let name = match node.kind() {
+            "preproc_def" | "preproc_function_def" => emitter.field(*node, "name")?,
+            "declaration" => {
+                let declarator = emitter.field(*node, "declarator")?;
+                let target = declarator
+                    .child_by_field_name("declarator")
+                    .unwrap_or(declarator);
+                target.child_by_field_name("declarator").unwrap_or(target)
+            }
+            "function_definition" => {
+                let declarator = emitter.field(*node, "declarator")?;
+                emitter.field(declarator, "declarator")?
+            }
+            _ => continue,
+        };
+        let name = emitter.text(name).to_owned();
+        emitter.name(&name, emitter.line(*node))?;
+        if !emitter.globals.insert(name.clone()) {
+            return Err(format!(
+                "line {}: `{name}` is declared twice; a shader's names are keys",
+                emitter.line(*node)
+            ));
+        }
+    }
     let mut shader = Shader::default();
     let mut note: Option<String> = None;
-    for node in named(tree.root_node()) {
+    for node in items {
         if node.kind() == "comment" {
             if note.is_some() {
                 return Err(format!(
@@ -96,20 +196,38 @@ pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
             }
         };
         let value = match note.take() {
-            Some(text) => format!("(commented {} {value})", emitter.string(&text)),
+            Some(text) => {
+                emitter.uses("commented");
+                format!("(commented {} {value})", emitter.string(&text))
+            }
             None => value,
         };
-        if section.insert(name.clone(), value).is_some() {
-            return Err(format!(
-                "line {}: `{name}` is declared twice; a shader's names are keys",
-                emitter.line(node)
-            ));
-        }
+        section.insert(name, value);
     }
     if note.is_some() {
         return Err("a comment after the last declaration".into());
     }
-    let mut out = String::from("{\n");
+    let used = emitter.used.borrow();
+    let selves = emitter.selves.borrow();
+    let mut out = String::new();
+    if used.is_empty() {
+        out.push_str("_: ");
+    } else {
+        out.push_str("{\n");
+        for name in used.iter() {
+            out.push_str(&format!("  {name},\n"));
+        }
+        out.push_str("  ...\n}: ");
+    }
+    if selves.is_empty() {
+        out.push_str("_: {\n");
+    } else {
+        let names: Vec<&str> = selves.iter().map(String::as_str).collect();
+        out.push_str(&format!(
+            "self: let\n  inherit (self) {};\nin {{\n",
+            names.join(" ")
+        ));
+    }
     for (key, section) in [
         ("defines", &shader.defines),
         ("consts", &shader.consts),
@@ -120,20 +238,12 @@ pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
         }
         out.push_str(&format!("  {key} = {{\n"));
         for (name, value) in section {
-            out.push_str(&format!("    {} = {value};\n", attribute(name)));
+            out.push_str(&format!("    {name} = {value};\n"));
         }
         out.push_str("  };\n");
     }
     out.push('}');
     Ok(out)
-}
-
-fn attribute(name: &str) -> String {
-    if KEYWORDS.contains(&name) {
-        format!("\"{name}\"")
-    } else {
-        name.to_owned()
-    }
 }
 
 fn mask(source: &str) -> String {
@@ -166,14 +276,6 @@ fn unparen(mut node: Node<'_>) -> Node<'_> {
         }
     }
     node
-}
-
-fn binary(node: Node<'_>, emitter: &Emitter<'_>) -> Option<u8> {
-    let node = unparen(node);
-    if node.kind() != "binary_expression" {
-        return None;
-    }
-    precedence(emitter.text(node.child_by_field_name("operator")?))
 }
 
 fn float(value: f64) -> String {
@@ -209,6 +311,21 @@ impl Emitter<'_> {
         nix::string(text, self.holes, 0)
     }
 
+    fn uses(&self, name: &str) -> String {
+        self.used.borrow_mut().insert(name.to_owned());
+        name.to_owned()
+    }
+
+    fn name(&self, name: &str, line: usize) -> Result<(), String> {
+        if reserved(name) {
+            Err(format!(
+                "line {line}: `{name}` is a name the GLSL generator or Nix already gives a meaning"
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     fn field<'t>(&self, node: Node<'t>, name: &str) -> Result<Node<'t>, String> {
         node.child_by_field_name(name).ok_or_else(|| {
             format!(
@@ -235,6 +352,29 @@ impl Emitter<'_> {
             }
             _ => self.refuse(node, "only a // comment on one line is kept"),
         }
+    }
+
+    fn resolve(&self, node: Node<'_>) -> Result<String, String> {
+        let name = self.text(node);
+        if self
+            .scopes
+            .borrow()
+            .iter()
+            .any(|scope| scope.iter().any(|one| one == name))
+        {
+            return Ok(name.to_owned());
+        }
+        if self.globals.contains(name) {
+            self.selves.borrow_mut().insert(name.to_owned());
+            return Ok(name.to_owned());
+        }
+        if EXTERNALS.contains(&name) {
+            return Ok(self.uses(name));
+        }
+        self.refuse(
+            node,
+            "a name neither bound here nor declared by the shader or tomoe's prelude",
+        )
     }
 
     fn number(&self, node: Node<'_>) -> Result<(String, &'static str), String> {
@@ -276,37 +416,32 @@ impl Emitter<'_> {
             return self.refuse(node, "an integer literal out of range");
         };
         if unsigned {
-            Ok((format!("(unsigned {value})"), "uint"))
+            Ok((format!("({} {value})", self.uses("unsigned")), "uint"))
         } else {
             Ok((value.to_string(), "int"))
         }
     }
 
-    fn inferred(&self, node: Node<'_>) -> Option<String> {
+    fn inferred(&self, node: Node<'_>) -> bool {
         let node = unparen(node);
         match node.kind() {
-            "number_literal" => self.number(node).ok().map(|(_, kind)| kind.to_owned()),
-            "true" | "false" => Some("bool".into()),
+            "number_literal" | "true" | "false" => {
+                self.number(node).is_ok() || node.kind() != "number_literal"
+            }
             "unary_expression" => {
-                let argument = unparen(node.child_by_field_name("argument")?);
-                let negative = self.text(node.child_by_field_name("operator")?) == "-";
-                let (_, kind) = self.number(argument).ok()?;
-                (negative
-                    && argument.kind() == "number_literal"
-                    && !self.text(argument).starts_with('-')
-                    && kind != "uint")
-                    .then(|| kind.to_owned())
+                node.child_by_field_name("argument")
+                    .is_some_and(|argument| unparen(argument).kind() == "number_literal")
+                    && node
+                        .child_by_field_name("operator")
+                        .is_some_and(|operator| self.text(operator) == "-")
             }
-            "call_expression" => {
-                let function = node.child_by_field_name("function")?;
-                if function.kind() == "identifier" && is_type(self.text(function)) {
-                    return Some(self.text(function).to_owned());
-                }
-                let (base, size) = self.array_type(function)?;
-                let count = named(node.child_by_field_name("arguments")?).len();
-                (size == count).then(|| format!("{base}[{size}]"))
-            }
-            _ => None,
+            "call_expression" => node
+                .child_by_field_name("function")
+                .is_some_and(|function| {
+                    (function.kind() == "identifier" && is_type(self.text(function)))
+                        || self.array_type(function).is_some()
+                }),
+            _ => false,
         }
     }
 
@@ -323,27 +458,45 @@ impl Emitter<'_> {
             .then(|| (self.text(base).to_owned(), size))
     }
 
+    fn type_name(&self, name: &str) -> String {
+        self.uses(name)
+    }
+
     fn expression(&self, node: Node<'_>) -> Result<String, String> {
         let node = unparen(node);
         match node.kind() {
-            "identifier" => Ok(self.string(self.text(node))),
+            "identifier" => self.resolve(node),
             "true" | "false" => Ok(self.text(node).to_owned()),
             "number_literal" => Ok(self.number(node)?.0),
             "field_expression" => {
                 let base = unparen(self.field(node, "argument")?);
                 let name = self.text(self.field(node, "field")?);
-                if let Some(path) = self.path(base) {
-                    Ok(self.string(&format!("{path}.{name}")))
+                let plain = name.chars().all(|c| "xyzw".contains(c));
+                let selectable = match base.kind() {
+                    "identifier" | "subscript_expression" | "field_expression" => true,
+                    "call_expression" => {
+                        base.child_by_field_name("function")
+                            .is_some_and(|function| {
+                                function.kind() == "identifier" && !is_type(self.text(function))
+                            })
+                    }
+                    _ => false,
+                };
+                let base = self.expression(base)?;
+                if plain && selectable {
+                    Ok(format!("{base}.{name}"))
                 } else {
                     Ok(format!(
-                        "(field {} {})",
-                        self.expression(base)?,
+                        "({} {} {})",
+                        self.uses("swizzle"),
+                        base,
                         self.string(name)
                     ))
                 }
             }
             "subscript_expression" => Ok(format!(
-                "(index {} {})",
+                "({} {} {})",
+                self.uses("index"),
                 self.expression(self.field(node, "argument")?)?,
                 self.expression(self.field(node, "index")?)?
             )),
@@ -367,7 +520,11 @@ impl Emitter<'_> {
                     "~" => "bitNot",
                     _ => return self.refuse(node, "no constructor for this unary operator"),
                 };
-                Ok(format!("({constructor} {})", self.expression(argument)?))
+                Ok(format!(
+                    "({} {})",
+                    self.uses(constructor),
+                    self.expression(argument)?
+                ))
             }
             "update_expression" => {
                 let operator = self.field(node, "operator")?;
@@ -380,28 +537,21 @@ impl Emitter<'_> {
                     ("--", true) => "preDec",
                     _ => return self.refuse(node, "an unexpected update"),
                 };
-                Ok(format!("({constructor} {})", self.expression(argument)?))
+                Ok(format!(
+                    "({} {})",
+                    self.uses(constructor),
+                    self.expression(argument)?
+                ))
             }
             "conditional_expression" => Ok(format!(
-                "(cond {} {} {})",
+                "({} {} {} {})",
+                self.uses("cond"),
                 self.expression(self.field(node, "condition")?)?,
                 self.expression(self.field(node, "consequence")?)?,
                 self.expression(self.field(node, "alternative")?)?
             )),
             "call_expression" => self.call(node),
             _ => self.refuse(node, "no GLSL expression for this"),
-        }
-    }
-
-    fn path(&self, node: Node<'_>) -> Option<String> {
-        match node.kind() {
-            "identifier" => Some(self.text(node).to_owned()),
-            "field_expression" => {
-                let base = unparen(node.child_by_field_name("argument")?);
-                let name = self.text(node.child_by_field_name("field")?);
-                Some(format!("{}.{name}", self.path(base)?))
-            }
-            _ => None,
         }
     }
 
@@ -412,16 +562,24 @@ impl Emitter<'_> {
         };
         let left = self.field(node, "left")?;
         let right = self.field(node, "right")?;
-        let mut items = match binary(left, self) {
+        let mut items = match self.binary(left) {
             Some(inner) if inner >= level => self.infix(unparen(left))?,
             _ => vec![self.expression(left)?],
         };
         items.push(self.string(operator));
-        match binary(right, self) {
+        match self.binary(right) {
             Some(inner) if inner > level => items.extend(self.infix(unparen(right))?),
             _ => items.push(self.expression(right)?),
         }
         Ok(items)
+    }
+
+    fn binary(&self, node: Node<'_>) -> Option<u8> {
+        let node = unparen(node);
+        if node.kind() != "binary_expression" {
+            return None;
+        }
+        precedence(self.text(node.child_by_field_name("operator")?))
     }
 
     fn call(&self, node: Node<'_>) -> Result<String, String> {
@@ -435,8 +593,9 @@ impl Emitter<'_> {
                 return self.refuse(node, "an array constructor whose size is not its length");
             }
             return Ok(format!(
-                "(array {} [{}])",
-                self.string(&base),
+                "({} {} [{}])",
+                self.uses("array"),
+                self.type_name(&base),
                 arguments.join(" ")
             ));
         }
@@ -444,13 +603,30 @@ impl Emitter<'_> {
             return self.refuse(node, "a call of something other than a name");
         }
         let name = self.text(function);
-        let head = if is_type(name) {
-            name.to_owned()
+        let (head, expected) = if is_type(name) {
+            (self.type_name(name), None)
+        } else if self.globals.contains(name) {
+            self.selves.borrow_mut().insert(name.to_owned());
+            (name.to_owned(), None)
         } else {
-            format!("call {}", self.string(name))
+            let name = if name == "atan" && arguments.len() == 2 {
+                "atan2"
+            } else {
+                name
+            };
+            match arity(name) {
+                Some(count) => (self.uses(name), Some(count)),
+                None => {
+                    return self
+                        .refuse(node, "a call of a function neither GLSL's nor the shader's")
+                }
+            }
         };
+        if expected.is_some_and(|count| count != arguments.len()) {
+            return self.refuse(node, "a builtin called with another number of arguments");
+        }
         if arguments.is_empty() {
-            Ok(format!("({head})"))
+            Ok(head)
         } else {
             Ok(format!("({head} {})", arguments.join(" ")))
         }
@@ -473,13 +649,24 @@ impl Emitter<'_> {
         Ok(words)
     }
 
-    fn words(&self, words: &[String]) -> String {
-        if let [one] = words {
-            self.string(one)
-        } else {
-            let quoted: Vec<String> = words.iter().map(|word| self.string(word)).collect();
-            format!("[{}]", quoted.join(" "))
+    fn qualified(&self, node: Node<'_>, words: &[String]) -> Result<String, String> {
+        let Some((ty, qualifiers)) = words.split_last() else {
+            return self.refuse(node, "a declaration without a type");
+        };
+        if !is_type(ty) {
+            return self.refuse(node, "a type GLSL's generator does not know");
         }
+        let mut out = self.type_name(ty);
+        for qualifier in qualifiers.iter().rev() {
+            let constructor = match qualifier.as_str() {
+                "in" => "in'",
+                "out" => "out",
+                "inout" => "inout",
+                _ => return self.refuse(node, "a qualifier the generator does not write here"),
+            };
+            out = format!("({} {out})", self.uses(constructor));
+        }
+        Ok(out)
     }
 
     fn declarator<'t>(
@@ -511,13 +698,6 @@ impl Emitter<'_> {
         }
     }
 
-    fn sized(&self, words: &[String], size: Option<usize>) -> String {
-        match size {
-            Some(size) => format!("(sized {} {size})", self.words(words)),
-            None => self.words(words),
-        }
-    }
-
     fn constant(&self, node: Node<'_>) -> Result<(String, String), String> {
         let words = self.type_words(node)?;
         let declarators: Vec<Node<'_>> = {
@@ -535,51 +715,57 @@ impl Emitter<'_> {
         let Some(value) = value else {
             return self.refuse(node, "a const without a value");
         };
-        let declared = match size {
-            Some(size) => format!("{ty}[{size}]"),
-            None => ty.clone(),
-        };
         let expression = self.expression(value)?;
-        let written = if self.inferred(value).as_deref() == Some(declared.as_str()) {
+        let written = if self.inferred(value) {
             expression
         } else if size.is_some() {
             return self.refuse(node, "an array const whose value is not its constructor");
         } else {
-            format!("(typed {} {expression})", self.string(ty))
+            format!(
+                "({} {} {expression})",
+                self.uses("typed"),
+                self.type_name(ty)
+            )
         };
         Ok((self.text(name).to_owned(), written))
     }
 
     fn function(&self, node: Node<'_>) -> Result<(String, String), String> {
         let returns = self.type_words(node)?;
+        let returns = self.qualified(node, &returns)?;
         let declarator = self.field(node, "declarator")?;
         if declarator.kind() != "function_declarator" {
             return self.refuse(declarator, "an unexpected function declarator");
         }
         let name = self.field(declarator, "declarator")?;
         let mut params = Vec::new();
+        let mut names = Vec::new();
         for param in named(self.field(declarator, "parameters")?) {
             if param.kind() != "parameter_declaration" {
                 return self.refuse(param, "an unexpected parameter");
             }
-            let mut words = self.type_words(param)?;
+            let words = self.type_words(param)?;
             match param.child_by_field_name("declarator") {
                 Some(target) if target.kind() == "identifier" => {
-                    words.push(self.text(target).to_owned());
+                    let target = self.text(target).to_owned();
+                    self.name(&target, self.line(param))?;
+                    params.push(format!(
+                        "{{{target} = {};}}",
+                        self.qualified(param, &words)?
+                    ));
+                    names.push(target);
                 }
                 None if words == ["void"] => continue,
                 _ => return self.refuse(param, "a parameter that is not `type name`"),
             }
-            let quoted: Vec<String> = words.iter().map(|word| self.string(word)).collect();
-            params.push(format!("[{}]", quoted.join(" ")));
         }
+        let body = self.scope(self.field(node, "body")?, names, None)?;
         Ok((
             self.text(name).to_owned(),
             format!(
-                "(fn {} [{}] {})",
-                self.words(&returns),
-                params.join(" "),
-                self.body(self.field(node, "body")?)?
+                "({} {returns} [{}] {body})",
+                self.uses("fn"),
+                params.join(" ")
             ),
         ))
     }
@@ -604,38 +790,108 @@ impl Emitter<'_> {
         let Some(init) = init else {
             return self.refuse(value, "a macro body that is not an expression");
         };
+        let params: Vec<String> = match node.child_by_field_name("parameters") {
+            None => Vec::new(),
+            Some(params) => named(params)
+                .into_iter()
+                .map(|param| self.text(param).to_owned())
+                .collect(),
+        };
+        if params.len() > 1 {
+            return self.refuse(node, "a macro of more than one parameter");
+        }
+        for param in &params {
+            self.name(param, self.line(node))?;
+        }
         let inner = Emitter {
             source: &wrapper,
             holes: self.holes,
+            globals: self.globals.clone(),
+            scopes: RefCell::new(vec![params.clone()]),
+            used: RefCell::new(BTreeSet::new()),
+            selves: RefCell::new(BTreeSet::new()),
         };
         let body = inner.expression(init)?;
-        match node.child_by_field_name("parameters") {
-            None => Ok((name, body)),
-            Some(params) => {
-                let names: Vec<String> = named(params)
-                    .into_iter()
-                    .map(|param| self.string(self.text(param)))
-                    .collect();
-                Ok((name, format!("(macro [{}] {body})", names.join(" "))))
-            }
+        self.used.borrow_mut().extend(inner.used.into_inner());
+        self.selves.borrow_mut().extend(inner.selves.into_inner());
+        if params.is_empty() {
+            Ok((name, body))
+        } else {
+            Ok((
+                name,
+                format!(
+                    "({} ({{{}}}: {body}))",
+                    self.uses("macro"),
+                    params.join(", ")
+                ),
+            ))
         }
     }
 
-    fn body(&self, node: Node<'_>) -> Result<String, String> {
-        let statements = if node.kind() == "compound_statement" {
-            let mut out = Vec::new();
-            for statement in named(node) {
-                out.extend(self.statement(statement)?);
+    fn declared(&self, node: Node<'_>, out: &mut Vec<String>) -> Result<(), String> {
+        if node.kind() != "declaration" {
+            return Ok(());
+        }
+        let mut cursor = node.walk();
+        let declarators: Vec<Node<'_>> = node
+            .children_by_field_name("declarator", &mut cursor)
+            .collect();
+        for declarator in declarators {
+            let (name, _, _) = self.declarator(declarator)?;
+            let name = self.text(name).to_owned();
+            self.name(&name, self.line(node))?;
+            if out.contains(&name) {
+                return self.refuse(node, "a name declared twice in one block");
             }
-            out
+            out.push(name);
+        }
+        Ok(())
+    }
+
+    fn items<'t>(&self, node: Node<'t>) -> Vec<Node<'t>> {
+        if node.kind() == "compound_statement" {
+            named(node)
         } else {
-            self.statement(node)?
-        };
-        Ok(format!("[\n{}\n]", statements.join("\n")))
+            vec![node]
+        }
+    }
+
+    fn scope(
+        &self,
+        node: Node<'_>,
+        given: Vec<String>,
+        header: Option<Node<'_>>,
+    ) -> Result<String, String> {
+        let mut names = given;
+        if let Some(header) = header {
+            self.declared(header, &mut names)?;
+        }
+        let items = self.items(node);
+        for item in &items {
+            self.declared(*item, &mut names)?;
+        }
+        self.scopes.borrow_mut().push(names.clone());
+        let result = self.statements(&items);
+        self.scopes.borrow_mut().pop();
+        let list = result?;
+        if names.is_empty() {
+            Ok(list)
+        } else {
+            Ok(format!("({{{}}}: {list})", names.join(", ")))
+        }
+    }
+
+    fn statements(&self, items: &[Node<'_>]) -> Result<String, String> {
+        let mut out = Vec::new();
+        for item in items {
+            out.extend(self.statement(*item)?);
+        }
+        Ok(format!("[\n{}\n]", out.join("\n")))
     }
 
     fn local(&self, node: Node<'_>) -> Result<Vec<String>, String> {
         let words = self.type_words(node)?;
+        let ty = self.qualified(node, &words)?;
         let mut cursor = node.walk();
         let declarators: Vec<Node<'_>> = node
             .children_by_field_name("declarator", &mut cursor)
@@ -647,10 +903,14 @@ impl Emitter<'_> {
                 Some(value) => self.expression(value)?,
                 None => "null".into(),
             };
+            let ty = match size {
+                Some(size) => format!("({} {ty} {size})", self.uses("sized")),
+                None => ty.clone(),
+            };
             out.push(format!(
-                "(var {} {} {value})",
-                self.sized(&words, size),
-                self.string(self.text(name))
+                "({} {} {ty} {value})",
+                self.uses("local"),
+                self.text(name)
             ));
         }
         Ok(out)
@@ -658,45 +918,72 @@ impl Emitter<'_> {
 
     fn statement(&self, node: Node<'_>) -> Result<Vec<String>, String> {
         Ok(vec![match node.kind() {
-            "comment" => format!("(comment {})", self.string(&self.comment(node)?)),
+            "comment" => format!(
+                "({} {})",
+                self.uses("comment"),
+                self.string(&self.comment(node)?)
+            ),
             "declaration" => return self.local(node),
             "expression_statement" => match named(node).as_slice() {
                 [inner] => self.effect(*inner)?,
                 _ => return self.refuse(node, "an empty statement"),
             },
             "return_statement" => match named(node).as_slice() {
-                [] => "(return null)".into(),
-                [value] => format!("(return {})", self.expression(*value)?),
+                [] => format!("({} null)", self.uses("return")),
+                [value] => format!("({} {})", self.uses("return"), self.expression(*value)?),
                 _ => return self.refuse(node, "an unexpected return"),
             },
-            "break_statement" => "break".into(),
-            "continue_statement" => "continue".into(),
+            "break_statement" => self.uses("break"),
+            "continue_statement" => self.uses("continue"),
             "if_statement" => self.conditional(node)?,
-            "for_statement" => {
-                let init = match node.child_by_field_name("initializer") {
-                    None => "null".into(),
-                    Some(init) if init.kind() == "declaration" => {
-                        match self.local(init)?.as_slice() {
-                            [one] => one.clone(),
-                            _ => return self.refuse(init, "a for header declaring several names"),
-                        }
-                    }
-                    Some(init) => self.effect(init)?,
-                };
-                format!(
-                    "(for {init} {} {} {})",
-                    self.expression(self.field(node, "condition")?)?,
-                    self.effect(self.field(node, "update")?)?,
-                    self.body(self.field(node, "body")?)?
-                )
-            }
+            "for_statement" => self.for_loop(node)?,
             "while_statement" => format!(
-                "(while {} {})",
+                "({} {} {})",
+                self.uses("while"),
                 self.expression(self.field(node, "condition")?)?,
-                self.body(self.field(node, "body")?)?
+                self.scope(self.field(node, "body")?, Vec::new(), None)?
             ),
+            "compound_statement" => return self.refuse(node, "a block that is not a body"),
             _ => return self.refuse(node, "no GLSL statement for this"),
         }])
+    }
+
+    fn for_loop(&self, node: Node<'_>) -> Result<String, String> {
+        let body = self.field(node, "body")?;
+        let header = node.child_by_field_name("initializer");
+        let mut names = Vec::new();
+        if let Some(header) = header {
+            self.declared(header, &mut names)?;
+        }
+        let items = self.items(body);
+        for item in &items {
+            self.declared(*item, &mut names)?;
+        }
+        self.scopes.borrow_mut().push(names.clone());
+        let result = (|| -> Result<String, String> {
+            let init = match header {
+                None => "null".into(),
+                Some(init) if init.kind() == "declaration" => match self.local(init)?.as_slice() {
+                    [one] => one.clone(),
+                    _ => return self.refuse(init, "a for header declaring several names"),
+                },
+                Some(init) => self.effect(init)?,
+            };
+            Ok(format!(
+                "{{\n init = {init};\n test = {};\n step = {};\n body = {};\n}}",
+                self.expression(self.field(node, "condition")?)?,
+                self.effect(self.field(node, "update")?)?,
+                self.statements(&items)?
+            ))
+        })();
+        self.scopes.borrow_mut().pop();
+        let spec = result?;
+        let loop_ = if names.is_empty() {
+            spec
+        } else {
+            format!("({{{}}}: {spec})", names.join(", "))
+        };
+        Ok(format!("({} {loop_})", self.uses("for")))
     }
 
     fn effect(&self, node: Node<'_>) -> Result<String, String> {
@@ -707,10 +994,11 @@ impl Emitter<'_> {
         let target = self.expression(self.field(node, "left")?)?;
         let value = self.expression(self.field(node, "right")?)?;
         if operator == "=" {
-            Ok(format!("(assign {target} {value})"))
+            Ok(format!("({} {target} {value})", self.uses("set")))
         } else if ASSIGNMENTS.contains(&operator) {
             Ok(format!(
-                "(update {} {target} {value})",
+                "({} {target} {} {value})",
+                self.uses("update"),
                 self.string(operator)
             ))
         } else {
@@ -720,9 +1008,9 @@ impl Emitter<'_> {
 
     fn conditional(&self, node: Node<'_>) -> Result<String, String> {
         let test = self.expression(self.field(node, "condition")?)?;
-        let then = self.body(self.field(node, "consequence")?)?;
+        let then = self.scope(self.field(node, "consequence")?, Vec::new(), None)?;
         let Some(clause) = node.child_by_field_name("alternative") else {
-            return Ok(format!("(if' {test} {then})"));
+            return Ok(format!("({} {test} {then})", self.uses("if'")));
         };
         let other = match named(clause).as_slice() {
             [other] => *other,
@@ -731,8 +1019,11 @@ impl Emitter<'_> {
         let otherwise = if other.kind() == "if_statement" {
             self.conditional(other)?
         } else {
-            self.body(other)?
+            self.scope(other, Vec::new(), None)?
         };
-        Ok(format!("(ifElse {test} {then} {otherwise})"))
+        Ok(format!(
+            "({} {test} {then} {otherwise})",
+            self.uses("ifElse")
+        ))
     }
 }

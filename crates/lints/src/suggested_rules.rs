@@ -337,10 +337,17 @@ pub(crate) fn syntax_tree(root: &SyntaxNode) -> bool {
     let Some(Expr::Lambda(lambda)) = Root::cast(root).and_then(|root| root.expr()) else {
         return false;
     };
+    let constructors =
+        matches!(lambda.param(), LambdaParam::Formals(formals, _) if formals.has_ellipsis());
     match lambda.body().map(unwrap_parens) {
         Some(Expr::List(_)) => true,
-        Some(Expr::Attrset(_)) => {
-            matches!(lambda.param(), LambdaParam::Formals(formals, _) if formals.has_ellipsis())
+        Some(Expr::Attrset(_)) => constructors,
+        Some(Expr::Lambda(shader)) => {
+            let body = match shader.body().map(unwrap_parens) {
+                Some(Expr::Let(scope)) => scope.body().map(unwrap_parens),
+                other => other,
+            };
+            constructors && matches!(body, Some(Expr::Attrset(_)))
         }
         _ => false,
     }
