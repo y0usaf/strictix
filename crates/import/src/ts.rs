@@ -1,6 +1,323 @@
+use std::cell::RefCell;
+use std::collections::BTreeSet;
+
 use tree_sitter::Node;
 
 use crate::{line_of, nix};
+
+const NIX_KEYWORDS: [&str; 11] = [
+    "assert", "else", "if", "in", "inherit", "let", "null", "or", "rec", "then", "with",
+];
+
+const CONSTRUCTORS: [&str; 75] = [
+    "array",
+    "arrayOf",
+    "arrow",
+    "async",
+    "await",
+    "below",
+    "blank",
+    "braces",
+    "break",
+    "call",
+    "case",
+    "catch",
+    "chain",
+    "class",
+    "comment",
+    "computed",
+    "const",
+    "continue",
+    "dec",
+    "default",
+    "delete",
+    "dot",
+    "export",
+    "extends",
+    "field",
+    "finally",
+    "fn",
+    "for",
+    "forAwait",
+    "forIn",
+    "forOf",
+    "generic",
+    "idx",
+    "if'",
+    "ifElse",
+    "import'",
+    "inc",
+    "infix",
+    "interface",
+    "intersection",
+    "is",
+    "let'",
+    "method",
+    "namespace",
+    "neg",
+    "new",
+    "nonNull",
+    "not",
+    "num",
+    "obj",
+    "opt",
+    "optCall",
+    "optIdx",
+    "prop",
+    "readonly",
+    "regex",
+    "render",
+    "return",
+    "return'",
+    "rows",
+    "shape",
+    "spaces",
+    "spread",
+    "sq",
+    "str",
+    "sub",
+    "switch",
+    "ternary",
+    "throw'",
+    "tpl",
+    "try",
+    "type",
+    "typeOnly",
+    "typed",
+    "typeof",
+];
+
+const GLOBALS: [&str; 45] = [
+    "Array",
+    "Awaited",
+    "Boolean",
+    "Buffer",
+    "Bun",
+    "Date",
+    "Error",
+    "Extract",
+    "Intl",
+    "JSON",
+    "Map",
+    "Math",
+    "NodeJS",
+    "Number",
+    "Object",
+    "Parameters",
+    "Partial",
+    "Promise",
+    "Readonly",
+    "ReadonlySet",
+    "Record",
+    "Response",
+    "ReturnType",
+    "Set",
+    "String",
+    "Symbol",
+    "WeakMap",
+    "WeakSet",
+    "any",
+    "boolean",
+    "console",
+    "const",
+    "globalThis",
+    "never",
+    "null",
+    "number",
+    "object",
+    "performance",
+    "process",
+    "string",
+    "super",
+    "this",
+    "undefined",
+    "unknown",
+    "void",
+];
+
+fn local(name: &str) -> String {
+    if NIX_KEYWORDS.contains(&name) || CONSTRUCTORS.contains(&name) || GLOBALS.contains(&name) {
+        format!("{name}'")
+    } else {
+        name.to_owned()
+    }
+}
+
+fn global(name: &str) -> String {
+    if NIX_KEYWORDS.contains(&name) || CONSTRUCTORS.contains(&name) {
+        format!("{name}'")
+    } else {
+        name.to_owned()
+    }
+}
+
+fn precedence(operator: &str) -> Option<u8> {
+    Some(match operator {
+        "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | ">>>=" | "&=" | "|="
+        | "^=" | "&&=" | "||=" | "??=" => 1,
+        "??" => 2,
+        "||" => 3,
+        "&&" => 4,
+        "|" => 5,
+        "^" => 6,
+        "&" => 7,
+        "==" | "!=" | "===" | "!==" => 8,
+        "<" | ">" | "<=" | ">=" | "in" | "instanceof" | "as" | "satisfies" => 9,
+        "<<" | ">>" | ">>>" => 10,
+        "+" | "-" => 11,
+        "*" | "/" | "%" => 12,
+        "**" => 13,
+        _ => return None,
+    })
+}
+
+fn level(operator: &str) -> u8 {
+    precedence(operator).unwrap_or(0)
+}
+
+fn assignment(operator: &str) -> bool {
+    level(operator) == 1
+}
+
+fn right_associative(operator: &str) -> bool {
+    assignment(operator) || operator == "**"
+}
+
+fn cast(operator: &str) -> bool {
+    operator == "as" || operator == "satisfies"
+}
+
+fn multiplicative(operator: &str) -> bool {
+    matches!(operator, "*" | "/" | "%")
+}
+
+fn bitshift(operator: &str) -> bool {
+    matches!(operator, "<<" | ">>" | ">>>")
+}
+
+fn bitwise(operator: &str) -> bool {
+    bitshift(operator) || matches!(operator, "|" | "^" | "&")
+}
+
+fn equality(operator: &str) -> bool {
+    matches!(operator, "==" | "!=" | "===" | "!==")
+}
+
+fn flatten(parent: &str, child: &str) -> bool {
+    !(level(parent) != level(child)
+        || parent == "**"
+        || equality(parent) && equality(child)
+        || child == "%" && multiplicative(parent)
+        || parent == "%" && multiplicative(child)
+        || child != parent && multiplicative(child) && multiplicative(parent)
+        || bitshift(parent) && bitshift(child))
+}
+
+fn nested(parent: &str, side: Side, child: &str) -> bool {
+    if cast(child) {
+        return !cast(parent) || side == Side::Right;
+    }
+    if assignment(child) || cast(parent) {
+        return true;
+    }
+    let logical = |op: &str| matches!(op, "??" | "||" | "&&");
+    if logical(parent) && logical(child) && (parent == "??") != (child == "??") {
+        return true;
+    }
+    if parent == "||" && child == "&&" {
+        return true;
+    }
+    let (outer, inner) = (level(parent), level(child));
+    if outer > inner || outer == inner && (side == Side::Right || !flatten(parent, child)) {
+        return true;
+    }
+    if outer < inner && child == "%" {
+        return parent == "+" || parent == "-";
+    }
+    bitwise(parent)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Side {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy)]
+enum Slot<'o> {
+    Plain,
+    Binary(&'o str, Side),
+    Unary,
+    Spread,
+    Member,
+    Test,
+    Branch,
+    ArrowBody,
+    Statement,
+    ArrayOf,
+    Union,
+    Intersection,
+}
+
+#[derive(Clone, Copy)]
+enum Class<'o> {
+    Binary(&'o str),
+    Ternary,
+    Arrow,
+    Function,
+    Await,
+    Unary,
+    Negative,
+    Object,
+    Union,
+    Intersection,
+    Atom,
+}
+
+fn wants(slot: Slot<'_>, class: Class<'_>) -> bool {
+    match slot {
+        Slot::Plain => false,
+        Slot::Binary(parent, side) => {
+            if assignment(parent) {
+                return side == Side::Left && matches!(class, Class::Binary(op) if cast(op));
+            }
+            match class {
+                Class::Binary(child) => nested(parent, side, child),
+                Class::Ternary | Class::Arrow | Class::Await => true,
+                Class::Unary | Class::Negative => parent == "**" && side == Side::Left,
+                _ => false,
+            }
+        }
+        Slot::Unary => matches!(
+            class,
+            Class::Binary(_) | Class::Ternary | Class::Arrow | Class::Await
+        ),
+        Slot::Spread => matches!(class, Class::Binary(_) | Class::Ternary | Class::Await),
+        Slot::Member => matches!(
+            class,
+            Class::Binary(_)
+                | Class::Ternary
+                | Class::Arrow
+                | Class::Function
+                | Class::Await
+                | Class::Unary
+                | Class::Negative
+        ),
+        Slot::Test => {
+            matches!(class, Class::Ternary | Class::Arrow | Class::Await)
+                || matches!(class, Class::Binary(op) if cast(op) || assignment(op))
+        }
+        Slot::Branch => matches!(class, Class::Binary(op) if cast(op) || op == "??"),
+        Slot::ArrowBody => matches!(class, Class::Ternary | Class::Object),
+        Slot::Statement => matches!(class, Class::Object | Class::Function),
+        Slot::ArrayOf => matches!(
+            class,
+            Class::Union | Class::Intersection | Class::Arrow | Class::Unary
+        ),
+        Slot::Union => matches!(class, Class::Arrow),
+        Slot::Intersection => matches!(class, Class::Union | Class::Arrow),
+    }
+}
 
 pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
     let tree = crate::parse(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(), source)?;
@@ -14,6 +331,8 @@ pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
         source,
         holes,
         unit,
+        scopes: RefCell::new(Vec::new()),
+        bound: RefCell::new(BTreeSet::new()),
     };
     let items = named(root);
     let first = items.first().ok_or("the file is empty")?;
@@ -24,25 +343,37 @@ pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
     if &source[last.end_byte()..] != "\n" {
         return Err("the file must end with one newline after its last statement".into());
     }
-    let lines = importer.statements(&items, 0)?;
-    let list = format!(
-        "[\n{}]",
-        lines
-            .iter()
-            .map(|line| format!("  {line}\n"))
-            .collect::<String>()
-    );
-    Ok(if unit == "\t" {
-        list
+    let names = importer.declared(&items)?;
+    let body = importer.scope(&names, || {
+        Ok(format!(
+            "[\n{}]",
+            importer
+                .statements(&items, 0)?
+                .iter()
+                .map(|line| format!("{line}\n"))
+                .collect::<String>()
+        ))
+    })?;
+    let body = if unit == "\t" {
+        body
     } else {
-        format!("(spaces 2 {list})")
-    })
+        format!("(spaces 2 {body})")
+    };
+    let bound = importer.bound.borrow();
+    let formals: String = nix::identifiers(&body)
+        .into_iter()
+        .filter(|name| !bound.contains(name) && !matches!(name.as_str(), "null" | "true" | "false"))
+        .map(|name| format!("  {name},\n"))
+        .collect();
+    Ok(format!("{{\n{formals}  ...\n}}: {body}"))
 }
 
 struct Importer<'s> {
     source: &'s str,
     holes: &'s [String],
     unit: &'s str,
+    scopes: RefCell<Vec<Vec<String>>>,
+    bound: RefCell<BTreeSet<String>>,
 }
 
 fn named(node: Node<'_>) -> Vec<Node<'_>> {
@@ -79,52 +410,50 @@ fn rows(items: &[String]) -> String {
     )
 }
 
-const WORDS: [&str; 17] = [
-    "identifier",
-    "property_identifier",
-    "shorthand_property_identifier",
-    "shorthand_property_identifier_pattern",
-    "private_property_identifier",
-    "type_identifier",
-    "predefined_type",
-    "number",
-    "this",
-    "super",
-    "true",
-    "false",
-    "null",
-    "undefined",
-    "statement_identifier",
-    "nested_type_identifier",
-    "existential_type",
+fn lines(items: &[String]) -> String {
+    format!(
+        "[\n{}]",
+        items
+            .iter()
+            .map(|item| format!("{item}\n"))
+            .collect::<String>()
+    )
+}
+
+fn optional(node: Node<'_>) -> bool {
+    children(node)
+        .iter()
+        .any(|child| child.kind() == "optional_chain" || child.kind() == "?.")
+}
+
+const BINARY: [&str; 5] = [
+    "binary_expression",
+    "assignment_expression",
+    "augmented_assignment_expression",
+    "as_expression",
+    "satisfies_expression",
 ];
 
-const ASSIGNING: [&str; 2] = ["assignment_expression", "augmented_assignment_expression"];
+#[derive(Clone, Copy, PartialEq)]
+enum Separator {
+    Comma,
+    Semicolon,
+}
 
-fn group(operator: &str) -> usize {
-    match operator {
-        "??" => 1,
-        "||" => 2,
-        "&&" => 3,
-        "|" => 4,
-        "^" => 5,
-        "&" => 6,
-        "==" | "!=" | "===" | "!==" => 7,
-        "<" | ">" | "<=" | ">=" | "instanceof" | "in" => 8,
-        "<<" | ">>" | ">>>" => 9,
-        "+" | "-" => 10,
-        "*" | "/" | "%" => 11,
-        _ => 0,
+impl Separator {
+    fn mark(self) -> &'static str {
+        match self {
+            Separator::Comma => ",",
+            Separator::Semicolon => ";",
+        }
     }
 }
 
 enum Link<'t> {
     Member(bool, Node<'t>, bool),
-    Call(Node<'t>),
-    Index(Node<'t>),
-    Optional,
+    Call(Node<'t>, bool, Option<Node<'t>>),
+    Index(Node<'t>, bool),
     NonNull,
-    Types(Node<'t>),
 }
 
 impl<'s> Importer<'s> {
@@ -176,10 +505,179 @@ impl<'s> Importer<'s> {
         nix::string(text, self.holes, 0)
     }
 
-    fn word(&self, text: &str) -> String {
-        match nix::int(text) {
-            Some(int) if !text.starts_with('-') => int,
-            _ => self.string(text),
+    fn refuse<T>(&self, node: Node<'_>, what: &str) -> Result<T, String> {
+        Err(format!("{}: {what}", self.at(node.start_byte())))
+    }
+
+    fn add(&self, node: Node<'_>, out: &mut Vec<String>) -> Result<(), String> {
+        let name = self.text(node);
+        if !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return self.refuse(
+                node,
+                &format!("`{name}` cannot be spelled as a Nix variable"),
+            );
+        }
+        if !out.iter().any(|one| one == name) {
+            out.push(name.to_owned());
+        }
+        Ok(())
+    }
+
+    fn binds(&self, node: Node<'_>, out: &mut Vec<String>) -> Result<(), String> {
+        match node.kind() {
+            "identifier" | "shorthand_property_identifier_pattern" => self.add(node, out),
+            "object_pattern" | "array_pattern" => {
+                for item in named(node) {
+                    match item.kind() {
+                        "comment" => {}
+                        "pair_pattern" => {
+                            self.binds(field(item, "value").ok_or("a pair without a value")?, out)?;
+                        }
+                        _ => self.binds(item, out)?,
+                    }
+                }
+                Ok(())
+            }
+            "assignment_pattern" | "object_assignment_pattern" => self.binds(
+                field(node, "left").ok_or("a default without a target")?,
+                out,
+            ),
+            "rest_pattern" => self.binds(named(node)[0], out),
+            "required_parameter" | "optional_parameter" => self.binds(
+                field(node, "pattern").ok_or("a parameter without a pattern")?,
+                out,
+            ),
+            kind => self.refuse(node, &format!("{kind} is not a binding pattern")),
+        }
+    }
+
+    fn declares(&self, node: Node<'_>, out: &mut Vec<String>) -> Result<(), String> {
+        match node.kind() {
+            "lexical_declaration" => {
+                for declarator in named(node) {
+                    if let Some(name) = field(declarator, "name") {
+                        self.binds(name, out)?;
+                    }
+                }
+                Ok(())
+            }
+            "function_declaration"
+            | "class_declaration"
+            | "interface_declaration"
+            | "type_alias_declaration" => self.add(
+                field(node, "name").ok_or("a declaration without a name")?,
+                out,
+            ),
+            "import_statement" => {
+                for clause in named(node)
+                    .into_iter()
+                    .filter(|child| child.kind() == "import_clause")
+                {
+                    for part in named(clause) {
+                        match part.kind() {
+                            "named_imports" => {
+                                for specifier in named(part) {
+                                    if let Some(name) =
+                                        field(specifier, "alias").or(field(specifier, "name"))
+                                    {
+                                        self.add(name, out)?;
+                                    }
+                                }
+                            }
+                            "namespace_import" => self.add(named(part)[0], out)?,
+                            "identifier" => self.add(part, out)?,
+                            _ => {}
+                        }
+                    }
+                }
+                Ok(())
+            }
+            "export_statement" => match field(node, "declaration") {
+                Some(declaration) => self.declares(declaration, out),
+                None => Ok(()),
+            },
+            _ => Ok(()),
+        }
+    }
+
+    fn declared(&self, items: &[Node<'_>]) -> Result<Vec<String>, String> {
+        let mut out = Vec::new();
+        for item in items {
+            self.declares(*item, &mut out)?;
+        }
+        Ok(out)
+    }
+
+    fn block_names(&self, body: Option<Node<'_>>, out: &mut Vec<String>) -> Result<(), String> {
+        if let Some(body) = body.filter(|body| body.kind() == "statement_block") {
+            for item in named(body) {
+                self.declares(item, out)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn function_names(&self, node: Node<'_>) -> Result<Vec<String>, String> {
+        let mut out = Vec::new();
+        if let Some(parameter) = field(node, "parameter") {
+            self.binds(parameter, &mut out)?;
+        }
+        if let Some(parameters) = field(node, "parameters") {
+            for parameter in named(parameters) {
+                if parameter.kind() != "comment" {
+                    self.binds(parameter, &mut out)?;
+                }
+            }
+        }
+        self.block_names(field(node, "body"), &mut out)?;
+        Ok(out)
+    }
+
+    fn scope(
+        &self,
+        names: &[String],
+        body: impl FnOnce() -> Result<String, String>,
+    ) -> Result<String, String> {
+        self.scopes.borrow_mut().push(names.to_vec());
+        let result = body();
+        self.scopes.borrow_mut().pop();
+        let value = result?;
+        if names.is_empty() {
+            return Ok(value);
+        }
+        let spelled: Vec<String> = names.iter().map(|name| local(name)).collect();
+        self.bound.borrow_mut().extend(spelled.iter().cloned());
+        Ok(format!("({{{}}}: {value})", spelled.join(", ")))
+    }
+
+    fn name(&self, node: Node<'_>) -> Result<String, String> {
+        let name = self.text(node);
+        if self
+            .scopes
+            .borrow()
+            .iter()
+            .any(|scope| scope.iter().any(|one| one == name))
+        {
+            return Ok(local(name));
+        }
+        if GLOBALS.contains(&name) {
+            return Ok(global(name));
+        }
+        self.refuse(
+            node,
+            &format!("`{name}` is declared nowhere in the file and is not a global the ts generator knows"),
+        )
+    }
+
+    fn property(&self, node: Node<'_>) -> Result<String, String> {
+        match node.kind() {
+            "property_identifier" | "private_property_identifier" | "type_identifier" => {
+                Ok(self.string(self.text(node)))
+            }
+            kind => self.refuse(node, &format!("{kind} is not a property name")),
         }
     }
 
@@ -193,14 +691,14 @@ impl<'s> Importer<'s> {
         for (index, node) in items.iter().enumerate() {
             if index > 0 {
                 let gap = self.gap(items[index - 1].end_byte(), node.start_byte());
-                let lines = gap.bytes().take_while(|&b| b == b'\n').count();
-                if lines == 0 || gap[lines..] != self.unit.repeat(depth) {
+                let count = gap.bytes().take_while(|&b| b == b'\n').count();
+                if count == 0 || gap[count..] != self.unit.repeat(depth) {
                     return Err(format!(
                         "{}: expected a line break to indentation {depth}, found {gap:?}",
                         self.at(node.start_byte())
                     ));
                 }
-                for _ in 1..lines {
+                for _ in 1..count {
                     out.push("blank".to_owned());
                 }
             }
@@ -218,12 +716,14 @@ impl<'s> Importer<'s> {
     }
 
     fn block(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
+        let mut names = Vec::new();
+        self.block_names(Some(node), &mut names)?;
+        self.scope(&names, || self.block_list(node, depth))
+    }
+
+    fn block_list(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
         if node.kind() != "statement_block" {
-            return Err(format!(
-                "{}: expected a block, found {}",
-                self.at(node.start_byte()),
-                node.kind()
-            ));
+            return self.refuse(node, &format!("expected a block, found {}", node.kind()));
         }
         let items = named(node);
         let close = node.end_byte() - 1;
@@ -244,15 +744,9 @@ impl<'s> Importer<'s> {
         )?;
         let last = items.last().unwrap_or(first);
         self.expect(last.end_byte(), close, &self.indent(depth))?;
-        let mut lines = vec!["blank".to_owned(); blanks];
-        lines.extend(self.statements(&items, depth + 1)?);
-        Ok(format!(
-            "[\n{}]",
-            lines
-                .iter()
-                .map(|line| format!("{line}\n"))
-                .collect::<String>()
-        ))
+        let mut out = vec!["blank".to_owned(); blanks];
+        out.extend(self.statements(&items, depth + 1)?);
+        Ok(lines(&out))
     }
 
     fn body(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
@@ -287,7 +781,7 @@ impl<'s> Importer<'s> {
             "expression_statement" => {
                 let inner = named(node)[0];
                 self.semicolon(node, inner)?;
-                self.expr(inner, depth)
+                self.child(Slot::Statement, inner, depth)
             }
             "lexical_declaration" => {
                 let declaration = self.declaration(node, depth)?;
@@ -303,6 +797,20 @@ impl<'s> Importer<'s> {
                 Some(value) => {
                     self.expect(start + 6, value.start_byte(), " ")?;
                     self.semicolon(node, *value)?;
+                    if value.kind() == "parenthesized_expression" {
+                        let inner = named(*value)[0];
+                        if self.broken(value.start_byte() + 1, inner.start_byte(), depth + 1)? {
+                            self.expect(
+                                inner.end_byte(),
+                                value.end_byte() - 1,
+                                &self.indent(depth),
+                            )?;
+                            return Ok(format!(
+                                "(return (below {}))",
+                                self.expr(inner, depth + 1)?
+                            ));
+                        }
+                    }
                     Ok(format!("(return {})", self.expr(*value, depth)?))
                 }
             },
@@ -319,7 +827,7 @@ impl<'s> Importer<'s> {
                     "continue"
                 };
                 if self.text(node) != format!("{word};") {
-                    return Err(format!("{}: a labelled {word}", self.at(start)));
+                    return self.refuse(node, &format!("a labelled {word}"));
                 }
                 Ok(word.to_owned())
             }
@@ -339,49 +847,44 @@ impl<'s> Importer<'s> {
             }
             "switch_statement" => self.switch(node, depth),
             "try_statement" => self.attempt(node, depth),
-            "function_declaration" | "class_declaration" | "interface_declaration" => {
-                self.expr(node, depth)
-            }
+            "function_declaration" => self.function(node, depth),
+            "class_declaration" => self.class(node, depth),
+            "interface_declaration" => self.interface(node, depth),
             "type_alias_declaration" => {
                 let name = field(node, "name").ok_or("type without a name")?;
                 let value = field(node, "value").ok_or("type without a value")?;
+                if field(node, "type_parameters").is_some() {
+                    return self.refuse(node, "a generic type alias");
+                }
                 self.expect(start + 4, name.start_byte(), " ")?;
                 self.expect(name.end_byte(), value.start_byte(), " = ")?;
                 self.semicolon(node, value)?;
                 Ok(format!(
                     "(type {} {})",
-                    self.expr(name, depth)?,
+                    self.name(name)?,
                     self.expr(value, depth)?
                 ))
             }
             "export_statement" => self.export(node, depth),
             "import_statement" => self.import(node),
-            kind => Err(format!("{}: {kind} is not supported", self.at(start))),
+            kind => self.refuse(node, &format!("{kind} is not supported")),
         }
     }
 
     fn declaration(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
         let declarators = named(node);
         let [declarator] = declarators.as_slice() else {
-            return Err(format!(
-                "{}: one declarator per declaration",
-                self.at(node.start_byte())
-            ));
+            return self.refuse(node, "one declarator per declaration");
         };
         let kind = self.text(node.child(0).ok_or("no kind")?);
         let constructor = match kind {
             "const" => "const",
             "let" => "let'",
-            other => {
-                return Err(format!(
-                    "{}: {other} is not supported",
-                    self.at(node.start_byte())
-                ))
-            }
+            other => return self.refuse(node, &format!("{other} is not supported")),
         };
         self.expect(node.start_byte() + kind.len(), declarator.start_byte(), " ")?;
         let name = field(*declarator, "name").ok_or("a declarator without a name")?;
-        let mut target = self.expr(name, depth)?;
+        let mut target = self.pattern(name, depth)?;
         let mut end = name.end_byte();
         if let Some(annotation) = field(*declarator, "type") {
             self.expect(end, annotation.start_byte(), "")?;
@@ -411,11 +914,7 @@ impl<'s> Importer<'s> {
     fn annotation(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
         let inner = named(node);
         let [value] = inner.as_slice() else {
-            return Err(format!(
-                "{}: an annotation of {} parts",
-                self.at(node.start_byte()),
-                inner.len()
-            ));
+            return self.refuse(node, &format!("an annotation of {} parts", inner.len()));
         };
         self.expect(node.start_byte() + 1, value.start_byte(), " ")?;
         self.expr(*value, depth)
@@ -473,54 +972,69 @@ impl<'s> Importer<'s> {
                 }
             });
         let increment = field(node, "increment");
-        let mut want = String::new();
-        let init = match init {
-            None => "null".to_owned(),
-            Some(init) if init.kind() == "lexical_declaration" => {
-                let declarators = named(init);
-                want.push_str(self.gap(init.start_byte(), declarators[0].end_byte()));
-                self.declaration(init, depth)?
-            }
-            Some(init) => {
-                want.push_str(self.text(init).trim_end_matches(';'));
-                let inner = if init.kind() == "expression_statement" {
-                    named(init)[0]
-                } else {
-                    init
-                };
-                self.expr(inner, depth)?
-            }
-        };
-        want.push(';');
-        let condition = match condition {
-            None => "null".to_owned(),
-            Some(condition) => {
-                want.push(' ');
-                want.push_str(self.text(condition));
-                self.expr(condition, depth)?
-            }
-        };
-        want.push(';');
-        let increment = match increment {
-            None => "null".to_owned(),
-            Some(increment) => {
-                want.push(' ');
-                want.push_str(self.text(increment));
-                self.expr(increment, depth)?
-            }
-        };
-        self.expect(open.end_byte(), close.start_byte(), &want)?;
-        Ok(format!(
-            "(for {init} {condition} {increment} {})",
-            self.body(body, depth)?
-        ))
+        let mut names = Vec::new();
+        if let Some(init) = init {
+            self.declares(init, &mut names)?;
+        }
+        self.block_names(Some(body), &mut names)?;
+        self.scope(&names, || {
+            let mut want = String::new();
+            let init = match init {
+                None => "null".to_owned(),
+                Some(init) if init.kind() == "lexical_declaration" => {
+                    let declarators = named(init);
+                    want.push_str(self.gap(init.start_byte(), declarators[0].end_byte()));
+                    self.declaration(init, depth)?
+                }
+                Some(init) => {
+                    want.push_str(self.text(init).trim_end_matches(';'));
+                    let inner = if init.kind() == "expression_statement" {
+                        named(init)[0]
+                    } else {
+                        init
+                    };
+                    self.expr(inner, depth)?
+                }
+            };
+            want.push(';');
+            let condition = match condition {
+                None => "null".to_owned(),
+                Some(condition) => {
+                    want.push(' ');
+                    want.push_str(self.text(condition));
+                    self.expr(condition, depth)?
+                }
+            };
+            want.push(';');
+            let increment = match increment {
+                None => "null".to_owned(),
+                Some(increment) => {
+                    want.push(' ');
+                    want.push_str(self.text(increment));
+                    self.expr(increment, depth)?
+                }
+            };
+            self.expect(open.end_byte(), close.start_byte(), &want)?;
+            Ok(format!(
+                "(for {init} {condition} {increment} {})",
+                self.loop_body(body, depth)?
+            ))
+        })
+    }
+
+    fn loop_body(&self, body: Node<'_>, depth: usize) -> Result<String, String> {
+        if body.kind() == "statement_block" {
+            self.block_list(body, depth)
+        } else {
+            self.statement(body, depth)
+        }
     }
 
     fn for_in(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
         let left = field(node, "left").ok_or("for without a target")?;
         let right = field(node, "right").ok_or("for without a subject")?;
         let body = field(node, "body").ok_or("for without a body")?;
-        let kind = field(node, "kind").ok_or("for without const or let")?;
+        let kind = field(node, "kind").ok_or("for without const")?;
         let operator = field(node, "operator").ok_or("for without of or in")?;
         let open = token(node, "(").ok_or("no (")?;
         let waiting = token(node, "await");
@@ -539,24 +1053,22 @@ impl<'s> Importer<'s> {
         self.expect(right.end_byte(), close.start_byte(), "")?;
         self.expect(close.end_byte(), body.start_byte(), " ")?;
         let constructor = match (self.text(kind), self.text(operator)) {
-            ("const", "of") if waiting.is_some() => "forAwait \"const\"",
-            ("const", "of") => "forOf \"const\"",
-            ("let", "of") => "forOf \"let\"",
-            ("const", "in") => "forIn \"const\"",
-            ("let", "in") => "forIn \"let\"",
-            (k, o) => {
-                return Err(format!(
-                    "{}: for ({k} .. {o}) is not supported",
-                    self.at(node.start_byte())
-                ))
-            }
+            ("const", "of") if waiting.is_some() => "forAwait",
+            ("const", "of") => "forOf",
+            ("const", "in") => "forIn",
+            (k, o) => return self.refuse(node, &format!("for ({k} .. {o}) is not supported")),
         };
-        Ok(format!(
-            "({constructor} {} {} {})",
-            self.expr(left, depth)?,
-            self.expr(right, depth)?,
-            self.body(body, depth)?
-        ))
+        let subject = self.expr(right, depth)?;
+        let mut names = Vec::new();
+        self.binds(left, &mut names)?;
+        self.block_names(Some(body), &mut names)?;
+        self.scope(&names, || {
+            Ok(format!(
+                "({constructor} {} {subject} {})",
+                self.pattern(left, depth)?,
+                self.loop_body(body, depth)?
+            ))
+        })
     }
 
     fn switch(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
@@ -576,53 +1088,58 @@ impl<'s> Importer<'s> {
             body.end_byte() - 1,
             &self.indent(depth),
         )?;
-        let arms = self.separated(&cases, depth + 1, |case| {
-            if case.kind() == "comment" {
-                return Ok(self.comment(case));
-            }
-            let colon = token(case, ":").ok_or("a case without a colon")?;
-            let test = match field(case, "value") {
-                Some(test) => {
-                    self.expect(case.start_byte() + 4, test.start_byte(), " ")?;
-                    self.expect(test.end_byte(), colon.start_byte(), "")?;
-                    self.expr(test, depth + 1)?
-                }
-                None => {
-                    self.expect(case.start_byte() + 7, colon.start_byte(), "")?;
-                    "null".to_owned()
-                }
-            };
-            let statements: Vec<_> = named(case)
-                .into_iter()
-                .filter(|child| child.start_byte() > colon.start_byte())
-                .collect();
-            if let [block] = statements.as_slice() {
-                if block.kind() == "statement_block"
-                    && self.gap(colon.end_byte(), block.start_byte()) == " "
-                {
-                    return Ok(format!(
-                        "(case {test} (braces {}))",
-                        self.block(*block, depth + 1)?
-                    ));
+        let subject = self.condition(value, depth)?;
+        let mut names = Vec::new();
+        for case in &cases {
+            for item in named(*case) {
+                if field(*case, "value") != Some(item) {
+                    self.declares(item, &mut names)?;
                 }
             }
-            if let Some(first) = statements.first() {
-                self.expect(
-                    colon.end_byte(),
-                    first.start_byte(),
-                    &self.indent(depth + 2),
-                )?;
-            }
-            let lines = self.statements(&statements, depth + 2)?;
-            Ok(format!("(case {test} {})", list(&lines)))
-        })?;
-        Ok(format!(
-            "(switch {} [\n{}])",
-            self.condition(value, depth)?,
-            arms.iter()
-                .map(|arm| format!("{arm}\n"))
-                .collect::<String>()
-        ))
+        }
+        self.scope(&names, || {
+            let arms = self.separated(&cases, depth + 1, |case| {
+                if case.kind() == "comment" {
+                    return Ok(self.comment(case));
+                }
+                let colon = token(case, ":").ok_or("a case without a colon")?;
+                let test = match field(case, "value") {
+                    Some(test) => {
+                        self.expect(case.start_byte() + 4, test.start_byte(), " ")?;
+                        self.expect(test.end_byte(), colon.start_byte(), "")?;
+                        self.expr(test, depth + 1)?
+                    }
+                    None => {
+                        self.expect(case.start_byte() + 7, colon.start_byte(), "")?;
+                        "null".to_owned()
+                    }
+                };
+                let statements: Vec<_> = named(case)
+                    .into_iter()
+                    .filter(|child| child.start_byte() > colon.start_byte())
+                    .collect();
+                if let [block] = statements.as_slice() {
+                    if block.kind() == "statement_block"
+                        && self.gap(colon.end_byte(), block.start_byte()) == " "
+                    {
+                        return Ok(format!(
+                            "(case {test} (braces {}))",
+                            self.block(*block, depth + 1)?
+                        ));
+                    }
+                }
+                if let Some(first) = statements.first() {
+                    self.expect(
+                        colon.end_byte(),
+                        first.start_byte(),
+                        &self.indent(depth + 2),
+                    )?;
+                }
+                let body = self.statements(&statements, depth + 2)?;
+                Ok(format!("(case {test} {})", list(&body)))
+            })?;
+            Ok(format!("(switch {subject} {})", lines(&arms)))
+        })
     }
 
     fn attempt(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
@@ -633,22 +1150,33 @@ impl<'s> Importer<'s> {
         if let Some(handler) = field(node, "handler") {
             self.expect(end, handler.start_byte(), " ")?;
             let block = field(handler, "body").ok_or("catch without a body")?;
-            let parameter = match field(handler, "parameter") {
-                Some(parameter) => {
-                    let open = token(handler, "(").ok_or("no (")?;
-                    let close = token(handler, ")").ok_or("no )")?;
-                    self.expect(handler.start_byte() + 5, open.start_byte(), " ")?;
-                    self.expect(open.end_byte(), parameter.start_byte(), "")?;
-                    self.expect(parameter.end_byte(), close.start_byte(), "")?;
-                    self.expect(close.end_byte(), block.start_byte(), " ")?;
-                    self.expr(parameter, depth)?
-                }
-                None => {
-                    self.expect(handler.start_byte() + 5, block.start_byte(), " ")?;
-                    "null".to_owned()
-                }
-            };
-            handlers.push(format!("(catch {parameter} {})", self.block(block, depth)?));
+            let parameter = field(handler, "parameter");
+            let mut names = Vec::new();
+            if let Some(parameter) = parameter {
+                self.binds(parameter, &mut names)?;
+            }
+            self.block_names(Some(block), &mut names)?;
+            handlers.push(self.scope(&names, || {
+                let parameter = match parameter {
+                    Some(parameter) => {
+                        let open = token(handler, "(").ok_or("no (")?;
+                        let close = token(handler, ")").ok_or("no )")?;
+                        self.expect(handler.start_byte() + 5, open.start_byte(), " ")?;
+                        self.expect(open.end_byte(), parameter.start_byte(), "")?;
+                        self.expect(parameter.end_byte(), close.start_byte(), "")?;
+                        self.expect(close.end_byte(), block.start_byte(), " ")?;
+                        self.pattern(parameter, depth)?
+                    }
+                    None => {
+                        self.expect(handler.start_byte() + 5, block.start_byte(), " ")?;
+                        "null".to_owned()
+                    }
+                };
+                Ok(format!(
+                    "(catch {parameter} {})",
+                    self.block_list(block, depth)?
+                ))
+            })?);
             end = handler.end_byte();
         }
         if let Some(finalizer) = field(node, "finalizer") {
@@ -671,33 +1199,23 @@ impl<'s> Importer<'s> {
                 self.expect(start + 6, default.start_byte(), " ")?;
                 self.expect(default.end_byte(), declaration.start_byte(), " ")?;
                 return Ok(format!(
-                    "(pre \"export\" (pre \"default\" {}))",
+                    "(export (default {}))",
                     self.statement(declaration, depth)?
                 ));
             }
             self.expect(start + 6, declaration.start_byte(), " ")?;
-            return Ok(format!(
-                "(pre \"export\" {})",
-                self.statement(declaration, depth)?
-            ));
+            return Ok(format!("(export {})", self.statement(declaration, depth)?));
         }
         let value = field(node, "value")
             .ok_or_else(|| format!("{}: this export is not supported", self.at(start)))?;
         let default = token(node, "default").ok_or("an export without default")?;
         self.expect(start + 6, default.start_byte(), " ")?;
         self.expect(default.end_byte(), value.start_byte(), " ")?;
-        if value.kind() != "function_expression" && value.kind() != "class" {
-            self.semicolon(node, value)?;
-        } else if value.end_byte() != node.end_byte() {
-            return Err(format!(
-                "{}: text after an export",
-                self.at(value.end_byte())
-            ));
+        if value.kind() == "function_expression" || value.kind() == "class" {
+            return self.refuse(node, "a default export of a function or class expression");
         }
-        Ok(format!(
-            "(pre \"export\" (pre \"default\" {}))",
-            self.expr(value, depth)?
-        ))
+        self.semicolon(node, value)?;
+        Ok(format!("(export (default {}))", self.expr(value, depth)?))
     }
 
     fn import(&self, node: Node<'_>) -> Result<String, String> {
@@ -719,34 +1237,27 @@ impl<'s> Importer<'s> {
         self.semicolon(node, source)?;
         let parts = named(clause);
         let [part] = parts.as_slice() else {
-            return Err(format!(
-                "{}: an import clause of {} parts",
-                self.at(start),
-                parts.len()
-            ));
+            return self.refuse(node, &format!("an import clause of {} parts", parts.len()));
         };
         let names = match part.kind() {
             "named_imports" => {
                 let specifiers = named(*part);
                 self.delimited(*part, &specifiers, 0, Separator::Comma, true, |specifier| {
                     let name = field(specifier, "name").ok_or("no name")?;
+                    if field(specifier, "alias").is_some() {
+                        return self.refuse(specifier, "an import renamed with as");
+                    }
                     let typed = token(specifier, "type");
                     match typed {
                         Some(word) => self.expect(word.end_byte(), name.start_byte(), " ")?,
                         None => self.expect(specifier.start_byte(), name.start_byte(), "")?,
                     }
-                    let mut value = self.word(self.text(name));
-                    let mut end = name.end_byte();
-                    if let Some(alias) = field(specifier, "alias") {
-                        self.expect(name.end_byte(), alias.start_byte(), " as ")?;
-                        value = format!("(infix [{value} \"as\" {}])", self.word(self.text(alias)));
-                        end = alias.end_byte();
+                    if name.end_byte() != specifier.end_byte() {
+                        return self.refuse(specifier, "text after an import specifier");
                     }
-                    if end != specifier.end_byte() {
-                        return Err(format!("{}: text after an import specifier", self.at(end)));
-                    }
+                    let value = self.name(name)?;
                     Ok(if typed.is_some() {
-                        format!("(pre \"type\" {value})")
+                        format!("(typeOnly {value})")
                     } else {
                         value
                     })
@@ -755,17 +1266,17 @@ impl<'s> Importer<'s> {
             "namespace_import" => {
                 let name = named(*part)[0];
                 self.expect(part.start_byte(), name.start_byte(), "* as ")?;
-                format!("(infix [\"*\" \"as\" {}])", self.word(self.text(name)))
+                format!("(namespace {})", self.name(name)?)
             }
-            "identifier" => self.word(self.text(*part)),
-            kind => return Err(format!("{}: {kind} in an import", self.at(start))),
+            "identifier" => self.name(*part)?,
+            kind => return self.refuse(node, &format!("{kind} in an import")),
         };
         let names = if typed.is_some() {
-            format!("(pre \"type\" {names})")
+            format!("(typeOnly {names})")
         } else {
             names
         };
-        Ok(format!("(import' {names} {})", self.expr(source, 0)?))
+        Ok(format!("(import' {names} {})", self.bare(source, 0)?))
     }
 
     fn delimited(
@@ -822,14 +1333,14 @@ impl<'s> Importer<'s> {
                         )
                     })?;
                 }
-                let lines = gap.bytes().take_while(|&b| b == b'\n').count();
-                if lines == 0 || gap[lines..] != self.unit.repeat(depth + 1) {
+                let count = gap.bytes().take_while(|&b| b == b'\n').count();
+                if count == 0 || gap[count..] != self.unit.repeat(depth + 1) {
                     return Err(format!(
                         "{}: items separated by {gap:?}",
                         self.at(node.start_byte())
                     ));
                 }
-                for _ in 1..lines {
+                for _ in 1..count {
                     out.push("blank".to_owned());
                 }
             }
@@ -854,13 +1365,135 @@ impl<'s> Importer<'s> {
         Ok(rows(&out))
     }
 
+    fn class_of(&self, node: Node<'_>) -> Class<'s> {
+        match node.kind() {
+            "binary_expression" => {
+                Class::Binary(field(node, "operator").map_or("", |operator| self.text(operator)))
+            }
+            "assignment_expression" => Class::Binary("="),
+            "augmented_assignment_expression" => {
+                Class::Binary(field(node, "operator").map_or("", |operator| self.text(operator)))
+            }
+            "as_expression" => Class::Binary("as"),
+            "satisfies_expression" => Class::Binary("satisfies"),
+            "ternary_expression" => Class::Ternary,
+            "arrow_function" | "function_type" => Class::Arrow,
+            "function_expression" => Class::Function,
+            "await_expression" => Class::Await,
+            "unary_expression" => {
+                let negative = field(node, "operator").is_some_and(|op| self.text(op) == "-")
+                    && field(node, "argument").is_some_and(|value| value.kind() == "number");
+                if negative {
+                    Class::Negative
+                } else {
+                    Class::Unary
+                }
+            }
+            "type_query" => Class::Unary,
+            "object" => Class::Object,
+            "union_type" => Class::Union,
+            "intersection_type" => Class::Intersection,
+            _ => Class::Atom,
+        }
+    }
+
+    fn child(&self, slot: Slot<'_>, node: Node<'_>, depth: usize) -> Result<String, String> {
+        let parenthesized = matches!(
+            node.kind(),
+            "parenthesized_expression" | "parenthesized_type"
+        );
+        let inner = if parenthesized {
+            let parts = named(node);
+            let [inner] = parts.as_slice() else {
+                return self.refuse(node, "parentheses around several expressions");
+            };
+            self.expect(node.start_byte() + 1, inner.start_byte(), "")?;
+            self.expect(inner.end_byte(), node.end_byte() - 1, "")?;
+            *inner
+        } else {
+            node
+        };
+        let wanted = wants(slot, self.class_of(inner));
+        if wanted && !parenthesized {
+            return self.refuse(
+                node,
+                "an expression without the parentheses the printer writes around it here",
+            );
+        }
+        if parenthesized && !wanted {
+            return self.refuse(node, "parentheses the printer would not write");
+        }
+        self.bare(inner, depth)
+    }
+
     fn expr(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
+        self.child(Slot::Plain, node, depth)
+    }
+
+    fn number(&self, node: Node<'_>, negative: bool) -> Result<String, String> {
+        let text = self.text(node);
+        let sign = if negative { "-" } else { "" };
+        let canonical = text.bytes().all(|byte| byte.is_ascii_digit())
+            && (text == "0" || !text.starts_with('0'))
+            && text.parse::<i64>().is_ok();
+        if canonical {
+            return Ok(if negative {
+                format!("({sign}{text})")
+            } else {
+                text.to_owned()
+            });
+        }
+        let float = text.parse::<f64>().ok().filter(|value| {
+            text.contains('.') && !text.starts_with('.') && format!("{value}") == text
+        });
+        if float.is_some() {
+            return Ok(if negative {
+                format!("({sign}{text})")
+            } else {
+                text.to_owned()
+            });
+        }
+        if negative {
+            return self.refuse(node, "a negative number in a spelling Nix does not share");
+        }
+        Ok(format!("(num {})", self.string(text)))
+    }
+
+    fn pattern(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
+        match node.kind() {
+            "identifier" => self.name(node),
+            "object_pattern" | "array_pattern" => self.bare(node, depth),
+            kind => self.refuse(node, &format!("{kind} is not a binding pattern")),
+        }
+    }
+
+    fn bare(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
         let start = node.start_byte();
         let kind = node.kind();
-        if WORDS.contains(&kind) || !node.is_named() {
-            return Ok(self.word(self.text(node)));
-        }
         match kind {
+            "identifier"
+            | "type_identifier"
+            | "shorthand_property_identifier"
+            | "predefined_type"
+            | "this"
+            | "super"
+            | "undefined"
+            | "const"
+            | "null" => self.name(node),
+            "true" | "false" => Ok(kind.to_owned()),
+            "number" => self.number(node, false),
+            "nested_type_identifier" => {
+                let parts = named(node);
+                let [module, name] = parts.as_slice() else {
+                    return self.refuse(node, "a qualified type of more than two names");
+                };
+                self.expect(module.end_byte(), name.start_byte(), ".")?;
+                Ok(format!(
+                    "(dot {} {})",
+                    self.name(*module)?,
+                    self.string(self.text(*name))
+                ))
+            }
             "member_expression"
             | "call_expression"
             | "subscript_expression"
@@ -883,9 +1516,18 @@ impl<'s> Importer<'s> {
             }
             "array" | "array_pattern" => {
                 let items = named(node);
-                self.delimited(node, &items, depth, Separator::Comma, false, |item| {
-                    self.expr(item, depth + usize::from(self.multiline(node)))
-                })
+                let inner = depth + usize::from(self.multiline(node));
+                let pattern = kind == "array_pattern";
+                Ok(format!(
+                    "(array {})",
+                    self.delimited(node, &items, depth, Separator::Comma, false, |item| {
+                        if pattern {
+                            self.element(item, inner)
+                        } else {
+                            self.expr(item, inner)
+                        }
+                    })?
+                ))
             }
             "object" | "object_pattern" => {
                 let items = named(node);
@@ -899,43 +1541,22 @@ impl<'s> Importer<'s> {
             "object_type" => {
                 let items = named(node);
                 let inner = depth + usize::from(self.multiline(node));
-                let separator = if self.text(node).contains(',') && !self.text(node).contains(';') {
-                    Separator::Comma
-                } else {
-                    Separator::Semicolon
-                };
-                if separator == Separator::Comma && !items.is_empty() {
-                    return Err(format!(
-                        "{}: an object type separated by commas",
-                        self.at(start)
-                    ));
+                if self.text(node).contains(',')
+                    && !self.text(node).contains(';')
+                    && !items.is_empty()
+                {
+                    return self.refuse(node, "an object type separated by commas");
                 }
                 Ok(format!(
                     "(shape {})",
-                    self.delimited(node, &items, depth, separator, true, |item| self
+                    self.delimited(node, &items, depth, Separator::Semicolon, true, |item| self
                         .member(item, inner))?
                 ))
             }
-            "pair"
-            | "pair_pattern"
-            | "shorthand_property_identifier"
-            | "spread_element"
-            | "method_definition"
-            | "object_assignment_pattern" => self.member(node, depth),
-            "binary_expression"
-            | "assignment_expression"
-            | "augmented_assignment_expression"
-            | "as_expression"
-            | "satisfies_expression"
-            | "union_type"
-            | "type_predicate"
-            | "assignment_pattern"
-            | "intersection_type" => self.infix(node, depth),
-            "unary_expression" | "await_expression" | "type_query" | "readonly_type"
-            | "spread_element_" | "rest_pattern" | "keyof_type_query" => {
-                let parts = children(node);
-                let operator = parts[0];
-                let argument = *parts.last().ok_or("no operand")?;
+            _ if BINARY.contains(&kind) => self.infix(node, depth),
+            "unary_expression" => {
+                let operator = field(node, "operator").ok_or("no operator")?;
+                let argument = field(node, "argument").ok_or("no operand")?;
                 let op = self.text(operator);
                 let gap = if op.chars().all(|c| c.is_ascii_alphabetic()) {
                     " "
@@ -944,52 +1565,104 @@ impl<'s> Importer<'s> {
                 };
                 self.expect(operator.end_byte(), argument.start_byte(), gap)?;
                 if op == "-" && argument.kind() == "number" {
-                    return Ok(self.string(self.text(node)));
+                    return self.number(argument, true);
                 }
+                let constructor = match op {
+                    "!" => "not",
+                    "-" => "neg",
+                    "typeof" => "typeof",
+                    "delete" => "delete",
+                    other => {
+                        return self.refuse(node, &format!("the unary {other} is not supported"))
+                    }
+                };
                 Ok(format!(
-                    "(pre {} {})",
-                    self.string(op),
-                    self.expr(argument, depth)?
+                    "({constructor} {})",
+                    self.child(Slot::Unary, argument, depth)?
                 ))
+            }
+            "await_expression" | "type_query" | "readonly_type" => {
+                let parts = children(node);
+                let keyword = parts[0];
+                let argument = *parts.last().ok_or("no operand")?;
+                self.expect(keyword.end_byte(), argument.start_byte(), " ")?;
+                let constructor = match kind {
+                    "await_expression" => "await",
+                    "type_query" => "typeof",
+                    _ => "readonly",
+                };
+                Ok(format!(
+                    "({constructor} {})",
+                    self.child(Slot::Unary, argument, depth)?
+                ))
+            }
+            "spread_element" => {
+                let inner = named(node)[0];
+                self.expect(start + 3, inner.start_byte(), "")?;
+                Ok(format!(
+                    "(spread {})",
+                    self.child(Slot::Spread, inner, depth)?
+                ))
+            }
+            "rest_pattern" => {
+                let inner = named(node)[0];
+                self.expect(start + 3, inner.start_byte(), "")?;
+                Ok(format!("(spread {})", self.pattern(inner, depth)?))
             }
             "update_expression" => {
                 let parts = children(node);
-                if parts[0].is_named() {
-                    self.expect(parts[0].end_byte(), parts[1].start_byte(), "")?;
-                    Ok(format!(
-                        "(post {} {})",
-                        self.expr(parts[0], depth)?,
-                        self.string(self.text(parts[1]))
-                    ))
-                } else {
-                    self.expect(parts[0].end_byte(), parts[1].start_byte(), "")?;
-                    Ok(format!(
-                        "(pre {} {})",
-                        self.string(self.text(parts[0])),
-                        self.expr(parts[1], depth)?
-                    ))
+                if !parts[0].is_named() {
+                    return self.refuse(node, "a prefix increment");
                 }
+                self.expect(parts[0].end_byte(), parts[1].start_byte(), "")?;
+                let constructor = if self.text(parts[1]) == "++" {
+                    "inc"
+                } else {
+                    "dec"
+                };
+                Ok(format!(
+                    "({constructor} {})",
+                    self.child(Slot::Member, parts[0], depth)?
+                ))
             }
             "array_type" => {
                 let inner = named(node)[0];
                 self.expect(inner.end_byte(), node.end_byte(), "[]")?;
-                let value = self.expr(inner, depth)?;
-                if WORDS.contains(&inner.kind()) {
-                    Ok(self.string(self.text(node)))
-                } else {
-                    Ok(format!("(post {value} \"[]\")"))
-                }
+                Ok(format!(
+                    "(arrayOf {})",
+                    self.child(Slot::ArrayOf, inner, depth)?
+                ))
             }
-            "literal_type" => self.expr(named(node)[0], depth),
-            "parenthesized_expression" | "parenthesized_type" => {
-                let inner = named(node)[0];
-                if self.broken(start + 1, inner.start_byte(), depth + 1)? {
-                    self.expect(inner.end_byte(), node.end_byte() - 1, &self.indent(depth))?;
-                    return Ok(format!("(paren (below {}))", self.expr(inner, depth + 1)?));
+            "literal_type" => self.bare(named(node)[0], depth),
+            "union_type" | "intersection_type" => {
+                let mut members = Vec::new();
+                let mut current = node;
+                loop {
+                    let parts = children(current);
+                    let [left, bar, right] = parts.as_slice() else {
+                        return self.refuse(current, "a leading union bar");
+                    };
+                    self.expect(left.end_byte(), bar.start_byte(), " ")?;
+                    self.expect(bar.end_byte(), right.start_byte(), " ")?;
+                    members.push(*right);
+                    if left.kind() == kind {
+                        current = *left;
+                    } else {
+                        members.push(*left);
+                        break;
+                    }
                 }
-                self.expect(start + 1, inner.start_byte(), "")?;
-                self.expect(inner.end_byte(), node.end_byte() - 1, "")?;
-                Ok(format!("(paren {})", self.expr(inner, depth)?))
+                members.reverse();
+                let (constructor, slot) = if kind == "union_type" {
+                    ("union", Slot::Union)
+                } else {
+                    ("intersection", Slot::Intersection)
+                };
+                let values = members
+                    .iter()
+                    .map(|member| self.child(slot, *member, depth))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(format!("({constructor} {})", list(&values)))
             }
             "ternary_expression" => {
                 let condition = field(node, "condition").ok_or("no condition")?;
@@ -1001,27 +1674,45 @@ impl<'s> Importer<'s> {
                     |before: usize, mark: Node<'_>, value: Node<'_>| -> Result<String, String> {
                         self.expect(mark.end_byte(), value.start_byte(), " ")?;
                         if self.broken(before, mark.start_byte(), depth + 1)? {
-                            Ok(format!("(below {})", self.expr(value, depth + 2)?))
+                            Ok(format!(
+                                "(below {})",
+                                self.child(Slot::Branch, value, depth + 2)?
+                            ))
                         } else {
                             self.expect(before, mark.start_byte(), " ")?;
-                            self.expr(value, depth)
+                            self.child(Slot::Branch, value, depth)
                         }
                     };
                 Ok(format!(
                     "(ternary {} {} {})",
-                    self.expr(condition, depth)?,
+                    self.child(Slot::Test, condition, depth)?,
                     branch(condition.end_byte(), question, consequence)?,
                     branch(consequence.end_byte(), colon, alternative)?
                 ))
             }
             "arrow_function" => self.arrow(node, depth),
-            "function_expression" | "function_declaration" => self.function(node, depth),
+            "function_expression" => self.function(node, depth),
+            "function_type" => {
+                let parameters =
+                    field(node, "parameters").ok_or("a function type without parameters")?;
+                let result =
+                    field(node, "return_type").ok_or("a function type without a result")?;
+                self.expect(parameters.end_byte(), result.start_byte(), " => ")?;
+                let names = self.function_names(node)?;
+                self.scope(&names, || {
+                    Ok(format!(
+                        "(arrow {} {})",
+                        self.parameters(parameters, depth)?,
+                        self.expr(result, depth)?
+                    ))
+                })
+            }
             "new_expression" => {
                 let constructor = field(node, "constructor").ok_or("new without a constructor")?;
                 let arguments = field(node, "arguments")
                     .ok_or_else(|| format!("{}: new without arguments", self.at(start)))?;
                 self.expect(start + 3, constructor.start_byte(), " ")?;
-                let mut callee = self.expr(constructor, depth)?;
+                let mut callee = self.child(Slot::Member, constructor, depth)?;
                 let mut end = constructor.end_byte();
                 if let Some(types) = field(node, "type_arguments") {
                     self.expect(end, types.start_byte(), "")?;
@@ -1040,7 +1731,7 @@ impl<'s> Importer<'s> {
                 self.expect(name.end_byte(), types.start_byte(), "")?;
                 Ok(format!(
                     "(generic {} {})",
-                    self.expr(name, depth)?,
+                    self.bare(name, depth)?,
                     self.type_arguments(types, depth)?
                 ))
             }
@@ -1050,61 +1741,41 @@ impl<'s> Importer<'s> {
                 self.expect(parts[1].end_byte(), node.end_byte(), "]")?;
                 Ok(format!(
                     "(idx {} {})",
-                    self.expr(parts[0], depth)?,
+                    self.child(Slot::Member, parts[0], depth)?,
                     self.expr(parts[1], depth)?
                 ))
             }
-            "function_type" => {
-                let parameters =
-                    field(node, "parameters").ok_or("a function type without parameters")?;
-                let result =
-                    field(node, "return_type").ok_or("a function type without a result")?;
-                self.expect(parameters.end_byte(), result.start_byte(), " => ")?;
+            "type_predicate" => {
+                let name = field(node, "name").ok_or("a predicate without a name")?;
+                let value = field(node, "type").ok_or("a predicate without a type")?;
+                self.expect(name.end_byte(), value.start_byte(), " is ")?;
                 Ok(format!(
-                    "(arrow {} {})",
-                    self.parameters(parameters, depth)?,
-                    self.expr(result, depth)?
+                    "(is {} {})",
+                    self.name(name)?,
+                    self.expr(value, depth)?
                 ))
             }
-            "class_declaration" | "class" => self.class(node, depth),
-            "interface_declaration" => {
-                let name = field(node, "name").ok_or("an interface without a name")?;
-                let body = field(node, "body").ok_or("an interface without a body")?;
-                self.expect(start + 9, name.start_byte(), " ")?;
-                let mut head = self.expr(name, depth)?;
-                let mut end = name.end_byte();
-                if let Some(extends) = named(node)
-                    .into_iter()
-                    .find(|child| child.kind() == "extends_type_clause")
-                {
-                    self.expect(end, extends.start_byte(), " ")?;
-                    let types = named(extends);
-                    self.expect(extends.start_byte() + 7, types[0].start_byte(), " ")?;
-                    if types.len() != 1 {
-                        return Err(format!(
-                            "{}: an interface extending several",
-                            self.at(start)
-                        ));
-                    }
-                    head = format!(
-                        "(infix [{head} \"extends\" {}])",
-                        self.expr(types[0], depth)?
-                    );
-                    end = extends.end_byte();
-                }
-                self.expect(end, body.start_byte(), " ")?;
-                Ok(format!(
-                    "(interface {head} {})",
-                    self.members(body, depth, Separator::Semicolon)?
-                ))
-            }
-            "property_signature"
-            | "method_signature"
-            | "public_field_definition"
-            | "index_signature" => self.member(node, depth),
-            "required_parameter" | "optional_parameter" => self.parameter(node, depth),
+            "class" | "class_declaration" => self.class(node, depth),
+            "interface_declaration" => self.interface(node, depth),
             "type_annotation" => self.annotation(node, depth),
-            _ => Err(format!("{}: {kind} is not supported", self.at(start))),
+            _ => self.refuse(node, &format!("{kind} is not supported")),
+        }
+    }
+
+    fn element(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
+        match node.kind() {
+            "assignment_pattern" => {
+                let left = field(node, "left").ok_or("no left")?;
+                let right = field(node, "right").ok_or("no right")?;
+                self.expect(left.end_byte(), right.start_byte(), " = ")?;
+                Ok(format!(
+                    "(infix [{} \"=\" {}])",
+                    self.pattern(left, depth)?,
+                    self.child(Slot::Binary("=", Side::Right), right, depth)?
+                ))
+            }
+            "rest_pattern" => self.bare(node, depth),
+            _ => self.pattern(node, depth),
         }
     }
 
@@ -1145,32 +1816,25 @@ impl<'s> Importer<'s> {
         let items = named(node);
         let inner = depth + usize::from(self.multiline(node));
         self.delimited(node, &items, depth, Separator::Comma, false, |item| {
-            self.expr(item, inner)
+            self.parameter(item, inner)
         })
     }
 
     fn parameter(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
-        let pattern = field(node, "pattern").ok_or("a parameter without a pattern")?;
-        let mut modifiers = Vec::new();
-        let mut at = node.start_byte();
-        for child in children(node) {
-            if child.start_byte() >= pattern.start_byte() {
-                break;
-            }
-            self.expect(at, child.start_byte(), "")?;
-            modifiers.push(self.text(child));
-            at = child.end_byte() + 1;
-            self.expect(child.end_byte(), at, " ")?;
+        if !matches!(node.kind(), "required_parameter" | "optional_parameter") {
+            return self.refuse(node, &format!("{} is not a parameter", node.kind()));
         }
-        self.expect(at, pattern.start_byte(), "")?;
-        let mut value = self.expr(pattern, depth)?;
+        let pattern = field(node, "pattern").ok_or("a parameter without a pattern")?;
+        let modifiers = self.modifiers(node, pattern)?;
+        let mut value = if pattern.kind() == "rest_pattern" {
+            self.bare(pattern, depth)?
+        } else {
+            self.pattern(pattern, depth)?
+        };
         let mut end = pattern.end_byte();
         if node.kind() == "optional_parameter" {
             self.expect(end, end + 1, "?")?;
-            value = match pattern.kind() {
-                "identifier" => self.string(&format!("{}?", self.text(pattern))),
-                _ => return Err(format!("{}: an optional pattern", self.at(end))),
-            };
+            value = format!("(opt {value})");
             end += 1;
         }
         if let Some(annotation) = field(node, "type") {
@@ -1180,12 +1844,12 @@ impl<'s> Importer<'s> {
         }
         if let Some(default) = field(node, "value") {
             self.expect(end, default.start_byte(), " = ")?;
-            value = format!("(infix [{value} \"=\" {}])", self.expr(default, depth)?);
+            value = format!(
+                "(infix [{value} \"=\" {}])",
+                self.child(Slot::Binary("=", Side::Right), default, depth)?
+            );
         }
-        for modifier in modifiers.iter().rev() {
-            value = format!("(pre {} {value})", self.string(modifier));
-        }
-        Ok(value)
+        Ok(Self::modified(&modifiers, value))
     }
 
     fn signature(
@@ -1205,44 +1869,49 @@ impl<'s> Importer<'s> {
     }
 
     fn function(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
-        let start = node.start_byte();
         let parts = children(node);
         let asynchronous = parts[0].kind() == "async";
         let keyword = parts[usize::from(asynchronous)];
         if keyword.kind() != "function" {
-            return Err(format!(
-                "{}: {} functions are not supported",
-                self.at(start),
-                keyword.kind()
-            ));
+            return self.refuse(
+                node,
+                &format!("{} functions are not supported", keyword.kind()),
+            );
         }
         if asynchronous {
             self.expect(parts[0].end_byte(), keyword.start_byte(), " ")?;
         }
         if field(node, "type_parameters").is_some() || token(node, "*").is_some() {
-            return Err(format!(
-                "{}: generic and generator functions are not supported",
-                self.at(start)
-            ));
+            return self.refuse(node, "generic and generator functions are not supported");
         }
         let parameters = field(node, "parameters").ok_or("a function without parameters")?;
+        let declared = node.kind() == "function_declaration";
         let name = match field(node, "name") {
+            Some(_) if !declared => {
+                return self.refuse(node, "a named function expression");
+            }
             Some(name) => {
                 self.expect(keyword.end_byte(), name.start_byte(), " ")?;
                 self.expect(name.end_byte(), parameters.start_byte(), "")?;
-                self.expr(name, depth)?
+                self.name(name)?
             }
             None => {
                 self.expect(keyword.end_byte(), parameters.start_byte(), " ")?;
                 "null".to_owned()
             }
         };
-        let (signature, end) = self.signature(parameters, field(node, "return_type"), depth)?;
-        let body = field(node, "body").ok_or("a function without a body")?;
-        self.expect(end, body.start_byte(), " ")?;
-        let value = format!("(fn {name} {signature} {})", self.block(body, depth)?);
+        let names = self.function_names(node)?;
+        let value = self.scope(&names, || {
+            let (signature, end) = self.signature(parameters, field(node, "return_type"), depth)?;
+            let body = field(node, "body").ok_or("a function without a body")?;
+            self.expect(end, body.start_byte(), " ")?;
+            Ok(format!(
+                "(fn {name} {signature} {})",
+                self.block_list(body, depth)?
+            ))
+        })?;
         Ok(if asynchronous {
-            format!("(pre \"async\" {value})")
+            format!("(async {value})")
         } else {
             value
         })
@@ -1251,47 +1920,39 @@ impl<'s> Importer<'s> {
     fn arrow(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
         let parts = children(node);
         let asynchronous = parts[0].kind() == "async";
-        let (parameters, mut end) = match field(node, "parameter") {
-            Some(parameter) => (self.expr(parameter, depth)?, parameter.end_byte()),
-            None => {
-                let parameters = field(node, "parameters").ok_or("an arrow without parameters")?;
-                self.signature(parameters, field(node, "return_type"), depth)?
-            }
-        };
         if asynchronous {
             self.expect(parts[0].end_byte(), parts[1].start_byte(), " ")?;
         }
         if field(node, "type_parameters").is_some() {
-            return Err(format!(
-                "{}: generic arrows are not supported",
-                self.at(node.start_byte())
-            ));
+            return self.refuse(node, "generic arrows are not supported");
         }
-        let arrow = token(node, "=>").ok_or("no =>")?;
-        self.expect(end, arrow.start_byte(), " ")?;
-        end = arrow.end_byte();
-        let body = field(node, "body").ok_or("an arrow without a body")?;
-        let value = if body.kind() == "statement_block" {
-            self.expect(end, body.start_byte(), " ")?;
-            self.block(body, depth)?
-        } else if self.broken(end, body.start_byte(), depth + 1)? {
-            format!("(below {})", self.arrow_body(body, depth + 1)?)
-        } else {
-            self.expect(end, body.start_byte(), " ")?;
-            self.arrow_body(body, depth)?
-        };
-        let value = format!("(arrow {parameters} {value})");
+        let names = self.function_names(node)?;
+        let value = self.scope(&names, || {
+            let (parameters, mut end) = match field(node, "parameter") {
+                Some(parameter) => (self.name(parameter)?, parameter.end_byte()),
+                None => {
+                    let parameters =
+                        field(node, "parameters").ok_or("an arrow without parameters")?;
+                    self.signature(parameters, field(node, "return_type"), depth)?
+                }
+            };
+            let arrow = token(node, "=>").ok_or("no =>")?;
+            self.expect(end, arrow.start_byte(), " ")?;
+            end = arrow.end_byte();
+            let body = field(node, "body").ok_or("an arrow without a body")?;
+            let value = if body.kind() == "statement_block" {
+                self.expect(end, body.start_byte(), " ")?;
+                self.block_list(body, depth)?
+            } else if self.broken(end, body.start_byte(), depth + 1)? {
+                format!("(below {})", self.expr(body, depth + 1)?)
+            } else {
+                self.expect(end, body.start_byte(), " ")?;
+                self.child(Slot::ArrowBody, body, depth)?
+            };
+            Ok(format!("(arrow {parameters} {value})"))
+        })?;
         Ok(if asynchronous {
-            format!("(pre \"async\" {value})")
-        } else {
-            value
-        })
-    }
-
-    fn arrow_body(&self, body: Node<'_>, depth: usize) -> Result<String, String> {
-        let value = self.expr(body, depth)?;
-        Ok(if body.kind() == "array" {
-            format!("(array {value})")
+            format!("(async {value})")
         } else {
             value
         })
@@ -1309,11 +1970,10 @@ impl<'s> Importer<'s> {
             }
             let inner = named(substitution);
             let [value] = inner.as_slice() else {
-                return Err(format!(
-                    "{}: a substitution of {} parts",
-                    self.at(substitution.start_byte()),
-                    inner.len()
-                ));
+                return self.refuse(
+                    substitution,
+                    &format!("a substitution of {} parts", inner.len()),
+                );
             };
             self.expect(substitution.start_byte() + 2, value.start_byte(), "")?;
             self.expect(value.end_byte(), substitution.end_byte() - 1, "")?;
@@ -1327,75 +1987,14 @@ impl<'s> Importer<'s> {
         Ok(format!("(tpl {})", list(&parts)))
     }
 
-    fn infix(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
-        let mut operands = Vec::new();
-        let mut operators = Vec::new();
-        self.flatten(node, &mut operands, &mut operators)?;
-        let mut gaps = Vec::new();
-        for (index, operator) in operators.iter().enumerate() {
-            self.expect(operands[index].end_byte(), operator.start_byte(), " ")?;
-            gaps.push(self.gap(operator.end_byte(), operands[index + 1].start_byte()));
-        }
-        let assigning = ASSIGNING.contains(&node.kind()) || node.kind() == "assignment_pattern";
-        if operators.len() == 1 && assigning {
-            let value = self.hang(operators[0].end_byte(), operands[1], depth)?;
-            return Ok(format!(
-                "(infix [{} {} {value}])",
-                self.expr(operands[0], depth)?,
-                self.string(self.text(operators[0]))
-            ));
-        }
-        let broken = gaps.iter().any(|gap| gap.contains('\n'));
-        let want = if broken {
-            self.indent(depth)
-        } else {
-            " ".to_owned()
-        };
-        for (index, gap) in gaps.iter().enumerate() {
-            if *gap != want {
-                return Err(format!(
-                    "{}: an operator followed by {gap:?}, expected {want:?}",
-                    self.at(operands[index + 1].start_byte())
-                ));
-            }
-        }
-        let mut items = vec![self.expr(operands[0], depth)?];
-        for (index, operator) in operators.iter().enumerate() {
-            items.push(self.string(self.text(*operator)));
-            items.push(self.expr(operands[index + 1], depth)?);
-        }
-        Ok(if broken {
-            format!("(infix {})", rows(&items))
-        } else {
-            format!("(infix {})", list(&items))
-        })
-    }
-
-    fn flatten<'t>(
-        &self,
-        node: Node<'t>,
-        operands: &mut Vec<Node<'t>>,
-        operators: &mut Vec<Node<'t>>,
-    ) -> Result<(), String> {
+    fn binary_parts<'t>(&self, node: Node<'t>) -> Result<(Node<'t>, Node<'t>, Node<'t>), String> {
         let parts = children(node);
-        let (left, operator, right) = match node.kind() {
-            "as_expression" | "satisfies_expression" | "type_predicate" => {
-                let named_parts = named(node);
-                (
-                    named_parts[0],
-                    parts[1],
-                    *parts.last().ok_or("no right operand")?,
-                )
-            }
-            "union_type" | "intersection_type" if parts.len() == 3 => {
-                (parts[0], parts[1], parts[2])
-            }
-            "union_type" | "intersection_type" => {
-                return Err(format!(
-                    "{}: a leading union bar",
-                    self.at(node.start_byte())
-                ))
-            }
+        Ok(match node.kind() {
+            "as_expression" | "satisfies_expression" => (
+                named(node)[0],
+                parts[1],
+                *parts.last().ok_or("no right operand")?,
+            ),
             _ => (
                 field(node, "left").ok_or("no left operand")?,
                 field(node, "operator")
@@ -1408,22 +2007,129 @@ impl<'s> Importer<'s> {
                     .ok_or("no operator")?,
                 field(node, "right").ok_or("no right operand")?,
             ),
-        };
-        let op = self.text(operator);
-        let flat = left.kind() == node.kind()
-            && node.kind() == "binary_expression"
-            && group(op) != 0
-            && field(left, "operator").is_some_and(|inner| group(self.text(inner)) == group(op))
-            || (left.kind() == node.kind()
-                && (node.kind() == "union_type" || node.kind() == "intersection_type"));
-        if flat {
-            self.flatten(left, operands, operators)?;
+        })
+    }
+
+    fn infix(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
+        let mut broken = None;
+        let items = self.flat(node, depth, Some(&mut broken))?;
+        Ok(if broken == Some(true) {
+            format!("(infix {})", rows(&items))
         } else {
-            operands.push(left);
+            format!("(infix {})", list(&items))
+        })
+    }
+
+    fn unparen<'t>(&self, node: Node<'t>) -> (Node<'t>, bool) {
+        if node.kind() == "parenthesized_expression" {
+            if let [inner] = named(node).as_slice() {
+                return (*inner, true);
+            }
         }
-        operators.push(operator);
-        operands.push(right);
+        (node, false)
+    }
+
+    fn operand(
+        &self,
+        slot: (&str, Side),
+        node: Node<'_>,
+        depth: usize,
+        chain: Option<&mut Option<bool>>,
+        out: &mut Vec<String>,
+    ) -> Result<(), String> {
+        let (operator, side) = slot;
+        let (inner, parenthesized) = self.unparen(node);
+        let class = self.class_of(inner);
+        let Class::Binary(child) = class else {
+            out.push(self.child(Slot::Binary(operator, side), node, depth)?);
+            return Ok(());
+        };
+        if wants(Slot::Binary(operator, side), class) != parenthesized {
+            return self.refuse(
+                node,
+                "parentheses around an operand that differ from those the printer writes",
+            );
+        }
+        if parenthesized {
+            self.expect(node.start_byte() + 1, inner.start_byte(), "")?;
+            self.expect(inner.end_byte(), node.end_byte() - 1, "")?;
+        }
+        let (outer, level_inner) = (level(operator), level(child));
+        let flat = level_inner > outer
+            || level_inner == outer && (right_associative(operator) == (side == Side::Right));
+        if !flat {
+            out.push(list(&self.flat(inner, depth, None)?));
+            return Ok(());
+        }
+        let continues = side == Side::Left && !parenthesized && level_inner == outer;
+        match chain {
+            Some(broken) if continues => out.extend(self.flat(inner, depth, Some(broken))?),
+            _ => out.extend(self.flat(inner, depth, None)?),
+        }
         Ok(())
+    }
+
+    fn flat(
+        &self,
+        node: Node<'_>,
+        depth: usize,
+        mut chain: Option<&mut Option<bool>>,
+    ) -> Result<Vec<String>, String> {
+        let (left, operator, right) = self.binary_parts(node)?;
+        let op = self.text(operator);
+        if precedence(op).is_none() {
+            return self.refuse(
+                operator,
+                &format!("`{op}` is not a binary operator the printer knows"),
+            );
+        }
+        let typed = matches!(node.kind(), "as_expression" | "satisfies_expression");
+        self.expect(left.end_byte(), operator.start_byte(), " ")?;
+        let mut out = Vec::new();
+        if assignment(op) {
+            out.push(self.child(Slot::Binary(op, Side::Left), left, depth)?);
+        } else {
+            self.operand(
+                (op, Side::Left),
+                left,
+                depth,
+                chain.as_deref_mut(),
+                &mut out,
+            )?;
+        }
+        out.push(self.string(op));
+        let after = self.gap(operator.end_byte(), right.start_byte());
+        if assignment(op) && after.contains('\n') {
+            self.broken(operator.end_byte(), right.start_byte(), depth + 1)?;
+            out.push(format!(
+                "(below {})",
+                self.child(Slot::Binary(op, Side::Right), right, depth + 1)?
+            ));
+            return Ok(out);
+        }
+        let split = after.contains('\n');
+        match chain {
+            Some(broken) => {
+                if broken.is_some_and(|known| known != split) {
+                    return self
+                        .refuse(right, "an operator chain broken after some operators only");
+                }
+                *broken = Some(split);
+                let gap = if split {
+                    self.indent(depth)
+                } else {
+                    " ".to_owned()
+                };
+                self.expect(operator.end_byte(), right.start_byte(), &gap)?;
+            }
+            None => self.expect(operator.end_byte(), right.start_byte(), " ")?,
+        }
+        if typed {
+            out.push(self.expr(right, depth)?);
+        } else {
+            self.operand((op, Side::Right), right, depth, None, &mut out)?;
+        }
+        Ok(out)
     }
 
     fn chain<'t>(&self, node: Node<'t>, links: &mut Vec<Link<'t>>) -> Result<Node<'t>, String> {
@@ -1438,10 +2144,7 @@ impl<'s> Importer<'s> {
                     let gap = self.gap(object.end_byte(), property.start_byte());
                     let broken = gap.contains('\n');
                     if !broken && gap != accessor {
-                        return Err(format!(
-                            "{}: member access spaced as {gap:?}",
-                            self.at(property.start_byte())
-                        ));
+                        return self.refuse(property, &format!("member access spaced as {gap:?}"));
                     }
                     links.push(Link::Member(optional, property, broken));
                     current = object;
@@ -1450,24 +2153,17 @@ impl<'s> Importer<'s> {
                     let function = field(current, "function").ok_or("no callee")?;
                     let arguments = field(current, "arguments").ok_or("no arguments")?;
                     if arguments.kind() != "arguments" {
-                        return Err(format!(
-                            "{}: tagged templates are not supported",
-                            self.at(arguments.start_byte())
-                        ));
+                        return self.refuse(arguments, "tagged templates are not supported");
                     }
-                    links.push(Link::Call(arguments));
                     let mut end = arguments.start_byte();
-                    if let Some(types) = field(current, "type_arguments") {
+                    let types = field(current, "type_arguments");
+                    if let Some(types) = types {
                         self.expect(types.end_byte(), end, "")?;
-                        links.push(Link::Types(types));
                         end = types.start_byte();
                     }
-                    if optional(current) {
-                        self.expect(function.end_byte(), end, "?.")?;
-                        links.push(Link::Optional);
-                    } else {
-                        self.expect(function.end_byte(), end, "")?;
-                    }
+                    let optional = optional(current);
+                    self.expect(function.end_byte(), end, if optional { "?." } else { "" })?;
+                    links.push(Link::Call(arguments, optional, types));
                     current = function;
                 }
                 "subscript_expression" => {
@@ -1480,10 +2176,7 @@ impl<'s> Importer<'s> {
                         if optional { "?.[" } else { "[" },
                     )?;
                     self.expect(index.end_byte(), current.end_byte(), "]")?;
-                    links.push(Link::Index(index));
-                    if optional {
-                        links.push(Link::Optional);
-                    }
+                    links.push(Link::Index(index, optional));
                     current = object;
                 }
                 "non_null_expression" => {
@@ -1501,120 +2194,147 @@ impl<'s> Importer<'s> {
         let mut links = Vec::new();
         let base = self.chain(node, &mut links)?;
         links.reverse();
-        let split = links
+        let starts = groups(&links);
+        let chained = links
             .iter()
-            .position(|link| matches!(link, Link::Member(_, _, true)));
-        let Some(split) = split else {
-            return self.fold(Value::from(self, base, depth)?, &links, depth);
-        };
-        let head = self.fold(Value::from(self, base, depth)?, &links[..split], depth)?;
-        let mut out = vec![head];
-        let mut index = split;
-        while index < links.len() {
-            let Link::Member(optional, property, true) = links[index] else {
-                return Err("a chain link".into());
-            };
-            if optional {
-                return Err(format!(
-                    "{}: an optional link starting a chain row",
-                    self.at(property.start_byte())
-                ));
+            .any(|link| matches!(link, Link::Member(_, _, true)));
+        if chained {
+            for (index, link) in links.iter().enumerate() {
+                let start = starts.contains(&index);
+                match link {
+                    Link::Member(optional, property, broken) => {
+                        if *broken != start {
+                            return self.refuse(
+                                *property,
+                                "a member chain broken other than before each call group",
+                            );
+                        }
+                        if !broken {
+                            continue;
+                        }
+                        if *optional {
+                            return self.refuse(*property, "an optional link starting a chain row");
+                        }
+                        let dot = property.start_byte() - 1;
+                        let before = self.source[..dot].trim_end_matches([' ', '\t']);
+                        let pad = &self.source[before.len()..dot];
+                        if self.gap(dot, property.start_byte()) != "."
+                            || !before.ends_with('\n')
+                            || pad != self.unit.repeat(depth + 1)
+                            || before[..before.len() - 1].ends_with('\n')
+                        {
+                            return self.refuse(*property, "a chain row not one dot one level in");
+                        }
+                    }
+                    _ if start => {
+                        return self.refuse(
+                            node,
+                            "a member chain group that does not start with a member",
+                        );
+                    }
+                    _ => {}
+                }
             }
-            let gap = self.gap(property.start_byte() - 1, property.start_byte());
-            if gap != "." {
-                return Err(format!(
-                    "{}: a chain row not starting with a dot",
-                    self.at(property.start_byte())
-                ));
-            }
-            let before = self.source[..property.start_byte() - 1].trim_end_matches([' ', '\t']);
-            let pad = &self.source[before.len()..property.start_byte() - 1];
-            if !before.ends_with('\n')
-                || pad != self.unit.repeat(depth + 1)
-                || before[..before.len() - 1].ends_with('\n')
-            {
-                return Err(format!(
-                    "{}: a chain row indented {pad:?}",
-                    self.at(property.start_byte())
-                ));
-            }
-            let end = links[index + 1..]
-                .iter()
-                .position(|link| matches!(link, Link::Member(_, _, true)))
-                .map_or(links.len(), |at| index + 1 + at);
-            out.push(self.fold(
-                Value::Word(self.text(property).to_owned()),
-                &links[index + 1..end],
-                depth + 1,
-            )?);
-            index = end;
         }
-        Ok(format!(
-            "(chain [\n{}])",
-            out.iter().map(|row| format!("{row}\n")).collect::<String>()
-        ))
+        let mut value = self.child(Slot::Member, base, depth)?;
+        let mut path = String::new();
+        for (index, link) in links.iter().enumerate() {
+            let depth = if chained && starts.first().is_some_and(|first| index >= *first) {
+                depth + 1
+            } else {
+                depth
+            };
+            if let Link::Member(optional, property, _) = link {
+                if *optional {
+                    path.push_str("?.");
+                } else if !path.is_empty() {
+                    path.push('.');
+                }
+                path.push_str(self.text(*property));
+                continue;
+            }
+            if !path.is_empty() {
+                value = format!("(dot {value} {})", self.string(&path));
+                path.clear();
+            }
+            value = match link {
+                Link::Call(arguments, optional, types) => {
+                    if let Some(types) = types {
+                        value =
+                            format!("(generic {value} {})", self.type_arguments(*types, depth)?);
+                    }
+                    let constructor = if *optional { "optCall" } else { "call" };
+                    format!(
+                        "({constructor} {value} {})",
+                        self.arguments(*arguments, depth)?
+                    )
+                }
+                Link::Index(index, optional) => {
+                    let constructor = if *optional { "optIdx" } else { "idx" };
+                    format!("({constructor} {value} {})", self.expr(*index, depth)?)
+                }
+                Link::NonNull => format!("(nonNull {value})"),
+                Link::Member(..) => value,
+            };
+        }
+        if !path.is_empty() {
+            value = format!("(dot {value} {})", self.string(&path));
+        }
+        Ok(if chained {
+            format!("(chain {value})")
+        } else {
+            value
+        })
     }
 
-    fn fold(&self, mut value: Value, links: &[Link<'_>], depth: usize) -> Result<String, String> {
-        for link in links {
-            value = match link {
-                Link::Member(optional, property, _) => {
-                    let name = self.text(*property);
-                    let accessor = if *optional { "?." } else { "." };
-                    match value {
-                        Value::Word(word) => Value::Word(format!("{word}{accessor}{name}")),
-                        Value::Dot(base, path) => {
-                            Value::Dot(base, format!("{path}{accessor}{name}"))
-                        }
-                        Value::Node(node) => Value::Dot(
-                            node,
-                            if *optional {
-                                format!("?.{name}")
-                            } else {
-                                name.to_owned()
-                            },
-                        ),
-                    }
-                }
-                Link::Optional => match value {
-                    Value::Word(word) => Value::Word(format!("{word}?.")),
-                    Value::Dot(base, path) => Value::Dot(base, format!("{path}?.")),
-                    Value::Node(node) => Value::Dot(node, "?.".to_owned()),
-                },
-                Link::Call(arguments) => Value::Node(format!(
-                    "(call {} {})",
-                    value.render(self),
-                    self.arguments(*arguments, depth)?
-                )),
-                Link::Types(types) => Value::Node(format!(
-                    "(generic {} {})",
-                    value.render(self),
-                    self.type_arguments(*types, depth)?
-                )),
-                Link::Index(index) => Value::Node(format!(
-                    "(idx {} {})",
-                    value.render(self),
-                    self.expr(*index, depth)?
-                )),
-                Link::NonNull => Value::Node(format!("(post {} \"!\")", value.render(self))),
-            };
+    fn key(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
+        match node.kind() {
+            "computed_property_name" => {
+                let inner = named(node)[0];
+                self.expect(node.start_byte() + 1, inner.start_byte(), "")?;
+                self.expect(inner.end_byte(), node.end_byte() - 1, "")?;
+                Ok(format!("(computed {})", self.expr(inner, depth)?))
+            }
+            "string" | "number" => self.bare(node, depth),
+            _ => self.property(node),
         }
-        Ok(value.render(self))
+    }
+
+    fn modifiers(&self, node: Node<'_>, name: Node<'_>) -> Result<Vec<&'s str>, String> {
+        let mut modifiers = Vec::new();
+        let mut at = node.start_byte();
+        for child in children(node) {
+            if child.start_byte() >= name.start_byte() {
+                break;
+            }
+            self.expect(at, child.start_byte(), "")?;
+            let word = self.text(child);
+            if !matches!(word, "async" | "readonly") {
+                return self.refuse(child, &format!("the modifier {word} is not supported"));
+            }
+            modifiers.push(word);
+            self.expect(child.end_byte(), child.end_byte() + 1, " ")?;
+            at = child.end_byte() + 1;
+        }
+        self.expect(at, name.start_byte(), "")?;
+        Ok(modifiers)
+    }
+
+    fn modified(modifiers: &[&str], mut value: String) -> String {
+        for modifier in modifiers.iter().rev() {
+            value = format!("({modifier} {value})");
+        }
+        value
     }
 
     fn member(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
-        let start = node.start_byte();
         match node.kind() {
             "comment" => Ok(self.comment(node)),
             "shorthand_property_identifier" | "shorthand_property_identifier_pattern" => {
-                Ok(self.word(self.text(node)))
+                self.name(node)
             }
-            "spread_element" | "rest_pattern" => {
-                let inner = named(node)[0];
-                self.expect(start + 3, inner.start_byte(), "")?;
-                Ok(format!("(pre \"...\" {})", self.expr(inner, depth)?))
-            }
-            "pair" | "pair_pattern" => {
+            "spread_element" | "rest_pattern" => self.bare(node, depth),
+            "pair" => {
                 let key = field(node, "key").ok_or("a pair without a key")?;
                 let value = field(node, "value").ok_or("a pair without a value")?;
                 let colon = token(node, ":").ok_or("no :")?;
@@ -1625,72 +2345,63 @@ impl<'s> Importer<'s> {
                     self.hang(colon.end_byte(), value, depth)?
                 ))
             }
+            "pair_pattern" => {
+                let key = field(node, "key").ok_or("a pair without a key")?;
+                let value = field(node, "value").ok_or("a pair without a value")?;
+                self.expect(key.end_byte(), value.start_byte(), ": ")?;
+                Ok(format!(
+                    "(prop {} {})",
+                    self.key(key, depth)?,
+                    self.element(value, depth)?
+                ))
+            }
             "object_assignment_pattern" => {
                 let left = field(node, "left").ok_or("no left")?;
                 let right = field(node, "right").ok_or("no right")?;
                 self.expect(left.end_byte(), right.start_byte(), " = ")?;
                 Ok(format!(
                     "(infix [{} \"=\" {}])",
-                    self.expr(left, depth)?,
-                    self.expr(right, depth)?
+                    self.name(left)?,
+                    self.child(Slot::Binary("=", Side::Right), right, depth)?
                 ))
             }
             "method_definition" | "method_signature" => {
                 let name = field(node, "name").ok_or("a method without a name")?;
-                let mut modifiers = Vec::new();
-                let mut at = start;
-                for child in children(node) {
-                    if child.start_byte() >= name.start_byte() {
-                        break;
-                    }
-                    self.expect(at, child.start_byte(), "")?;
-                    modifiers.push(self.text(child));
-                    self.expect(child.end_byte(), child.end_byte() + 1, " ")?;
-                    at = child.end_byte() + 1;
-                }
-                self.expect(at, name.start_byte(), "")?;
+                let modifiers = self.modifiers(node, name)?;
                 let parameters = field(node, "parameters").ok_or("a method without parameters")?;
                 let mut name_end = name.end_byte();
                 let mut key = self.key(name, depth)?;
                 if token(node, "?").is_some() {
                     self.expect(name_end, name_end + 1, "?")?;
-                    key = self.string(&format!("{}?", self.text(name)));
+                    key = format!("(opt {key})");
                     name_end += 1;
                 }
                 self.expect(name_end, parameters.start_byte(), "")?;
-                let (signature, end) =
-                    self.signature(parameters, field(node, "return_type"), depth)?;
-                let mut value = match field(node, "body") {
-                    Some(body) => {
-                        self.expect(end, body.start_byte(), " ")?;
-                        format!("(method {key} {signature} {})", self.block(body, depth)?)
-                    }
-                    None => format!("(method {key} {signature} null)"),
-                };
-                for modifier in modifiers.iter().rev() {
-                    value = format!("(pre {} {value})", self.string(modifier));
-                }
-                Ok(value)
+                let names = self.function_names(node)?;
+                let value = self.scope(&names, || {
+                    let (signature, end) =
+                        self.signature(parameters, field(node, "return_type"), depth)?;
+                    Ok(match field(node, "body") {
+                        Some(body) => {
+                            self.expect(end, body.start_byte(), " ")?;
+                            format!(
+                                "(method {key} {signature} {})",
+                                self.block_list(body, depth)?
+                            )
+                        }
+                        None => format!("(method {key} {signature} null)"),
+                    })
+                })?;
+                Ok(Self::modified(&modifiers, value))
             }
             "property_signature" | "public_field_definition" => {
                 let name = field(node, "name").ok_or("a property without a name")?;
-                let mut modifiers = Vec::new();
-                let mut at = start;
-                for child in children(node) {
-                    if child.start_byte() >= name.start_byte() {
-                        break;
-                    }
-                    self.expect(at, child.start_byte(), "")?;
-                    modifiers.push(self.text(child));
-                    self.expect(child.end_byte(), child.end_byte() + 1, " ")?;
-                    at = child.end_byte() + 1;
-                }
-                self.expect(at, name.start_byte(), "")?;
+                let modifiers = self.modifiers(node, name)?;
                 let mut value = self.key(name, depth)?;
                 let mut end = name.end_byte();
                 if token(node, "?").is_some() {
                     self.expect(end, end + 1, "?")?;
-                    value = self.string(&format!("{}?", self.text(name)));
+                    value = format!("(opt {value})");
                     end += 1;
                 }
                 if let Some(annotation) = field(node, "type") {
@@ -1702,7 +2413,7 @@ impl<'s> Importer<'s> {
                     let equals = token(node, "=").ok_or("no =")?;
                     self.expect(end, equals.start_byte(), " ")?;
                     value = format!(
-                        "(infix [{value} \"=\" {}])",
+                        "(field {value} {})",
                         self.hang(equals.end_byte(), initial, depth)?
                     );
                     end = initial.end_byte();
@@ -1710,23 +2421,10 @@ impl<'s> Importer<'s> {
                 if end != node.end_byte() {
                     return Err(format!("{}: text after a property", self.at(end)));
                 }
-                for modifier in modifiers.iter().rev() {
-                    value = format!("(pre {} {value})", self.string(modifier));
-                }
-                Ok(value)
+                Ok(Self::modified(&modifiers, value))
             }
             _ => self.expr(node, depth),
         }
-    }
-
-    fn key(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
-        if node.kind() == "computed_property_name" {
-            let inner = named(node)[0];
-            self.expect(node.start_byte() + 1, inner.start_byte(), "")?;
-            self.expect(inner.end_byte(), node.end_byte() - 1, "")?;
-            return Ok(format!("[{}]", self.expr(inner, depth)?));
-        }
-        self.expr(node, depth)
     }
 
     fn members(
@@ -1752,14 +2450,14 @@ impl<'s> Importer<'s> {
         for (index, node) in items.iter().enumerate() {
             if index > 0 {
                 let gap = self.gap(end, node.start_byte());
-                let lines = gap.bytes().take_while(|&b| b == b'\n').count();
-                if lines == 0 || gap[lines..] != self.unit.repeat(depth + 1) {
+                let count = gap.bytes().take_while(|&b| b == b'\n').count();
+                if count == 0 || gap[count..] != self.unit.repeat(depth + 1) {
                     return Err(format!(
                         "{}: members separated by {gap:?}",
                         self.at(node.start_byte())
                     ));
                 }
-                for _ in 1..lines {
+                for _ in 1..count {
                     out.push("blank".to_owned());
                 }
             }
@@ -1775,11 +2473,35 @@ impl<'s> Importer<'s> {
             out.push(self.member(*node, depth + 1)?);
         }
         self.expect(end, close, &self.indent(depth))?;
-        Ok(format!(
-            "[\n{}]",
-            out.iter()
-                .map(|item| format!("{item}\n"))
-                .collect::<String>()
+        Ok(lines(&out))
+    }
+
+    fn heritage(
+        &self,
+        name: Node<'_>,
+        clause: Option<Node<'_>>,
+        keyword: &str,
+    ) -> Result<(String, usize), String> {
+        let head = self.name(name)?;
+        let Some(clause) = clause else {
+            return Ok((head, name.end_byte()));
+        };
+        self.expect(name.end_byte(), clause.start_byte(), " ")?;
+        let mut clauses = vec![clause];
+        if clause.kind() == "class_heritage" {
+            clauses = named(clause);
+        }
+        let [inner] = clauses.as_slice() else {
+            return self.refuse(clause, "several heritage clauses");
+        };
+        let types = named(*inner);
+        if !inner.kind().starts_with("extends") || types.len() != 1 {
+            return self.refuse(clause, &format!("only a single {keyword} is supported"));
+        }
+        self.expect(inner.start_byte() + 7, types[0].start_byte(), " ")?;
+        Ok((
+            format!("(extends {head} {})", self.expr(types[0], 0)?),
+            clause.end_byte(),
         ))
     }
 
@@ -1787,84 +2509,76 @@ impl<'s> Importer<'s> {
         let start = node.start_byte();
         let name = field(node, "name").ok_or("a class without a name")?;
         let body = field(node, "body").ok_or("a class without a body")?;
-        self.expect(start + 5, name.start_byte(), " ")?;
-        let mut head = self.expr(name, depth)?;
-        let mut end = name.end_byte();
-        if let Some(heritage) = named(node)
-            .into_iter()
-            .find(|child| child.kind() == "class_heritage")
-        {
-            self.expect(end, heritage.start_byte(), " ")?;
-            let clauses = named(heritage);
-            let [clause] = clauses.as_slice() else {
-                return Err(format!(
-                    "{}: a class with several heritage clauses",
-                    self.at(start)
-                ));
-            };
-            let types = named(*clause);
-            if clause.kind() != "extends_clause" || types.len() != 1 {
-                return Err(format!(
-                    "{}: only a single extends is supported",
-                    self.at(start)
-                ));
-            }
-            self.expect(clause.start_byte() + 7, types[0].start_byte(), " ")?;
-            head = format!(
-                "(infix [{head} \"extends\" {}])",
-                self.expr(types[0], depth)?
-            );
-            end = heritage.end_byte();
+        if field(node, "type_parameters").is_some() {
+            return self.refuse(node, "a generic class");
         }
+        self.expect(start + 5, name.start_byte(), " ")?;
+        let heritage = named(node)
+            .into_iter()
+            .find(|child| child.kind() == "class_heritage");
+        let (head, end) = self.heritage(name, heritage, "extends")?;
         self.expect(end, body.start_byte(), " ")?;
         Ok(format!(
             "(class {head} {})",
             self.members(body, depth, Separator::Semicolon)?
         ))
     }
-}
 
-fn optional(node: Node<'_>) -> bool {
-    children(node)
-        .iter()
-        .any(|child| child.kind() == "optional_chain" || child.kind() == "?.")
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Separator {
-    Comma,
-    Semicolon,
-}
-
-impl Separator {
-    fn mark(self) -> &'static str {
-        match self {
-            Separator::Comma => ",",
-            Separator::Semicolon => ";",
+    fn interface(&self, node: Node<'_>, depth: usize) -> Result<String, String> {
+        let start = node.start_byte();
+        let name = field(node, "name").ok_or("an interface without a name")?;
+        let body = field(node, "body").ok_or("an interface without a body")?;
+        if field(node, "type_parameters").is_some() {
+            return self.refuse(node, "a generic interface");
         }
+        self.expect(start + 9, name.start_byte(), " ")?;
+        let extends = named(node)
+            .into_iter()
+            .find(|child| child.kind() == "extends_type_clause");
+        let (head, end) = self.heritage(name, extends, "extends")?;
+        self.expect(end, body.start_byte(), " ")?;
+        Ok(format!(
+            "(interface {head} {})",
+            self.members(body, depth, Separator::Semicolon)?
+        ))
     }
 }
 
-enum Value {
-    Word(String),
-    Node(String),
-    Dot(String, String),
+fn member_link(link: &Link<'_>) -> bool {
+    matches!(link, Link::Member(..) | Link::Index(..))
 }
 
-impl Value {
-    fn from(importer: &Importer<'_>, node: Node<'_>, depth: usize) -> Result<Value, String> {
-        if WORDS.contains(&node.kind()) {
-            Ok(Value::Word(importer.text(node).to_owned()))
-        } else {
-            Ok(Value::Node(importer.expr(node, depth)?))
-        }
-    }
+fn literal_index(link: &Link<'_>) -> bool {
+    matches!(link, Link::Index(index, _) if matches!(index.kind(), "number" | "string"))
+}
 
-    fn render(self, importer: &Importer<'_>) -> String {
-        match self {
-            Value::Word(word) => importer.word(&word),
-            Value::Node(node) => node,
-            Value::Dot(base, path) => format!("(dot {base} {})", importer.string(&path)),
+fn groups(links: &[Link<'_>]) -> Vec<usize> {
+    let mut at = 0;
+    while at < links.len()
+        && (matches!(links[at], Link::Call(..) | Link::NonNull) || literal_index(&links[at]))
+    {
+        at += 1;
+    }
+    if !matches!(links.first(), Some(Link::Call(..))) {
+        while at + 1 < links.len() && member_link(&links[at]) && member_link(&links[at + 1]) {
+            at += 1;
         }
     }
+    let mut starts = Vec::new();
+    let mut called = false;
+    for (index, link) in links.iter().enumerate().skip(at) {
+        if index == at {
+            starts.push(index);
+        } else if called
+            && member_link(link)
+            && (matches!(link, Link::Member(..)) || literal_index(link))
+        {
+            starts.push(index);
+            called = false;
+        }
+        if matches!(link, Link::Call(..)) {
+            called = true;
+        }
+    }
+    starts
 }

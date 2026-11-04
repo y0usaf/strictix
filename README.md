@@ -104,7 +104,7 @@ call replaced by
 and the list's interpolations come back as interpolations inside the tree's
 strings. Layout the printer derives (Lisp indentation; shell, Luau and Python
 nesting; Python's spacing; a hunk's line counts and new start; a Markdown
-paragraph filled to 78 columns, kept as `wrap`; TypeScript blocks) is left out; layout it cannot
+paragraph filled to 78 columns, kept as `wrap`; TypeScript blocks, parentheses and member chains' rows) is left out; layout it cannot
 derive is kept as `rows`, `inline`, `at`, `below` (TypeScript's break after
 `=`, `=>`, `:` or `(`) and `blank` nodes (and, for Python, `aligned` and
 `hang` brackets), and anything else it would not reproduce byte for byte
@@ -125,6 +125,21 @@ layout, blank lines, redundant parentheses and literal spelling are dropped,
 and a global that is not one `const` name, a name declared twice, a name the
 generator or Nix already uses, a name nothing declares, a suffixed float or a
 bare nested block is an error.
+TypeScript keeps its layout and reads names like GLSL: `import ts` prints the
+whole data file, `{call, dot, string, ...}: ({toolRenderers, failed, ...}: [
+... ])`. Every identifier and type name is a Nix variable: the file, a block,
+a function (its parameters and its body's declarations), a `for` (its binding
+and body), a `catch` (its parameter and body) and a `switch` that declare names
+are lambdas of them (`({cell}: arrow cell ...)`), a global the generator
+lists (`JSON`, `Promise`, `string`, `undefined`, `this`, ...) is a formal, a
+name Nix or the generator already uses is spelled with a trailing `'`
+(`call'`, `null'`), and a name nothing declares, a name with `$` and an import
+renamed with `as` are errors. Member access is `dot x "a?.b"`, operators an
+infix list parsed by precedence and nested only where precedence needs
+parentheses, unary operators constructors (`not`, `await`, `typeof`,
+`spread`, ...), and parentheses that differ from those the printer writes
+(prettier's: mixed `&&` and `||`, `??` in a ternary branch, `as` in an
+operand, an inline ternary or object arrow body, ...) are an error.
 tree-sitter-glsl reads `(float(x) + y)` as a broken cast, so the importer
 parses a constructor call of a builtin scalar type (`float(`, `int(`, `uint(`,
 `bool(`, `double(`) as a call of an identifier, keeping its source bytes.
@@ -182,6 +197,7 @@ often as the code uses it), including such a binding of a merged file; the
 schema rules do not read that file as a module. `duplicate-function-argument` skips that
 syntax-tree file too, where a constructor takes the same name twice as often
 as the code does (Luau's `name = name` is `field "name" "name"`).
+`shadowed-formal` skips it as well: its nested block lambdas bind the names each block of the code declares, so an inner block's local shadows an outer one exactly where the code's own scoping does.
 
 `singleton-optionals` simplifies `lib.optionals condition [value]` to
 `lib.optional condition value`. Qualified calls have an automatic fix that

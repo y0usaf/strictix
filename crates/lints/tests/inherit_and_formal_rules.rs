@@ -105,3 +105,17 @@ fn shadowed_formal_has_its_own_diagnostic() {
         ["[shadowed-formal] warning 16..17 formal parameter 'a' shadows an outer binding"]
     );
 }
+
+#[test]
+fn shadowed_formal_exempts_a_data_file_of_a_syntax_tree() {
+    let at = |path: &str| {
+        let source = "{ local, ... }: ({ ok }: [ (local ok [ ]) (({ ok }: [ (local ok [ ]) ]) ) ])";
+        let tree = parse(source);
+        let model = SemanticModel::new(source, &tree).with_path(Some(std::path::Path::new(path)));
+        let mut diags = Vec::new();
+        ShadowedFormal.check_file(&model, &LintConfig::default(), &mut diags);
+        diags.len()
+    };
+    assert_eq!(at("modules/catch-lua.data.nix"), 0);
+    assert_eq!(at("modules/catch-lua.nix"), 1);
+}

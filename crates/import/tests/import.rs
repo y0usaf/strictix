@@ -349,33 +349,47 @@ fn javascript_data_file_leaves_null_to_nix() {
 }
 
 #[test]
-fn ts_statements_expressions_and_layout() {
+fn ts_names_are_bound_by_the_block_that_declares_them() {
     let source = "import { a, type B } from \"x\";\n\nexport function f(p: B): number {\n\tif (!p) return 0;\n\tconst n = p.items\n\t\t.map((i) => i * 2)\n\t\t.filter(Boolean);\n\treturn n.length > 0 ? n[0] : -1;\n}\n";
-    assert_eq!(
-        expression("ts", source, &[]).unwrap(),
-        "[\n  (import' [\"a\" (pre \"type\" \"B\")] (str \"x\"))\n  blank\n  (pre \"export\" (fn \"f\" (typed [(typed \"p\" \"B\")] \"number\") [\n(if' (pre \"!\" \"p\") (return 0))\n(const \"n\" (chain [\n\"p.items\"\n(call \"map\" [(arrow [\"i\"] (infix [\"i\" \"*\" 2]))])\n(call \"filter\" [\"Boolean\"])\n]))\n(return (ternary (infix [\"n.length\" \">\" 0]) (idx \"n\" 0) \"-1\"))\n]))\n]"
-    );
+    assert_eq!(expression("ts", source, &[]).unwrap(), "{\n  Boolean,\n  arrow,\n  blank,\n  call,\n  chain,\n  const,\n  dot,\n  export,\n  fn,\n  idx,\n  if',\n  import',\n  infix,\n  not,\n  number,\n  return,\n  str,\n  ternary,\n  typeOnly,\n  typed,\n  ...\n}: ({a, B, f}: [\n(import' [a (typeOnly B)] (str \"x\"))\nblank\n(export ({p, n}: (fn f (typed [(typed p B)] number) [\n(if' (not p) (return 0))\n(const n (chain (call (dot (call (dot p \"items.map\") [({i}: (arrow [i] (infix [i \"*\" 2])))]) \"filter\") [Boolean])))\n(return (ternary (infix [(dot n \"length\") \">\" 0]) (idx n 0) (-1)))\n])))\n])");
+}
+
+#[test]
+fn ts_operators_are_infix_lists_and_parentheses_are_derived() {
+    let source = "const a = 1;\nconst b = 2;\nconst x = (a || b) && a;\nconst y = (a && b) || a;\nconst z = a - (b - a) * 2;\nconst g = async () => (await f()).y;\nconst h = (p) => ({ p });\nfunction f() {}\n";
+    assert_eq!(expression("ts", source, &[]).unwrap(), "{\n  arrow,\n  async,\n  await,\n  call,\n  const,\n  dot,\n  fn,\n  infix,\n  obj,\n  spaces,\n  ...\n}: (spaces 2 ({a, b, x, y, z, g, h, f}: [\n(const a 1)\n(const b 2)\n(const x (infix [[a \"||\" b] \"&&\" a]))\n(const y (infix [a \"&&\" b \"||\" a]))\n(const z (infix [a \"-\" [b \"-\" a] \"*\" 2]))\n(const g (async (arrow [] (dot (await (call f [])) \"y\"))))\n(const h ({p}: (arrow [p] (obj [p]))))\n(fn f [] [])\n]))");
 }
 
 #[test]
 fn ts_broken_lists_operators_and_indentation_are_kept() {
-    let source = "const x =\n\ta &&\n\tb;\nf(\n\t1,\n\t2,\n);\n";
+    let source = "const a = 1;\nconst x =\n\ta &&\n\ta;\nf(\n\t1,\n\t2,\n);\nfunction f(n, m) {}\n";
+    assert_eq!(expression("ts", source, &[]).unwrap(), "{\n  below,\n  call,\n  const,\n  fn,\n  infix,\n  rows,\n  ...\n}: ({a, x, f}: [\n(const a 1)\n(const x (below (infix (rows [\na\n\"&&\"\na\n]))))\n(call f (rows [\n1\n2\n]))\n({n, m}: (fn f [n m] []))\n])");
     assert_eq!(
-        expression("ts", source, &[]).unwrap(),
-        "[\n  (const \"x\" (below (infix (rows [\n\"a\"\n\"&&\"\n\"b\"\n]))))\n  (call \"f\" (rows [\n1\n2\n]))\n]"
-    );
-    assert_eq!(
-        expression("ts", "if (a) {\n  b();\n}\n", &[]).unwrap(),
-        "(spaces 2 [\n  (if' \"a\" [\n(call \"b\" [])\n])\n])"
+        data_file("ts", "if (globalThis) {\n  const call = 1;\n}\n", &[]).unwrap(),
+        "{\n  const,\n  globalThis,\n  if',\n  spaces,\n  ...\n}: (spaces 2 [\n(if' globalThis ({call'}: [\n(const call' 1)\n]))\n])\n"
     );
 }
 
 #[test]
-fn ts_layout_the_printer_cannot_reproduce_is_an_error() {
-    assert!(expression("ts", "f(a,  b);\n", &[])
+fn ts_names_nothing_declares_and_layout_the_printer_cannot_reproduce_are_errors() {
+    assert!(expression("ts", "f(1);\n", &[])
+        .unwrap_err()
+        .contains("`f` is declared nowhere"));
+    assert!(expression("ts", "const $x = 1;\n", &[])
+        .unwrap_err()
+        .contains("cannot be spelled"));
+    assert!(expression("ts", "const a = 1;\nconst x = (a);\n", &[])
+        .unwrap_err()
+        .contains("parentheses the printer would not write"));
+    assert!(
+        expression("ts", "const a = 1;\nconst x = a && a || a;\n", &[])
+            .unwrap_err()
+            .contains("parentheses")
+    );
+    assert!(expression("ts", "const a = 1;\na(a,  a);\n", &[])
         .unwrap_err()
         .contains("expected"));
-    assert!(expression("ts", "a();  // note\n", &[]).is_err());
-    assert!(expression("ts", "const x = a &&\n\tb;\n", &[]).is_err());
-    assert!(expression("ts", "f(a,\n\tb);\n", &[]).is_err());
+    assert!(expression("ts", "const a = 1;\na();  // note\n", &[]).is_err());
+    assert!(expression("ts", "const a = 1;\nconst x = a &&\n\ta;\n", &[]).is_err());
+    assert!(expression("ts", "const a = 1;\na(a,\n\ta);\n", &[]).is_err());
 }

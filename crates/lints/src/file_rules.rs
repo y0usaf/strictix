@@ -373,13 +373,19 @@ impl Rule for ShadowedFormal {
         "Shadowed formal parameter"
     }
     fn description(&self) -> &'static str {
-        "Flags a formal parameter whose name shadows an outer binding."
+        "Flags a formal parameter whose name shadows an outer binding. A `*.data.nix` file that is a function returning a list, or a function of `...` constructors returning an attribute set, is exempt: it is a syntax tree whose nested block lambdas bind the names each block of the generated code declares, so an inner block's local shadows an outer one exactly where the code's own scoping does."
     }
     fn severity(&self) -> Severity {
         Severity::Warning
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let data = model
+            .path()
+            .is_some_and(|path| path.to_string_lossy().ends_with(".data.nix"));
+        if data && crate::suggested_rules::syntax_tree(model.root()) {
+            return;
+        }
         for binding in model.bindings() {
             if binding.kind != BindingKind::LambdaParam
                 || !inside_formals(model.root(), binding.name.range())
