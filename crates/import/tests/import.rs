@@ -261,44 +261,83 @@ fn glsl_what_a_keyed_shader_cannot_express_is_an_error() {
 }
 
 #[test]
-fn lua_calls_are_nix_lists_and_blocks_keep_their_layout() {
-    let source = "local t = { a = 1, \"x\", -1 }\nif not t then return end\n\nfor i = 1, #t do f:write(t[i]); break end\n";
+fn lua_locals_parameters_and_loop_variables_are_nix_bindings() {
+    let source = "local t = { a = 1, \"x\", -1, 0.5 }\nlocal function f(self, ...)\n  local n = select(\"#\", ...)\n  for i = 1, #t do t[i] = nil; break end\n  for _, v in ipairs(t) do print(v) end\n  return n\nend\nif not t then return end\n";
     assert_eq!(
         expression("lua", source, &[]).unwrap(),
-        "[\n  (local \"t\" [(table [(field \"a\" 1) (str \"x\") (-1)])])\n  (if' (not \"t\") (inline [(return [])]))\n  blank\n  (forNum \"i\" [1 (len \"t\")] (inline [[\"f:write\" (index \"t\" \"i\")] \";\" \"break\"]))\n]"
+        "{\n  assign,\n  break,\n  field,\n  forIn,\n  forNum,\n  if',\n  index,\n  inline,\n  ipairs,\n  len,\n  local,\n  localFunction,\n  nil,\n  not,\n  print,\n  return,\n  select,\n  semicolon,\n  str,\n  table,\n  vararg,\n  ...\n}: ({t, f}: [\n  (local t [(table [(field \"a\" 1) (str \"x\") (-1) 0.5])])\n  (localFunction f ({self, n}: {params = [self vararg]; body = [\n(local n [[select (str \"#\") vararg]])\n(forNum ({i}: {name = i; range = [1 (len t)]; body = inline [(assign (index t i) [nil]) semicolon break];}))\n(forIn ({_, v}: {names = [_ v]; values = [[ipairs t]]; body = inline [[print v]];}))\n(return [n])\n];}))\n  (if' (not t) (inline [(return [])]))\n])"
+    );
+}
+
+#[test]
+fn lua_infix_lists_follow_precedence_and_nest_where_the_source_parenthesizes() {
+    let source = "local a, b = 1, 2\nlocal x = (a or b) and a .. b .. (a + b) * 2 or not (a == b)\nreturn (print(x)), x:gsub(\"y\", \"z\"), -a ^ 2\n";
+    assert_eq!(
+        expression("lua", source, &[]).unwrap(),
+        "{\n  local,\n  method,\n  neg,\n  not,\n  paren,\n  print,\n  return,\n  str,\n  ...\n}: ({a, b, x}: [\n  (local [a b] [1 2])\n  (local x [[[a \"or\" b] \"and\" a \"..\" b \"..\" [a \"+\" b] \"*\" 2 \"or\" (not [a \"==\" b])]])\n  (return [(paren [print x]) [(method x \"gsub\") (str \"y\") (str \"z\")] (neg [a \"^\" 2])])\n])"
     );
 }
 
 #[test]
 fn lua_broken_conditions_and_tables_are_rows() {
-    let source = "if a\n  and b == nil then\n  x = {\n    { 1 }, { 2 },\n    p{ q = true },\n  }\nelseif c then y() else z() end\n";
+    let source = "local x\nif x\n  and x == nil then\n  x = {\n    { 1 }, { 2 },\n    print{ q = true },\n  }\nelseif x then print() else error() end\n";
     assert_eq!(
         expression("lua", source, &[]).unwrap(),
-        "[\n  (ifElse (op (rows [[\"a\"] [\"and\" (op [\"b\" \"==\" null])]])) [\n(assign \"x\" [(table (rows [\n[(table [1]) (table [2])]\n(apply \"p\" (table [(field \"q\" true)]))\n]))])\n] (ifElse \"c\" (inline [[\"y\"]]) (inline [[\"z\"]])))\n]"
+        "{\n  apply,\n  assign,\n  error,\n  field,\n  ifElse,\n  inline,\n  local,\n  nil,\n  print,\n  rows,\n  table,\n  ...\n}: ({x}: [\n  (local x [])\n  (ifElse (rows [[x] [\"and\" x \"==\" nil]]) [\n(assign x [(table (rows [\n[(table [1]) (table [2])]\n(apply print (table [(field \"q\" true)]))\n]))])\n] (ifElse x (inline [[print]]) (inline [[error]])))\n])"
     );
 }
 
 #[test]
-fn lua_layout_the_printer_cannot_reproduce_is_an_error() {
-    assert!(expression("lua", "f(a,b)\n", &[])
+fn lua_names_that_collide_with_nix_or_the_generator_take_a_prime() {
+    assert_eq!(
+        data_file("lua", "local print, let = print, 1\nprint(let)\n", &[]).unwrap(),
+        "{\n  local,\n  print,\n  ...\n}: ({print', let'}: [\n  (local [print' let'] [print 1])\n  [print' let']\n])\n"
+    );
+    assert!(expression("lua", "local table = 1\n", &[])
+        .unwrap_err()
+        .contains("already ends in '"));
+}
+
+#[test]
+fn lua_names_nothing_binds_are_an_error() {
+    assert!(expression("lua", "print(undeclared)\n", &[])
+        .unwrap_err()
+        .contains("nothing declares"));
+    assert!(expression("lua", "x = true\n", &[])
+        .unwrap_err()
+        .contains("nothing declares"));
+    assert!(expression("lua", "function f() end\n", &[])
+        .unwrap_err()
+        .contains("global function"));
+    assert!(expression(
+        "lua",
+        "local x = 1\ndo\n  print(x)\n  local x = 2\nend\n",
+        &[]
+    )
+    .unwrap_err()
+    .contains("capture"));
+}
+
+#[test]
+fn lua_what_the_printer_cannot_reproduce_is_an_error() {
+    assert!(expression("lua", "print(1,2)\n", &[])
         .unwrap_err()
         .contains("expected"));
-    assert!(expression("lua", "f() g()\n", &[])
+    assert!(expression("lua", "print() print()\n", &[])
         .unwrap_err()
         .contains("share a line"));
-    assert!(expression("lua", "x = [[long]]\n", &[])
+    assert!(expression("lua", "print([[long]])\n", &[])
         .unwrap_err()
         .contains("long bracket"));
+    assert!(expression("lua", "print((1 + 2))\n", &[])
+        .unwrap_err()
+        .contains("would not write"));
+    assert!(expression("lua", "print(0x10)\n", &[])
+        .unwrap_err()
+        .contains("does not spell"));
+    assert!(expression("lua", "repeat print() until true\n", &[]).is_err());
     assert!(expression("lua", "local t = { a = 1 }\n", &[]).is_ok());
     assert!(expression("lua", "local t = {\n  a = 1\n}\n", &[]).is_err());
-}
-
-#[test]
-fn lua_data_file_formals_leave_out_nix_literals() {
-    assert_eq!(
-        data_file("lua", "x = true\n", &[]).unwrap(),
-        "{\n  assign,\n  ...\n}: [\n  (assign \"x\" [true])\n]\n"
-    );
 }
 
 #[test]

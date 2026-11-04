@@ -163,6 +163,26 @@ errors.
 tree-sitter-glsl reads `(float(x) + y)` as a broken cast, so the importer
 parses a constructor call of a builtin scalar type (`float(`, `int(`, `uint(`,
 `bool(`, `double(`) as a call of an identifier, keeping its source bytes.
+Lua keeps its layout and binds its names: `import lua` prints the whole data
+file, a function of the constructors and globals of `generators.lua` it uses
+(`{local, pcall, pg, table', ...}: ({INTERVAL, log, ...}: [ ... ])`). A block
+that declares names is a lambda whose formals are its locals, local functions,
+parameters or loop variables; a function with parameters is `({self, r}:
+{params = [self vararg]; body = ...;})`, a loop `{names; values; body}` or
+`{name; range; body}`, the order Lua needs being a list of bound variables. A
+global is one of the generator's fixed list (Lua's standard globals, LuaJIT's
+`bit` and `jit`, Aniimo's `CS`, `pg` and `Vector3`, Hyprland's `hl`), mirrored
+in the importer; a name that is a Nix keyword, a constructor or a global is
+primed (`table'`, `assert'`, a local `field'`). A call is a list `[f x]`, a
+field path `dot pg "me.space"`, a method call `[(method x "m") y]`, an
+operator run an infix list `[a "and" b "==" c]` nested exactly where the source
+writes parentheses; `paren` is kept only around a call or `...`, whose first
+value it keeps, and the parentheses before `.`, `:`, `[` or `(` that a
+non-prefix expression needs are left to the printer. A name nothing declares,
+a local named like a primed global, a name used before a local of its own
+block declares it (the Nix binding would capture it), a global function
+declaration, any other parentheses, a number Nix does not spell as the source
+does (`0x10`, `1e3`), a long bracket string, `repeat` and `goto` are errors.
 Python's `@name@` substitution placeholders are names to the importer.
 
 `strictix check` and `strictix fix` lint a merged file binding by binding, as
