@@ -308,6 +308,37 @@ fn shallow_merge_requires_opt_in_and_disable_wins() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[test]
+fn scattered_documentation_reports_markdown_beside_the_document() {
+    let dir = temp_tree(
+        "docs",
+        &[
+            (
+                "strictix.toml",
+                "[lint]\nenabled = [\"scattered-documentation\"]\n\n[lint.\"scattered-documentation\"]\nfile = \"modules/README.md\"\n",
+            ),
+            ("modules/README.md", "# Layout\n"),
+            ("modules/a/README.md", "# A\n"),
+            ("modules/a/default.nix", "{ }\n"),
+            ("modules/a/notes.txt", "text\n"),
+        ],
+    );
+    let out = run_in(&dir, &["check"]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(
+        text.contains("./modules/a/README.md:1:1: warning[scattered-documentation]: documentation outside modules/README.md"),
+        "{text}"
+    );
+    assert!(
+        text.contains("1 file(s) linted, 1 diagnostic(s) found"),
+        "{text}"
+    );
+    let off = run_in(&dir, &["check", "--disable", "scattered-documentation"]);
+    assert_eq!(off.status.code(), Some(0), "{}", stdout(&off));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn temp_tree(name: &str, files: &[(&str, &str)]) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "strictix-{name}-{}-{}",

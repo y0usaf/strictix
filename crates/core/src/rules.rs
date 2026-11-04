@@ -100,6 +100,30 @@ pub trait Rule: Send + Sync {
     ) {
         self.check_file(model, config, diags);
     }
+
+    fn check_path(
+        &self,
+        _path: &std::path::Path,
+        _config: &LintConfig,
+        _diags: &mut Vec<Diagnostic>,
+    ) {
+    }
+}
+
+pub fn run_path_rules(
+    rules: &[Box<dyn Rule>],
+    path: &std::path::Path,
+    config: &LintConfig,
+) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    for rule in rules {
+        if config.is_enabled(rule.code())
+            && (rule.default_enabled() || config.enabled.iter().any(|code| code == rule.code()))
+        {
+            rule.check_path(path, config, &mut diags);
+        }
+    }
+    diags
 }
 
 /// Run every enabled rule over one file.

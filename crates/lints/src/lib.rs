@@ -36,6 +36,7 @@ pub mod non_boolean_condition;
 pub mod non_callable_application;
 pub mod path_rules;
 pub mod reference_rules;
+pub mod scattered_documentation;
 pub mod schema;
 pub mod shallow_merge_overwrite;
 pub mod simplification_rules;
@@ -92,6 +93,7 @@ use non_boolean_condition::NonBooleanCondition;
 use non_callable_application::NonCallableApplication;
 use path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
 use reference_rules::{UndefinedVariable, UnknownBuiltin};
+use scattered_documentation::ScatteredDocumentation;
 use schema::{OptionTypeMismatch, UnknownOption};
 use shallow_merge_overwrite::ShallowMergeOverwrite;
 use simplification_rules::{
@@ -229,5 +231,6 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         HandMaintainedDataFile,
         CodecCandidate,
         HandWrittenLuaData,
+        ScatteredDocumentation,
     }
 }

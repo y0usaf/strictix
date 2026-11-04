@@ -259,21 +259,13 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
     } else {
         args.paths.clone()
     };
-    let (files, filter) = match walk::collect_files(&paths, ignore_file.as_deref()) {
+    let (files, others, filter) = match walk::collect_files(&paths, ignore_file.as_deref()) {
         Ok(found) => found,
         Err(message) => {
             eprintln!("error: {message}");
             return ExitCode::FAILURE;
         }
     };
-
-    if files.is_empty() {
-        match args.format {
-            Format::Human => println!("{}", render::summary_line(0, 0, render::color_enabled()),),
-            Format::Json => print_json(&[]),
-        }
-        return ExitCode::SUCCESS;
-    }
 
     let color = render::color_enabled();
     let rules = strictix_lints::all_rules();
@@ -345,6 +337,22 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
             .map(|handle| handle.join().expect("worker thread panicked"))
             .collect()
     });
+    let path_results: Vec<FileResult> = others
+        .iter()
+        .filter_map(|path| {
+            let diagnostics = strictix_core::rules::run_path_rules(&rules, path, &config);
+            (!diagnostics.is_empty()).then(|| FileResult {
+                path: path.clone(),
+                source: std::fs::read_to_string(path).unwrap_or_default(),
+                diagnostics,
+                read_error: None,
+                fixes_applied: 0,
+                fixed: None,
+                write_error: None,
+                apply_error: None,
+            })
+        })
+        .collect();
 
     let mut any_error = false;
     let mut linted = 0usize;
@@ -359,6 +367,10 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
             total_diags += result.diagnostics.len();
             linted_results.push(result);
         }
+    }
+    for result in &path_results {
+        total_diags += result.diagnostics.len();
+        linted_results.push(result);
     }
 
     match args.format {

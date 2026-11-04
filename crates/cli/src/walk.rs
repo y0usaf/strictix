@@ -143,7 +143,8 @@ impl Filter {
     }
 }
 
-/// Collect every `.nix` file under `paths`, sorted.
+/// Collect every `.nix` file under `paths`, sorted, and every other file
+/// the walk reaches, sorted, for the rules that read paths.
 ///
 /// Directories are walked recursively. `ignore_file` is the parsed
 /// ignore file when one was found (an explicitly requested file that
@@ -159,7 +160,7 @@ impl Filter {
 pub fn collect_files(
     paths: &[PathBuf],
     ignore_file: Option<&Path>,
-) -> Result<(Vec<PathBuf>, Filter), String> {
+) -> Result<(Vec<PathBuf>, Vec<PathBuf>, Filter), String> {
     let ignore = match ignore_file {
         Some(path) => {
             let text = fs::read_to_string(path)
@@ -169,19 +170,23 @@ pub fn collect_files(
         None => IgnoreSet::empty(),
     };
     let mut out = Vec::new();
+    let mut others = Vec::new();
     for path in paths {
         if !path.exists() {
             return Err(format!("path does not exist: {}", path.display()));
         }
         if path.is_dir() {
-            walk_dir(path, &[], &ignore, &mut out)?;
+            walk_dir(path, &[], &ignore, &mut out, &mut others)?;
         } else if path.extension().is_some_and(|ext| ext == "nix") {
             out.push(path.clone());
+        } else {
+            others.push(path.clone());
         }
     }
     out.sort();
+    others.sort();
     let roots = paths.iter().filter(|path| path.is_dir()).cloned().collect();
-    Ok((out, Filter { ignore, roots }))
+    Ok((out, others, Filter { ignore, roots }))
 }
 
 /// Recursively collect `.nix` files under `dir` (the walk root is
@@ -191,6 +196,7 @@ fn walk_dir(
     rel: &[String],
     ignore: &IgnoreSet,
     out: &mut Vec<PathBuf>,
+    others: &mut Vec<PathBuf>,
 ) -> Result<(), String> {
     let entries =
         fs::read_dir(dir).map_err(|e| format!("cannot read directory {}: {e}", dir.display()))?;
@@ -210,13 +216,15 @@ fn walk_dir(
             if ignore.matches(&rel_owned, true) {
                 continue;
             }
-            walk_dir(&path, &rel_owned, ignore, out)?;
+            walk_dir(&path, &rel_owned, ignore, out, others)?;
         } else if file_type.is_file() {
             if ignore.matches(&rel_owned, false) {
                 continue;
             }
             if path.extension().is_some_and(|ext| ext == "nix") {
                 out.push(path);
+            } else {
+                others.push(path);
             }
         }
     }

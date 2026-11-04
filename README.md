@@ -298,7 +298,7 @@ the binding copies verbatim, and is withheld otherwise.
 
 ## Rules
 
-103 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
+104 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
@@ -307,6 +307,7 @@ the binding copies verbatim, and is withheld otherwise.
 | Hallucination checks | unknown-option, option-type-mismatch, unknown-builtin, unknown-lib-type |
 | Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, duplicate-function-argument, dynamic-import, suspicious-import-argument, suspicious-recursion, unsafe-with-shadowing, shallow-merge-overwrite (opt-in), discouraged-lib-type, masked-generator |
 | Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in), constant-option (opt-in) |
+| Layout | scattered-documentation (opt-in) |
 | Maintainability | cyclomatic-complexity, cognitive-complexity |
 | Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, singleton-attrset (opt-in), singleton-list (opt-in), templated-bindings (opt-in), collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data, codec-candidate, duplicate-definitions (opt-in) |
 
@@ -458,6 +459,14 @@ deletes the others; the parameter is `name`, or `key`, `tag` or `label` when
 that is already bound, and a value that is just the name's string is
 `lib.id`. `min` (default 3) is the group size it reports, and
 `exempt` works as `singleton-attrset`'s does.
+
+`scattered-documentation` is opt-in and reads paths, not Nix: every file the
+walk reaches that is not `.nix` (after the skip list and `.strictixignore`) is
+offered to it, and it reports each Markdown file other than the project's one
+document, `[lint.scattered-documentation] file = "modules/README.md"`
+(default `README.md`, a path relative to the linted root), at the file's first
+line. Fold such a file into the document under a heading naming its
+directory, rewriting its relative links, and delete it.
 
 `discouraged-lib-type` flags `types.attrs`, which merges definitions
 shallowly and does not discharge `mkIf`/`mkDefault`, and fixes it to
