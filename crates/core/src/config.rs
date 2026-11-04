@@ -22,7 +22,7 @@ pub struct LintConfig {
     /// matching prefix wins over [Self::schema].
     pub schemas: Vec<(PathBuf, Option<PathBuf>)>,
     /// Path prefixes of generated data files, exempt from
-    /// `hand-maintained-data-file`.
+    /// `hand-maintained-data-file` and `duplicate-definitions`.
     pub generated: Vec<PathBuf>,
     /// Codecs from `[codecs.<id>]` as `(id, extensions)`; non-empty
     /// enables `codec-candidate`.

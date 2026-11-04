@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
@@ -6,7 +7,7 @@ use strictix_core::project::ProjectContext;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::SemanticModel;
 use strictix_syntax::{
-    parse, AstNode, AttrItem, AttrName, AttrsetExpr, Expr, Root, StringPart, SyntaxKind,
+    parse, AstNode, AttrItem, AttrName, AttrsetExpr, Binding, Expr, Root, StringPart, SyntaxKind,
     SyntaxNode, TextRange,
 };
 
@@ -162,7 +163,58 @@ impl Builder<'_, '_> {
     }
 }
 
-fn merged_modules<'t>(tree: &'t SyntaxNode, source: &str) -> Option<Vec<(String, &'t SyntaxNode)>> {
+fn plain_string(value: Expr<'_>, source: &str) -> Option<String> {
+    let Expr::String(string) = value else {
+        return None;
+    };
+    string
+        .parts()
+        .map(|part| match part {
+            StringPart::Content(token) => Some(token.text(source)),
+            StringPart::Interp(_) => None,
+        })
+        .collect()
+}
+
+fn bindings<'t>(
+    items: impl Iterator<Item = AttrItem<'t>>,
+    source: &str,
+) -> Vec<(String, Binding<'t>)> {
+    items
+        .filter_map(|item| {
+            let AttrItem::Binding(binding) = item else {
+                return None;
+            };
+            let mut elements = binding.attrpath()?.elements();
+            let (Some(AttrName::Ident(name)), None) = (elements.next(), elements.next()) else {
+                return None;
+            };
+            Some((name.text(source).to_owned(), binding))
+        })
+        .collect()
+}
+
+fn manifest_paths(manifest: Option<Expr<'_>>, source: &str) -> HashMap<String, String> {
+    let files = manifest
+        .and_then(attrset_of)
+        .and_then(|set| {
+            bindings(set.items(), source)
+                .into_iter()
+                .find(|(name, _)| name == "files")
+        })
+        .and_then(|(_, files)| files.value())
+        .and_then(attrset_of);
+    files.map_or_else(HashMap::new, |files| {
+        bindings(files.items(), source)
+            .into_iter()
+            .filter_map(|(name, path)| Some((name, plain_string(path.value()?, source)?)))
+            .collect()
+    })
+}
+
+type MergedModule<'t> = (String, &'t SyntaxNode, Option<String>);
+
+fn merged_modules<'t>(tree: &'t SyntaxNode, source: &str) -> Option<Vec<MergedModule<'t>>> {
     let Expr::Let(top) = Root::cast(tree)?.expr()? else {
         return None;
     };
@@ -183,19 +235,22 @@ fn merged_modules<'t>(tree: &'t SyntaxNode, source: &str) -> Option<Vec<(String,
         return None;
     };
     let manifest = manifest.text(source);
+    let (modules, manifests): (Vec<_>, Vec<_>) = bindings(top.bindings()?.items(), source)
+        .into_iter()
+        .partition(|(name, _)| name != manifest);
+    let paths = manifest_paths(
+        manifests
+            .into_iter()
+            .next()
+            .and_then(|(_, binding)| binding.value()),
+        source,
+    );
     Some(
-        top.bindings()?
-            .items()
-            .filter_map(|item| {
-                let AttrItem::Binding(binding) = item else {
-                    return None;
-                };
-                let mut elements = binding.attrpath()?.elements();
-                let (Some(AttrName::Ident(name)), None) = (elements.next(), elements.next()) else {
-                    return None;
-                };
-                let name = name.text(source);
-                (name != manifest).then(|| (name.to_owned(), binding.syntax()))
+        modules
+            .into_iter()
+            .map(|(name, binding)| {
+                let path = paths.get(&name).cloned();
+                (name, binding.syntax(), path)
             })
             .collect(),
     )
@@ -248,7 +303,7 @@ impl Index<'_> {
     }
 }
 
-fn index(project: &ProjectContext) -> Findings {
+fn index(project: &ProjectContext, config: &LintConfig) -> Findings {
     let files = project.sources();
     let mut segments = Interner::default();
     let mut values = Interner::default();
@@ -266,6 +321,9 @@ fn index(project: &ProjectContext) -> Findings {
                 )
                 .collect(),
         );
+        if config.is_generated(&entry.path) {
+            continue;
+        }
         let tree = parse(source);
         if tree.error_nodes().next().is_some() {
             continue;
@@ -279,7 +337,10 @@ fn index(project: &ProjectContext) -> Findings {
         };
         match merged_modules(&tree, source) {
             Some(bindings) => {
-                for (name, node) in bindings {
+                for (name, node, path) in bindings {
+                    if path.is_some_and(|path| config.is_generated(Path::new(&path))) {
+                        continue;
+                    }
                     modules.push(Module {
                         file,
                         name: Some(name),
@@ -486,7 +547,7 @@ impl Rule for DuplicateDefinitions {
     }
 
     fn description(&self) -> &'static str {
-        "Flags attrset subtrees with at least 8 leaf bindings that are identical (every relative key path and whitespace-normalized value) in two or more modules: different files, or different top-level bindings of a `strictix merge` file. Each group is reported once at every site, naming the others. When whole subtrees differ, two root attrsets (a module body, a `let` value, a list element; never one nested under a different key) that still share at least 8 identical key-path/value leaves are reported at the deepest pair holding all of them, with the count and a per-key breakdown. Keys are compared by full path, so a setting under a different section never matches."
+        "Flags attrset subtrees with at least 8 leaf bindings that are identical (every relative key path and whitespace-normalized value) in two or more modules: different files, or different top-level bindings of a `strictix merge` file. Each group is reported once at every site, naming the others. When whole subtrees differ, two root attrsets (a module body, a `let` value, a list element; never one nested under a different key) that still share at least 8 identical key-path/value leaves are reported at the deepest pair holding all of them, with the count and a per-key breakdown. Keys are compared by full path, so a setting under a different section never matches. Files under a `lint.generated` prefix (and bindings of a `strictix merge` file whose manifest path is under one) are left out, since a generator, not a person, repeats their records."
     }
 
     fn severity(&self) -> Severity {
@@ -500,7 +561,7 @@ impl Rule for DuplicateDefinitions {
     fn check_file_project(
         &self,
         model: &SemanticModel,
-        _config: &LintConfig,
+        config: &LintConfig,
         project: Option<&ProjectContext>,
         diags: &mut Vec<Diagnostic>,
     ) {
@@ -515,7 +576,7 @@ impl Rule for DuplicateDefinitions {
         else {
             return;
         };
-        let findings = project.memo(index);
+        let findings = project.memo(|project| index(project, config));
         for (range, message) in &findings.0[current] {
             diags.push(Diagnostic::new(
                 self.code(),

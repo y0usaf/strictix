@@ -471,7 +471,11 @@ rule runs by default.
 
 Config (strictix.toml) toggles rules; .strictixignore prunes paths.
 `[lint] generated = ["path/prefix", ...]` marks generated data files (matched like
-`[schemas]` prefixes) so `hand-maintained-data-file` skips them.
+`[schemas]` prefixes) so `hand-maintained-data-file` skips them and
+`duplicate-definitions` leaves them out of its comparison (a lockfile repeats
+its package records by nature): such a file is neither reported nor named as
+another file's twin, and neither is a binding of a `strictix merge` file whose
+`merge_manifest` path lies under a prefix.
 A `[lint.<rule-code>]` section holds that rule's settings, such as
 `[lint.constant-option] readers = 3`; a rule documents the settings it reads.
 `[codecs.<id>] extensions = ["json"]` sections enable `codec-candidate`, which flags literal data texts and data files of those extensions and adds a `codec` object to `--format json` output for a converter to rewrite them as Nix values. A codec section with `generator = "lispSource"` also flags `generators.lispSource (import ./x.data.nix)`, a line list, as a `file` candidate with the `lines` loader, for the converter to replace with the syntax tree `strictix import` prints.
