@@ -265,9 +265,12 @@ impl Importer<'_> {
         if previous != end {
             return Err(format!("{}: text after the table", self.at(previous)));
         }
+        let Some((header, rows)) = out.split_first() else {
+            return Err(format!("{}: a table without a header", self.at(start)));
+        };
         Ok(format!(
-            "(table [\n{}  ])",
-            out.iter()
+            "(table {header} [\n{}  ])",
+            rows.iter()
                 .map(|row| format!("    {row}\n"))
                 .collect::<String>()
         ))
@@ -276,12 +279,19 @@ impl Importer<'_> {
     fn inlines(&self, from: usize, to: usize) -> Result<Vec<Inline>, String> {
         let text = &self.source[from..to];
         let tree = crate::parse(&tree_sitter_md::INLINE_LANGUAGE.into(), text)?;
-        Inlines {
+        let inlines = Inlines {
             importer: self,
             text,
             base: from,
         }
-        .within(tree.root_node(), 0, text.len())
+        .within(tree.root_node(), 0, text.len())?;
+        match literal(&inlines) {
+            Some(markup) => Err(format!(
+                "{}: the text {markup:?} would read as markup the printer does not write",
+                self.at(from)
+            )),
+            None => Ok(inlines),
+        }
     }
 
     fn nix(&self, inlines: &[Inline]) -> String {
@@ -330,7 +340,14 @@ impl Inlines<'_, '_> {
                 text(&mut out, &self.text[at..child.start_byte()]);
             }
             if child.kind() == "shortcut_link" {
-                text(&mut out, &self.text[child.start_byte()..child.end_byte()]);
+                text(&mut out, "[");
+                for inline in self.bracketed(child)? {
+                    match inline {
+                        Inline::Text(more) => text(&mut out, &more),
+                        other => out.push(other),
+                    }
+                }
+                text(&mut out, "]");
             } else {
                 out.push(self.inline(child)?);
             }
@@ -340,6 +357,22 @@ impl Inlines<'_, '_> {
             text(&mut out, &self.text[at..to]);
         }
         Ok(out)
+    }
+
+    fn bracketed(&self, node: Node<'_>) -> Result<Vec<Inline>, String> {
+        let (start, end) = (node.start_byte(), node.end_byte());
+        let parts = named(node);
+        match parts[..] {
+            [] if &self.text[start..end] == "[]" => Ok(Vec::new()),
+            [label]
+                if label.kind() == "link_text"
+                    && label.start_byte() == start + 1
+                    && label.end_byte() + 1 == end =>
+            {
+                self.within(label, label.start_byte(), label.end_byte())
+            }
+            _ => Err(self.fail(start, "brackets other than literal `[text]`")),
+        }
     }
 
     fn delimited(&self, node: Node<'_>, open: &str) -> Result<(usize, usize), String> {
@@ -397,6 +430,26 @@ impl Inlines<'_, '_> {
             kind => Err(self.fail(start, &format!("{kind} is not supported"))),
         }
     }
+}
+
+fn literal(inlines: &[Inline]) -> Option<&str> {
+    inlines.iter().find_map(|inline| match inline {
+        Inline::Text(text) => markup(text).then_some(text.as_str()),
+        Inline::Code(_) => None,
+        Inline::Strong(inner) | Inline::Em(inner) | Inline::Link(inner, _) => literal(inner),
+    })
+}
+
+fn markup(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let word = |at: Option<&u8>| at.is_some_and(u8::is_ascii_alphanumeric);
+    text.contains(['`', '*', '\\', '<', '&'])
+        || ["~~", "](", "][", "!["]
+            .iter()
+            .any(|pair| text.contains(pair))
+        || bytes.iter().enumerate().any(|(at, &byte)| {
+            byte == b'_' && !(at > 0 && word(bytes.get(at - 1)) && word(bytes.get(at + 1)))
+        })
 }
 
 fn text(out: &mut Vec<Inline>, more: &str) {

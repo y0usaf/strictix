@@ -188,8 +188,28 @@ fn markdown_blocks_inlines_and_blank_lines() {
     let source = "# Title\n\n<!-- note -->\n\n- one `x`\n- **two** [a](b)\n\n| A | B |\n|---|---|\n| *c* | d |\n";
     assert_eq!(
         expression("markdown", source, &[]).unwrap(),
-        "[\n  (heading 1 \"Title\")\n  blank\n  (comment \" note \")\n  blank\n  (bullets [\n    [\"one \" (code \"x\")]\n    [(strong \"two\") \" \" (link \"a\" \"b\")]\n  ])\n  blank\n  (table [\n    [\"A\" \"B\"]\n    [[(em \"c\")] \"d\"]\n  ])\n]"
+        "[\n  (heading 1 \"Title\")\n  blank\n  (comment \" note \")\n  blank\n  (bullets [\n    [\"one \" (code \"x\")]\n    [(strong \"two\") \" \" (link \"a\" \"b\")]\n  ])\n  blank\n  (table [\"A\" \"B\"] [\n    [[(em \"c\")] \"d\"]\n  ])\n]"
     );
+}
+
+#[test]
+fn markdown_brackets_that_are_no_link_are_literal_text_around_typed_inlines() {
+    assert_eq!(
+        expression("markdown", "box [3,0,9] and [*x* `y`] new_tab\n", &[]).unwrap(),
+        "[\n  [\"box [3,0,9] and [\" (em \"x\") \" \" (code \"y\") \"] new_tab\"]\n]"
+    );
+}
+
+#[test]
+fn markdown_text_that_would_read_as_markup_is_an_error() {
+    for source in ["a * b\n", "a _b\n", "a_ b\n", "a & b\n"] {
+        assert!(expression("markdown", source, &[])
+            .unwrap_err()
+            .contains("would read as markup"));
+    }
+    assert!(expression("markdown", "\\*a\n", &[])
+        .unwrap_err()
+        .contains("backslash_escape"));
 }
 
 #[test]

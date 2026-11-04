@@ -204,6 +204,14 @@ iterable naming what its own scope binds, a class attribute a method names, a
 `global` an enclosing function also binds), a `:=` outside an `if` or `while`
 test, a name Nix cannot spell and a parenthesis neither the grouping nor a
 line break needs are errors.
+Markdown is read as typed blocks and inlines: `heading`, a tight `- ` list
+(`bullets`), `table header rows`, an HTML `comment` and paragraphs of text,
+`code`, `strong`, `em` and `link text url`. Text is only literal: brackets
+that are no link stay text around their typed inlines, and text that would
+read as markup the printer does not write (a stray `*`, `` ` ``, `\`, `<`
+or `&`, `~~`, `](`, `][`, `![`, an `_` at the edge of a word) is an error, as
+is every other inline node (escapes, entities, HTML, autolinks, reference
+links, strikethrough).
 
 `strictix check` and `strictix fix` lint a merged file binding by binding, as
 the files its manifest names: each binding is restored in memory and linted
