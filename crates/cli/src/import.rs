@@ -57,7 +57,9 @@ fn nix_file(language: &str, source: &str) -> Result<String, String> {
     let (text, holes) = lines(list, source)?;
     let expression = strictix_import::expression(language, &text, &holes)?;
     let names = strictix_import::constructors(&expression);
-    let tree = if names.is_empty() {
+    let tree = if strictix_import::bound(language) {
+        format!("(({expression}) generators.{language})")
+    } else if names.is_empty() {
         expression
     } else {
         format!(

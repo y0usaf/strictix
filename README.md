@@ -100,7 +100,9 @@ file `{rows, str, ...}: [ ... ]`, a function of the constructors of
 string per source line); when it is not a list itself but holds one
 `generators.<name>Source [ ... ]` call, the file is printed back with that
 call replaced by
-`generators.LANGUAGE.render (let inherit (generators.LANGUAGE) ...; in [ ... ])`,
+`generators.LANGUAGE.render (let inherit (generators.LANGUAGE) ...; in [ ... ])`
+(`generators.LANGUAGE.render ((DATA FILE) generators.LANGUAGE)` for GLSL and
+shell, whose data file binds names),
 and the list's interpolations come back as interpolations inside the tree's
 strings. Layout the printer derives (Lisp indentation; shell, Luau and Python
 nesting; Python's spacing; a hunk's line counts and new start; a Markdown
@@ -171,6 +173,29 @@ operators infix lists nested only where precedence needs parentheses (the
 printer adds prettier's own); a name nothing declares that is not one of the
 generator's globals, a name Nix cannot spell (`$x`), parentheses the printer
 would not write and an unbraced body that is an operation are errors.
+Shell keeps its layout and binds its names the same way: `import shell`
+prints a script as `{assign, dq, var, HOME, ...}: ({state, usage, ...}: [
+... ])`. Bash scopes a name to the script or to a function, so the script's
+lambda binds its function names and every variable it sets (`x=`, `for x`,
+`read x`) outside a function or inside one without `local`, and a function
+body is a lambda of the names it declares `local` (`fn covers ({base}: inline
+[ ... ])`). A word naming a variable or one of the script's functions is that
+binding, `$x` is `var x` and `${x:-w}`, `${x:?w}`, `${x#w}`, `${x##w}`,
+`${x%w}`, `${x%%w}` and `${x[@]}` are `default`, `required`, `dropPrefix`,
+`dropLongestPrefix`, `dropSuffix`, `dropLongestSuffix` and `elements` of it; a
+positional parameter is a Nix integer (`var 1`), `$@`, `$*`, `$#` and `$?` are
+`args`, `argsJoined`, `argCount` and `exitStatus`, and the environment
+variables `generators.shell` lists (`HOME`, `IFS`, `PATH`, `XDG_STATE_HOME`,
+...) are formals of the data file. A double-quoted string's text is unescaped,
+a whole bare word that is a decimal integer is a Nix integer, and `[ ... ]` is
+`test` of a unary test (`nonEmpty`, `isEmpty`, `exists`, `isDir`, `isFile`)
+or a `[left "=" right]` comparison. A name that is a Nix keyword or an
+attribute of `generators.shell`, or a local named like a script-level name
+(which Nix would shadow), gets a trailing `'`; a name nothing declares
+and the generator does not list, `local` outside a function, `export` and
+other declarations, a function inside a function, a name set inside `$(...)`,
+braces or backslashes the printer would not write, a heredoc whose delimiter is
+not single-quoted, `[[`, `$((...))` and backquotes are errors.
 tree-sitter-glsl reads `(float(x) + y)` as a broken cast, so the importer
 parses a constructor call of a builtin scalar type (`float(`, `int(`, `uint(`,
 `bool(`, `double(`) as a call of an identifier, keeping its source bytes.

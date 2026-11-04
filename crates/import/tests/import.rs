@@ -29,12 +29,40 @@ fn lisp_spacing_the_printer_cannot_reproduce_is_an_error() {
 }
 
 #[test]
-fn shell_statements_words_and_layout() {
-    let source = "set -eu\n\nf() { echo \"$1\" >&2; exit 1; }\nif [ -n \"$x\" ]; then\n  f \"$(date)\"\nfi\n";
+fn shell_names_are_nix_bindings_and_expansions_are_nodes() {
+    let source = "set -eu\n\nf() { local x=${1:-} y; echo \"$x/$HOME\" >&2; read -r y; [ -n \"$y\" ] || exit 1; }\nfor for in a \"$@\"; do\n  n=${for%.sh}\ndone\nif [ $# -gt 0 ]; then\n  f \"$(date)\" \"${n}x\"\nfi\n";
     assert_eq!(
         expression("shell", source, &[]).unwrap(),
-        "[\n  [\"set\" \"-eu\"]\n  blank\n  (fn \"f\" (inline [[\"echo\" (dq \"$1\") (redir \">&\" \"2\")] [\"exit\" \"1\"]]))\n  (if' [\"[\" \"-n\" (dq \"$x\") \"]\"] [\n[\"f\" (dq [(sub [[\"date\"]])])]\n])\n]"
+        "{\n  HOME,\n  argCount,\n  args,\n  assign,\n  blank,\n  chain,\n  default,\n  dq,\n  dropSuffix,\n  fn,\n  for,\n  if',\n  inline,\n  nonEmpty,\n  redir,\n  sub,\n  test,\n  var,\n  ...\n}: ({f, for', n}: [\n  [\"set\" \"-eu\"]\n  blank\n  (fn f ({x, y}: inline [[\"local\" (assign x (default 1 \"\")) y] [\"echo\" (dq [(var x) \"/\" (var HOME)]) (redir \">&\" 2)] [\"read\" \"-r\" y] (chain [(test (nonEmpty (dq (var y)))) \"||\" [\"exit\" 1]])]))\n  (for for' [\"a\" (dq (var args))] [\n(assign n (dropSuffix for' \".sh\"))\n])\n  (if' (test [(var argCount) \"-gt\" 0]) [\n[f (dq (sub [[\"date\"]])) (dq [(var n) \"x\"])]\n])\n])"
     );
+}
+
+#[test]
+fn shell_a_local_shadowing_a_script_name_is_primed() {
+    assert_eq!(
+        expression("shell", "x=1\nf() { local x=2; echo \"$x\"; }\n", &[]).unwrap(),
+        "{\n  assign,\n  dq,\n  fn,\n  inline,\n  var,\n  ...\n}: ({x, f}: [\n  (assign x 1)\n  (fn f ({x'}: inline [[\"local\" (assign x' 2)] [\"echo\" (dq (var x'))]]))\n])"
+    );
+}
+
+#[test]
+fn shell_what_the_printer_would_not_write_or_nothing_declares_is_an_error() {
+    let refused = |source: &str, reason: &str| {
+        let error = expression("shell", source, &[]).unwrap_err();
+        assert!(error.contains(reason), "{source:?}: {error}");
+    };
+    refused("echo \"$nothing\"\n", "does not declare");
+    refused(
+        "x=1\necho \"${x}/\"\n",
+        "braces the printer would not write",
+    );
+    refused("local x\n", "local outside a function");
+    refused("export X=1\n", "a declaration other than local");
+    refused("cat <<EOF\n$HOME\nEOF\n", "not single-quoted");
+    refused("echo \"a\\b\"\n", "escapes nothing");
+    refused("x=$(y=1; echo)\n", "inside $(...)");
+    refused("[[ -n x ]]\n", "not `[[ ... ]]`");
+    refused("echo $((1 + 2))\n", "no shell word");
 }
 
 #[test]

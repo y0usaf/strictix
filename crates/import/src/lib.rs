@@ -27,7 +27,7 @@ pub const LANGUAGES: [&str; 11] = [
     "vbs",
 ];
 
-const BOUND: [&str; 7] = ["glsl", "ts", "luau", "lua", "python", "vbs", "javascript"];
+const BOUND: [&str; 8] = ["glsl", "ts", "luau", "lua", "python", "vbs", "javascript", "shell"];
 
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {
@@ -49,9 +49,13 @@ pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<Stri
     }
 }
 
+pub fn bound(language: &str) -> bool {
+    BOUND.contains(&language)
+}
+
 pub fn data_file(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     let expression = expression(language, source, holes)?;
-    if BOUND.contains(&language) {
+    if bound(language) {
         return Ok(format!("{expression}\n"));
     }
     let names = constructors(&expression);
