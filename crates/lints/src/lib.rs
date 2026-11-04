@@ -48,6 +48,7 @@ pub mod style_rules;
 pub mod suggested_rules;
 pub mod templated_bindings;
 pub mod unexpected_function_argument;
+pub mod unformatted_file;
 pub mod unused_option;
 
 use advanced_rules::{
@@ -115,6 +116,7 @@ use suggested_rules::{
 };
 use templated_bindings::TemplatedBindings;
 use unexpected_function_argument::UnexpectedFunctionArgument;
+use unformatted_file::UnformattedFile;
 use unused_option::UnusedOption;
 
 /// The full builtin registry, in declaration order.
@@ -232,5 +234,6 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         CodecCandidate,
         HandWrittenLuaData,
         ScatteredDocumentation,
+        UnformattedFile,
     }
 }

@@ -14,6 +14,7 @@
 
 mod args;
 mod config;
+mod format;
 mod import;
 mod merge;
 mod merged;
@@ -316,12 +317,13 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
         .filter(|file| file.skipped)
         .map(|file| file.path.clone());
     let project = strictix_core::project::ProjectContext::new(project_files).with_present(skipped);
+    let formatter = format::command(&config);
     let results: Vec<FileResult> = std::thread::scope(|scope| {
         let mut handles = Vec::new();
         for input in &inputs {
             let (rules, config, project, filter) = (&rules, &config, &project, &filter);
             handles.push(scope.spawn(move || {
-                process_file(
+                let mut result = process_file(
                     input,
                     rules,
                     config,
@@ -329,7 +331,11 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
                     !args.dry_run,
                     project,
                     filter,
-                )
+                );
+                if let Some(command) = formatter {
+                    format::apply(command, input, &mut result);
+                }
+                result
             }));
         }
         handles

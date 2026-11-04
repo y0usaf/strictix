@@ -339,6 +339,49 @@ fn scattered_documentation_reports_markdown_beside_the_document() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[test]
+fn unformatted_file_reports_the_first_line_the_formatter_changes() {
+    let config = |command: &str| {
+        format!("[lint]\nenabled = [\"unformatted-file\"]\n\n[lint.\"unformatted-file\"]\ncommand = \"{command}\"\n")
+    };
+    let dir = temp_tree(
+        "unformatted",
+        &[
+            ("strictix.toml", &config("tr i I")),
+            ("a.nix", "let\n  a = 1;\nin\n  a + 1\n"),
+            ("b.nix", "{\n  i = ;\n}\n"),
+        ],
+    );
+    let out = run_in(&dir, &["check"]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(
+        text.contains("./a.nix:3:1: warning[unformatted-file]: the formatter would change this file from this line on"),
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("warning[unformatted-file]").count(),
+        1,
+        "{text}"
+    );
+    assert!(text.contains("./b.nix:2:"), "{text}");
+    std::fs::write(dir.join("strictix.toml"), config("cat")).unwrap();
+    std::fs::write(dir.join("b.nix"), "{ }\n").unwrap();
+    let clean = run_in(&dir, &["check"]);
+    assert_eq!(clean.status.code(), Some(0), "{}", stdout(&clean));
+    std::fs::write(dir.join("strictix.toml"), config("false")).unwrap();
+    let failed = run_in(&dir, &["check"]);
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&failed.stderr).contains("the formatter false failed"),
+        "{}",
+        String::from_utf8_lossy(&failed.stderr)
+    );
+    let off = run_in(&dir, &["check", "--disable", "unformatted-file"]);
+    assert_eq!(off.status.code(), Some(0), "{}", stdout(&off));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 fn temp_tree(name: &str, files: &[(&str, &str)]) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "strictix-{name}-{}-{}",
