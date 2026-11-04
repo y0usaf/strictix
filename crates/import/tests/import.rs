@@ -341,21 +341,38 @@ fn lua_what_the_printer_cannot_reproduce_is_an_error() {
 }
 
 #[test]
-fn python_statements_expressions_and_layout() {
-    let source = "import os\n\n\ndef f(a, b=1):\n    if a:\n        return os.path.join(a, f\"{b:03d}\")\n    elif b:\n        x = g(a,\n              b)\n    else:\n        pass\n";
+fn python_names_are_bound_by_their_scope_and_builtins_are_formals() {
+    let source = "import os\n\n\ndef f(a, b=1):\n    if a:\n        return os.path.join(a, f\"{b:03d}\")\n    elif b:\n        x = print(a,\n                  b)\n    else:\n        pass\n";
     assert_eq!(
-        expression("python", source, &[]).unwrap(),
-        "[\n  [\"import\" \"os\"]\n  blank\n  blank\n  (def \"f\" [\"a\" (kw \"b\" 1)] [\n    (ifElse \"a\" [\n      [\"return\" (call \"os.path.join\" [\"a\" (str [(spec \"b\" \"03d\")])])]\n    ] (ifElse \"b\" [\n      [\"x\" \"=\" (call \"g\" (aligned [\"a\" \"b\"]))]\n    ] [\n      \"pass\"\n    ]))\n  ])\n]"
+        data_file("python", source, &[]).unwrap(),
+        "{\n  aligned,\n  assign,\n  blank,\n  call,\n  def,\n  default,\n  dot,\n  ifElse,\n  import',\n  pass,\n  print,\n  return,\n  spec,\n  str,\n  ...\n}: ({os, f}: [\n(import' os)\nblank\nblank\n(def f ({a, b, x}: {\nparams = [a (default b 1)];\nbody = [\n(ifElse a [\n(return (call (dot os \"path.join\") [a (str [(spec b \"03d\")])]))\n] (ifElse b [\n(assign x (call print (aligned [a b])))\n] [\npass\n]))\n];\n}))\n])\n"
     );
 }
 
 #[test]
 fn python_hanging_brackets_slices_and_continuations() {
-    let source =
-        "x = f(\n    a,\n    b,\n)\ny = g(\n    a, b\n)\nz = s[a + 1 :] + s[1:] \\\n    + t\n";
+    let source = "from m import f, s, t\nx = f(\n    s,\n    t,\n)\ny = f(\n    s, t\n)\nz = s[t + 1 :] + s[1:] \\\n    + t\n";
     assert_eq!(
         expression("python", source, &[]).unwrap(),
-        "[\n  [\"x\" \"=\" (call \"f\" (rows [\"a\" \"b\"]))]\n  [\"y\" \"=\" (call \"g\" (rows [[\"a\" \"b\"]]))]\n  (rows [[\"z\" \"=\" (index \"s\" (slice [\"a\" \"+\" 1] null)) \"+\" (index \"s\" (slice 1 null))] [\"+\" \"t\"]])\n]"
+        "{\n  assign,\n  call,\n  from,\n  index,\n  rows,\n  slice,\n  ...\n}: ({f, s, t, x, y, z}: [\n(from \"m\" [f s t])\n(assign x (call f (rows [s t])))\n(assign y (call f (rows [[s t]])))\n(assign z (rows [[(index s (slice [t \"+\" 1] null)) \"+\" (index s (slice 1 null))] [\"+\" t]]))\n])"
+    );
+}
+
+#[test]
+fn python_infix_lists_keep_only_the_grouping_precedence_does_not_give() {
+    let source = "from m import a, b, c\nx = (a + b) * c - (a - b)\ny = not (a < b) < c\nz = [str(k) for k in x if k]\n";
+    assert_eq!(
+        expression("python", source, &[]).unwrap(),
+        "{\n  assign,\n  call,\n  compFor,\n  compIf,\n  from,\n  listComp,\n  not,\n  str',\n  ...\n}: ({a, b, c, x, y, z}: [\n(from \"m\" [a b c])\n(assign x [[a \"+\" b] \"*\" c \"-\" [a \"-\" b]])\n(assign y (not [[a \"<\" b] \"<\" c]))\n(assign z (listComp ({k}: [(call str' [k]) (compFor k x) (compIf k)])))\n])"
+    );
+}
+
+#[test]
+fn python_names_colliding_with_constructors_builtins_or_nix_take_a_prime() {
+    let source = "def index(list):\n    str = [x for x in list]\n    return lambda y=str: y\n";
+    assert_eq!(
+        expression("python", source, &[]).unwrap(),
+        "{\n  assign,\n  compFor,\n  def,\n  default,\n  lambda,\n  listComp,\n  return,\n  ...\n}: ({index'}: [\n(def index' ({list', str'}: {\nparams = [list'];\nbody = [\n(assign str' (listComp ({x}: [x (compFor x list')])))\n(return (lambda ({y}: {\nparams = [(default y str')];\nbody = y;\n})))\n];\n}))\n])"
     );
 }
 
@@ -363,19 +380,45 @@ fn python_hanging_brackets_slices_and_continuations() {
 fn python_layout_the_printer_cannot_reproduce_is_an_error() {
     assert!(expression("python", "x  = 1\n", &[])
         .unwrap_err()
-        .contains("not one space"));
-    assert!(expression("python", "f(a, b,)\n", &[])
+        .contains("where the printer writes"));
+    assert!(expression("python", "print(1, 2,)\n", &[])
         .unwrap_err()
         .contains("trailing comma"));
     assert!(expression("python", "x = 1  # note\n", &[]).is_err());
-    assert!(expression("python", "s[a+1:]\n", &[]).is_err());
+    assert!(expression("python", "s = 1\ns[s+1:]\n", &[]).is_err());
+    assert!(expression("python", "x = (1)\n", &[])
+        .unwrap_err()
+        .contains("neither the grouping nor a line break"));
 }
 
 #[test]
-fn python_template_placeholders_stay_names() {
+fn python_names_nothing_declares_or_nix_would_bind_differently_are_errors() {
+    assert!(expression("python", "print(y)\n", &[])
+        .unwrap_err()
+        .contains("`y` is not declared"));
+    assert!(expression("python", "x = [(y := 1)]\n", &[])
+        .unwrap_err()
+        .contains("assignment expression"));
+    assert!(expression(
+        "python",
+        "class A:\n    x = 1\n\n    def f(self):\n        return x\n",
+        &[]
+    )
+    .unwrap_err()
+    .contains("class attribute"));
+    assert!(expression("python", "x = [x for x in x]\n", &[])
+        .unwrap_err()
+        .contains("outside the scope that declares it"));
+    assert!(expression("python", "\u{e9} = 1\n", &[])
+        .unwrap_err()
+        .contains("not a name Nix can spell"));
+}
+
+#[test]
+fn python_template_placeholders_are_a_constructor() {
     assert_eq!(
-        data_file("python", "x = @owners@.get(k, '')\n", &[]).unwrap(),
-        "{\n  call,\n  sq,\n  ...\n}: [\n  [\"x\" \"=\" (call \"@owners@.get\" [\"k\" (sq \"\")])]\n]\n"
+        data_file("python", "k = 'a'\nx = @owners@.get(k, '')\n", &[]).unwrap(),
+        "{\n  assign,\n  call,\n  dot,\n  placeholder,\n  sq,\n  ...\n}: ({k, x}: [\n(assign k (sq \"a\"))\n(assign x (call (dot (placeholder \"owners\") \"get\") [k (sq \"\")]))\n])\n"
     );
 }
 

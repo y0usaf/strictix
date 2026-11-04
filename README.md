@@ -184,6 +184,26 @@ block declares it (the Nix binding would capture it), a global function
 declaration, any other parentheses, a number Nix does not spell as the source
 does (`0x10`, `1e3`), a long bracket string, `repeat` and `goto` are errors.
 Python's `@name@` substitution placeholders are names to the importer.
+Python is read as code Nix binds: `import python` prints the whole data file,
+`{call, def, print, str', ...}: ({os, Path, main}: [ ... ])`, a function of
+the constructors it uses and the Python builtins it names (a builtin spelled
+like a constructor takes a `'`), returning the module's scope. Each Python
+scope (the module, a `def`, a `class` body, a `lambda`, a comprehension) is a
+lambda whose formals are the names Python binds in it (imports, assignment,
+`for`, `with ... as`, `except ... as` and `:=` targets, `def` and `class`
+names, parameters), `(def f ({a, x}: {params = [a]; body = [ ... ];}))`, so
+every name is a Nix variable resolved as Python resolves it; a name that is a
+Nix keyword, a constructor or a builtin takes a `'`. Statements and
+expressions are typed constructors (`assign`, `call`, `dot x "environ.get"`,
+`ternary`, `listComp`, ...), an operator chain an infix list nested only where
+Python's precedence needs parentheses, `True` and `False` Nix booleans and
+`@name@` substitution placeholders `placeholder "name"`. A name nothing binds
+that is not a builtin the generator knows, a name Nix would bind to a
+different scope than Python (a parameter default or a comprehension's first
+iterable naming what its own scope binds, a class attribute a method names, a
+`global` an enclosing function also binds), a `:=` outside an `if` or `while`
+test, a name Nix cannot spell and a parenthesis neither the grouping nor a
+line break needs are errors.
 
 `strictix check` and `strictix fix` lint a merged file binding by binding, as
 the files its manifest names: each binding is restored in memory and linted
