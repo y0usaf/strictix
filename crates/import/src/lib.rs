@@ -27,7 +27,7 @@ pub const LANGUAGES: [&str; 11] = [
     "vbs",
 ];
 
-const BOUND: [&str; 8] = ["glsl", "ts", "luau", "lua", "python", "vbs", "javascript", "shell"];
+const BOUND: [&str; 9] = ["glsl", "ts", "luau", "lua", "python", "vbs", "javascript", "shell", "lisp"];
 
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {

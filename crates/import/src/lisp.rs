@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::collections::BTreeSet;
+
 use crate::{column_of, line_of, nix};
 
 const PREFIXES: [(&str, &str); 5] = [
@@ -72,9 +75,309 @@ struct Row<'a> {
     blank: bool,
 }
 
+const NIX_KEYWORDS: [&str; 13] = [
+    "assert", "else", "false", "if", "in", "inherit", "let", "null", "or", "rec", "then", "true",
+    "with",
+];
+
+const CONSTRUCTORS: [&str; 24] = [
+    "and-key",
+    "and-optional",
+    "and-rest",
+    "at",
+    "blank",
+    "char",
+    "comment",
+    "constant",
+    "dot",
+    "double",
+    "function",
+    "hex",
+    "kw",
+    "quasi",
+    "quote",
+    "ratio",
+    "render",
+    "rows",
+    "special",
+    "splice",
+    "str",
+    "uninterned",
+    "unquote",
+    "wrap",
+];
+
+const OPERATORS: [&str; 16] = [
+    "*", "+", "-", "/", "/=", "1+", "1-", "<", "<=", "=", ">", ">=", "char=", "let*", "list*",
+    "string=",
+];
+
+const MARKERS: [(&str, &str); 3] = [
+    ("&key", "and-key"),
+    ("&optional", "and-optional"),
+    ("&rest", "and-rest"),
+];
+
+const DEFINERS: [&str; 5] = ["defconstant", "defmacro", "defparameter", "defun", "defvar"];
+
+const LOOP_BINDERS: [&str; 4] = ["as", "for", "into", "with"];
+
+const CL: [&str; 122] = [
+    "abs",
+    "acons",
+    "and",
+    "append",
+    "apply",
+    "assoc",
+    "atom",
+    "car",
+    "case",
+    "cddr",
+    "cdr",
+    "ceiling",
+    "char",
+    "char-code",
+    "code-char",
+    "concatenate",
+    "cond",
+    "cons",
+    "copy-list",
+    "count-if",
+    "declare",
+    "defpackage",
+    "defparameter",
+    "defun",
+    "defvar",
+    "destructuring-bind",
+    "digit-char-p",
+    "do",
+    "dolist",
+    "dotimes",
+    "ecase",
+    "eq",
+    "eql",
+    "equal",
+    "evenp",
+    "every",
+    "exp",
+    "expt",
+    "fifth",
+    "find",
+    "find-if",
+    "first",
+    "flet",
+    "float",
+    "floor",
+    "format",
+    "fourth",
+    "get-internal-real-time",
+    "getf",
+    "if",
+    "ignore",
+    "in-package",
+    "incf",
+    "integerp",
+    "intern",
+    "internal-time-units-per-second",
+    "intersection",
+    "labels",
+    "lambda",
+    "last",
+    "ldiff",
+    "length",
+    "let",
+    "list",
+    "listp",
+    "loop",
+    "map",
+    "mapcar",
+    "max",
+    "member",
+    "min",
+    "mod",
+    "most-positive-fixnum",
+    "multiple-value-bind",
+    "nconc",
+    "nil",
+    "not",
+    "nreverse",
+    "nth",
+    "nthcdr",
+    "null",
+    "oddp",
+    "or",
+    "parse-integer",
+    "plusp",
+    "position",
+    "position-if",
+    "progn",
+    "push",
+    "read-line",
+    "realp",
+    "reduce",
+    "remove",
+    "remove-duplicates",
+    "remove-if",
+    "remove-if-not",
+    "rest",
+    "return",
+    "reverse",
+    "rotatef",
+    "round",
+    "second",
+    "setf",
+    "sin",
+    "sort",
+    "sqrt",
+    "string",
+    "string-downcase",
+    "string-right-trim",
+    "string-upcase",
+    "stringp",
+    "subseq",
+    "subsetp",
+    "substitute",
+    "t",
+    "third",
+    "truncate",
+    "unless",
+    "values",
+    "when",
+    "with-input-from-string",
+    "zerop",
+];
+
+const LOOP: [&str; 15] = [
+    "across", "below", "by", "collect", "downto", "for", "from", "in", "on", "repeat", "sum",
+    "thereis", "to", "while", "with",
+];
+
+const TOMOE: [&str; 88] = [
+    "+bar+",
+    "+cassette+",
+    "+gap+",
+    "+glass+",
+    "+hud+",
+    "+hud-theme+",
+    "+layout+",
+    "+layout-bindings+",
+    "+peek+",
+    "+policy-bindings+",
+    "+policy-displays+",
+    "+policy-hidden-window+",
+    "+policy-launcher+",
+    "+policy-launches+",
+    "+policy-settings+",
+    "+policy-terminal+",
+    "+shader-wallpaper+",
+    "+sounds+",
+    "adjust-brightness",
+    "bind-key",
+    "cassette--c",
+    "cassette--degrees",
+    "cassette--fit",
+    "cassette--gib",
+    "cassette--grille",
+    "cassette--height",
+    "cassette--hot-p",
+    "cassette--led",
+    "cassette--module",
+    "cassette--plate",
+    "cassette--px",
+    "cassette--reel",
+    "cassette--split",
+    "cassette--window",
+    "cassette--zone",
+    "clock-text",
+    "close-window",
+    "configure-output",
+    "context",
+    "deck--narrow-p",
+    "define-extension",
+    "exec-async",
+    "focus",
+    "fullscreen",
+    "hide-window",
+    "hud--alpha",
+    "hud--c",
+    "hud--decay",
+    "hud--dim",
+    "hud--heat",
+    "hud--icon",
+    "hud--mix",
+    "hud--now",
+    "hud--off",
+    "hud--panel",
+    "hud--text",
+    "interval",
+    "keyboard-grab",
+    "launch",
+    "media-control",
+    "menu-choice",
+    "output-power",
+    "place",
+    "policy--area",
+    "policy--centred",
+    "policy--launch",
+    "policy--terminal",
+    "policy--unmanaged-p",
+    "previous-context",
+    "probe--gpu-p",
+    "probe--sample",
+    "publish-state",
+    "quit",
+    "raise-window",
+    "rules-for",
+    "screenshot",
+    "service-state",
+    "setting",
+    "settings",
+    "shell-surface",
+    "show-window",
+    "sound",
+    "state-value",
+    "theme",
+    "ui",
+    "watch-file",
+    "window-properties",
+    "window-rule",
+];
+
+const EKKO: [&str; 8] = [
+    "action",
+    "register-command",
+    "register-component",
+    "register-keymap",
+    "register-layout-provider",
+    "registry",
+    "set-option",
+    "value",
+];
+
+const GLOBALS: [&[&str]; 4] = [&CL, &LOOP, &TOMOE, &EKKO];
+
+fn global(name: &str) -> bool {
+    GLOBALS.iter().any(|group| group.contains(&name))
+}
+
+struct Binding {
+    lisp: String,
+    nix: String,
+    function: bool,
+    site: usize,
+}
+
+struct Frame {
+    bindings: Vec<Binding>,
+    hidden: Vec<(usize, usize, String)>,
+}
+
 struct Emitter<'s> {
     source: &'s str,
     holes: &'s [String],
+    frames: RefCell<Vec<Frame>>,
+    used: RefCell<BTreeSet<String>>,
+    unknown: RefCell<BTreeSet<String>>,
 }
 
 pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
@@ -86,8 +389,25 @@ pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
         collect(child, source, &mut items)?;
     }
     let items = merge_atoms(items, source)?;
-    let emitter = Emitter { source, holes };
-    let mut out = String::from("[\n");
+    let emitter = Emitter {
+        source,
+        holes,
+        frames: RefCell::new(Vec::new()),
+        used: RefCell::new(BTreeSet::new()),
+        unknown: RefCell::new(BTreeSet::new()),
+    };
+    let mut sites = Vec::new();
+    for item in &items {
+        if let Form::List(parts) = &item.form {
+            let head = parts.first().and_then(atom);
+            if head.is_some_and(|head| DEFINERS.contains(&head)) {
+                let function = matches!(head, Some("defun" | "defmacro"));
+                sites.extend(parts.get(1).and_then(named).map(|site| (site, function)));
+            }
+        }
+    }
+    let formals = emitter.enter(&sites, Vec::new(), 1)?;
+    let mut body = String::from("[\n");
     let mut previous = 0;
     for item in &items {
         let gap = &source[previous..item.start];
@@ -103,22 +423,304 @@ pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
                 )
             })?;
             for _ in 1..lines {
-                out.push_str("  blank\n");
+                emitter.uses("blank");
+                body.push_str("  blank\n");
             }
         }
-        out.push_str("  ");
-        out.push_str(&emitter.form(item, false, 2)?);
-        out.push('\n');
+        body.push_str("  ");
+        body.push_str(&emitter.form(item, false, false, 2)?);
+        body.push('\n');
         previous = item.end;
     }
+    emitter.frames.borrow_mut().pop();
     let tail = &source[previous..];
     if tail != "\n" {
         return Err(format!(
             "the source must end with one newline after its last form, not {tail:?}"
         ));
     }
-    out.push(']');
+    body.push(']');
+    let unknown = emitter.unknown.borrow();
+    if !unknown.is_empty() {
+        let names: Vec<String> = unknown.iter().map(|name| format!("`{name}`")).collect();
+        return Err(format!(
+            "{} {} bound nowhere and not a global of generators.lisp",
+            names.join(", "),
+            if names.len() == 1 { "is" } else { "are" }
+        ));
+    }
+    let used = emitter.used.borrow();
+    let mut out = String::new();
+    if used.is_empty() {
+        out.push_str("_: ");
+    } else {
+        out.push_str("{\n");
+        for name in used.iter() {
+            out.push_str(&format!("  {name},\n"));
+        }
+        out.push_str("  ...\n}: ");
+    }
+    match formals {
+        Some(formals) => out.push_str(&format!("({{{formals}}}: {body})")),
+        None => out.push_str(&body),
+    }
     Ok(out)
+}
+
+fn atom(item: &Item) -> Option<&str> {
+    match &item.form {
+        Form::Atom(text) => Some(text.as_str()),
+        _ => None,
+    }
+}
+
+fn named(item: &Item) -> Option<&Item> {
+    atom(item).map(|_| item)
+}
+
+fn lambda_list<'a>(item: Option<&'a Item>, out: &mut Vec<&'a Item>) {
+    if let Some(Item {
+        form: Form::List(parts),
+        ..
+    }) = item
+    {
+        for part in parts {
+            match &part.form {
+                Form::Atom(text) if !text.starts_with('&') => out.push(part),
+                Form::List(entry) => out.extend(entry.first().and_then(named)),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn pattern<'a>(item: Option<&'a Item>, out: &mut Vec<&'a Item>) {
+    match item.map(|item| (item, &item.form)) {
+        Some((item, Form::Atom(text)))
+            if !text.starts_with('&') && text != "." && text != "nil" =>
+        {
+            out.push(item);
+        }
+        Some((_, Form::List(parts))) => {
+            let mut defaulted = false;
+            for part in parts {
+                match &part.form {
+                    Form::Atom(text) if text.starts_with('&') => {
+                        defaulted = text != "&rest";
+                    }
+                    Form::List(entry) if defaulted => out.extend(entry.first().and_then(named)),
+                    _ => pattern(Some(part), out),
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn heads<'a>(item: Option<&'a Item>, out: &mut Vec<&'a Item>) {
+    if let Some(Item {
+        form: Form::List(parts),
+        ..
+    }) = item
+    {
+        for part in parts {
+            match &part.form {
+                Form::Atom(_) => out.push(part),
+                Form::List(entry) => out.extend(entry.first().and_then(named)),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn first<'a>(item: Option<&'a Item>, out: &mut Vec<&'a Item>) {
+    if let Some(Item {
+        form: Form::List(parts),
+        ..
+    }) = item
+    {
+        out.extend(parts.first().and_then(named));
+    }
+}
+
+fn declared(items: &[Item], definition: bool) -> (Vec<&Item>, bool) {
+    let mut out = Vec::new();
+    let head = items.first().and_then(atom);
+    let functions = matches!(head, Some("flet" | "labels" | "macrolet"));
+    match head {
+        Some("defun" | "defmacro") => lambda_list(items.get(2), &mut out),
+        Some("lambda") => lambda_list(items.get(1), &mut out),
+        Some("define-extension") => lambda_list(items.get(3), &mut out),
+        Some("let" | "let*") => heads(items.get(1), &mut out),
+        Some("flet" | "labels" | "macrolet") => {
+            if let Some(Item {
+                form: Form::List(definitions),
+                ..
+            }) = items.get(1)
+            {
+                for definition in definitions {
+                    first(Some(definition), &mut out);
+                }
+            }
+        }
+        Some("destructuring-bind" | "multiple-value-bind") => pattern(items.get(1), &mut out),
+        Some(
+            "dolist"
+            | "dotimes"
+            | "with-input-from-string"
+            | "with-open-file"
+            | "with-output-to-string",
+        ) => first(items.get(1), &mut out),
+        Some("loop") => {
+            for (index, item) in items.iter().enumerate() {
+                if atom(item).is_some_and(|word| LOOP_BINDERS.contains(&word)) {
+                    pattern(items.get(index + 1), &mut out);
+                }
+            }
+        }
+        _ if definition => lambda_list(items.get(1), &mut out),
+        _ => {}
+    }
+    (out, functions)
+}
+
+fn mentions(item: &Item, name: &str) -> bool {
+    match &item.form {
+        Form::Atom(text) => text == name,
+        Form::Prefix(_, inner) => mentions(inner, name),
+        Form::List(parts) => parts.iter().any(|part| mentions(part, name)),
+        Form::Str(_) | Form::Comment(_) => false,
+    }
+}
+
+fn outside<'a>(items: &'a [Item], names: &[&str]) -> Vec<(&'a Item, Vec<String>)> {
+    let head = items.first().and_then(atom);
+    let all: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
+    let rest = |index: usize| -> Vec<&'a Item> {
+        match items.get(index).map(|item| &item.form) {
+            Some(Form::List(parts)) => parts.iter().skip(1).collect(),
+            _ => Vec::new(),
+        }
+    };
+    let scoped: Vec<(&'a Item, Vec<String>)> = match head {
+        Some("let") => initializers(items.get(1))
+            .into_iter()
+            .map(|(_, init)| (init, all.clone()))
+            .collect(),
+        Some("let*") => initializers(items.get(1))
+            .into_iter()
+            .map(|(index, init)| (init, all[index..].to_vec()))
+            .collect(),
+        Some("destructuring-bind" | "multiple-value-bind") => items
+            .get(2)
+            .map(|value| vec![(value, all.clone())])
+            .unwrap_or_default(),
+        Some(
+            "dolist"
+            | "dotimes"
+            | "with-input-from-string"
+            | "with-open-file"
+            | "with-output-to-string",
+        ) => rest(1)
+            .into_iter()
+            .map(|value| (value, all.clone()))
+            .collect(),
+        _ => Vec::new(),
+    };
+    scoped
+        .into_iter()
+        .map(|(value, names)| {
+            let read = names
+                .into_iter()
+                .filter(|name| mentions(value, name))
+                .collect();
+            (value, read)
+        })
+        .filter(|(_, read): &(&Item, Vec<String>)| !read.is_empty())
+        .collect()
+}
+
+fn initializers(item: Option<&Item>) -> Vec<(usize, &Item)> {
+    let mut out = Vec::new();
+    if let Some(Item {
+        form: Form::List(bindings),
+        ..
+    }) = item
+    {
+        let mut index = 0;
+        for binding in bindings {
+            match &binding.form {
+                Form::Atom(_) => index += 1,
+                Form::List(parts) => {
+                    out.extend(parts.iter().skip(1).map(|init| (index, init)));
+                    index += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+fn spellable(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes
+        .next()
+        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+fn convention(name: &str) -> (&str, Option<&'static str>) {
+    for (mark, constructor) in [('+', "constant"), ('*', "special")] {
+        if let Some(base) = name
+            .strip_prefix(mark)
+            .and_then(|rest| rest.strip_suffix(mark))
+        {
+            if !base.is_empty() {
+                return (base, Some(constructor));
+            }
+        }
+    }
+    (name, None)
+}
+
+fn escaped(base: &str, bound: bool) -> String {
+    let taken = NIX_KEYWORDS.contains(&base)
+        || CONSTRUCTORS.contains(&base)
+        || (bound
+            && GLOBALS
+                .iter()
+                .any(|group| group.iter().any(|global| convention(global).0 == base)));
+    if taken {
+        format!("{base}'")
+    } else {
+        base.to_owned()
+    }
+}
+
+fn float(text: &str) -> Option<String> {
+    let body = text.strip_prefix('-').unwrap_or(text);
+    let (whole, fraction) = body.split_once('.')?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let canonical = digits(whole)
+        && digits(fraction)
+        && (whole == "0" || !whole.starts_with('0'))
+        && (fraction == "0" || !fraction.ends_with('0'))
+        && !(whole == "0" && fraction.starts_with("000"))
+        && whole.len() + fraction.len() <= 15;
+    canonical.then(|| {
+        if text.starts_with('-') {
+            format!("({text})")
+        } else {
+            text.to_owned()
+        }
+    })
+}
+
+fn hex(text: &str) -> Option<u64> {
+    let digits = text.strip_prefix("#x")?;
+    let value = u64::from_str_radix(digits, 16).ok()?;
+    (format!("{value:X}") == digits && value < 1 << 53).then_some(value)
 }
 
 fn newlines(gap: &str) -> Option<usize> {
@@ -199,7 +801,7 @@ fn collect(node: tree_sitter::Node<'_>, source: &str, out: &mut Vec<Item>) -> Re
                 }
                 Form::Prefix(name, Box::new(inner.remove(0)))
             }
-            None if structured(node) => {
+            None if structured(node) || source[start..end].contains(char::is_whitespace) => {
                 for child in children {
                     collect(child, source, out)?;
                 }
@@ -294,13 +896,229 @@ impl Emitter<'_> {
         nix::string(text, self.holes, indent)
     }
 
-    fn form(&self, item: &Item, local: bool, indent: usize) -> Result<String, String> {
+    fn uses(&self, name: &str) {
+        self.used.borrow_mut().insert(name.to_owned());
+    }
+
+    fn enter(
+        &self,
+        sites: &[(&Item, bool)],
+        hidden: Vec<(usize, usize, String)>,
+        line: usize,
+    ) -> Result<Option<String>, String> {
+        if sites.is_empty() {
+            return Ok(None);
+        }
+        let mut bindings: Vec<Binding> = Vec::new();
+        for (item, function) in sites {
+            let name = atom(item).unwrap_or_default();
+            let (base, _) = convention(name);
+            if !spellable(base) {
+                return Err(format!(
+                    "line {line}: `{name}` has characters a Nix name cannot spell"
+                ));
+            }
+            let mut nix = escaped(base, true);
+            if hidden.iter().any(|(_, _, shadowing)| shadowing == name) {
+                if nix.ends_with('\'') {
+                    return Err(format!(
+                        "line {line}: `{name}` is read from outside the form that rebinds it, but Nix already spells it `{nix}`"
+                    ));
+                }
+                nix.push('\'');
+            }
+            if bindings.iter().any(|binding| binding.nix == nix) {
+                return Err(format!(
+                    "line {line}: `{name}` is declared twice in one form, or beside a name Nix spells the same"
+                ));
+            }
+            bindings.push(Binding {
+                lisp: name.to_owned(),
+                nix,
+                function: *function,
+                site: item.start,
+            });
+        }
+        let formals: Vec<&str> = bindings
+            .iter()
+            .map(|binding| binding.nix.as_str())
+            .collect();
+        let formals = formals.join(", ");
+        self.frames.borrow_mut().push(Frame { bindings, hidden });
+        Ok(Some(formals))
+    }
+
+    fn resolve(&self, text: &str, at: usize, head: bool) -> Option<(usize, String)> {
+        let frames = self.frames.borrow();
+        if let Some(found) = frames.iter().enumerate().rev().find_map(|(depth, frame)| {
+            frame
+                .bindings
+                .iter()
+                .find(|binding| binding.site == at)
+                .map(|binding| (depth, binding.nix.clone()))
+        }) {
+            return Some(found);
+        }
+        let nearest = |function: bool| {
+            frames.iter().enumerate().rev().find_map(|(depth, frame)| {
+                let hidden = frame
+                    .hidden
+                    .iter()
+                    .any(|(start, end, name)| name == text && (*start..*end).contains(&at));
+                frame
+                    .bindings
+                    .iter()
+                    .find(|binding| !hidden && binding.lisp == text && binding.function == function)
+                    .map(|binding| (depth, binding.nix.clone()))
+            })
+        };
+        if head {
+            nearest(true).or_else(|| (!global(text)).then(|| nearest(false)).flatten())
+        } else {
+            nearest(false).or_else(|| nearest(true))
+        }
+    }
+
+    fn symbol(&self, text: &str, at: usize, head: bool) -> Result<String, String> {
+        let line = line_of(self.source, at);
+        if let Some(operator) = OPERATORS.iter().find(|operator| **operator == text) {
+            return Ok(format!("\"{operator}\""));
+        }
+        if let Some((_, name)) = MARKERS.iter().find(|(marker, _)| *marker == text) {
+            self.uses(name);
+            return Ok((*name).to_owned());
+        }
+        if text == "." {
+            self.uses("dot");
+            return Ok("dot".to_owned());
+        }
+        let (base, wrapper) = convention(text);
+        if !spellable(base) {
+            return Err(format!(
+                "line {line}: `{text}` has characters a Nix name cannot spell"
+            ));
+        }
+        let (nix, inner) = match self.resolve(text, at, head) {
+            Some((depth, nix)) => (nix, depth + 1),
+            None if global(text) => {
+                let nix = escaped(base, false);
+                self.uses(&nix);
+                (nix, 0)
+            }
+            None => {
+                self.unknown.borrow_mut().insert(text.to_owned());
+                (escaped(base, false), 0)
+            }
+        };
+        let frames = self.frames.borrow();
+        if frames[inner..]
+            .iter()
+            .any(|frame| frame.bindings.iter().any(|binding| binding.nix == nix))
+        {
+            return Err(format!(
+                "line {line}: `{text}` is spelled `{nix}` in Nix, which a nearer binding of that Nix name shadows"
+            ));
+        }
+        Ok(match wrapper {
+            Some(wrapper) => {
+                self.uses(wrapper);
+                format!("({wrapper} {nix})")
+            }
+            None => nix,
+        })
+    }
+
+    fn atom(&self, item: &Item, text: &str, head: bool, indent: usize) -> Result<String, String> {
+        if let Some(int) = nix::int(text) {
+            return Ok(int);
+        }
+        if let Some(float) = float(text) {
+            return Ok(float);
+        }
+        let constructed = |name: &str, argument: String| {
+            self.uses(name);
+            format!("({name} {argument})")
+        };
+        if let Some((numerator, denominator)) = text.split_once('/') {
+            if let (Some(numerator), Some(denominator)) =
+                (nix::int(numerator), nix::int(denominator))
+            {
+                if !denominator.starts_with('(') && denominator != "0" {
+                    return Ok(constructed("ratio", format!("{numerator} {denominator}")));
+                }
+            }
+        }
+        if let Some(int) = text.strip_suffix("d0").and_then(nix::int) {
+            return Ok(constructed("double", int));
+        }
+        if let Some(value) = hex(text) {
+            return Ok(constructed("hex", value.to_string()));
+        }
+        if let Some(name) = text.strip_prefix("#\\") {
+            return Ok(constructed("char", self.string(name, indent)));
+        }
+        if let Some(name) = text.strip_prefix("#:") {
+            if !name.is_empty() && !name.contains([':', '|', '\\', '#']) {
+                return Ok(constructed("uninterned", self.string(name, indent)));
+            }
+        }
+        if let Some(name) = text.strip_prefix(':') {
+            if !name.is_empty() && !name.contains([':', '|', '\\', '#']) {
+                return Ok(constructed("kw", self.string(name, indent)));
+            }
+        }
+        if text.starts_with('#') || text.contains([':', '|', '\\']) || number(text) {
+            return Err(format!(
+                "line {}: `{text}` is reader syntax the printer does not write",
+                line_of(self.source, item.start)
+            ));
+        }
+        self.symbol(text, item.start, head)
+    }
+
+    fn form(&self, item: &Item, local: bool, head: bool, indent: usize) -> Result<String, String> {
+        let line = line_of(self.source, item.start);
         Ok(match &item.form {
-            Form::Atom(text) => nix::int(text).unwrap_or_else(|| self.string(text, indent)),
-            Form::Str(text) => format!("(str {})", self.string(text, indent)),
-            Form::Comment(text) => format!("(comment {})", self.string(text, indent)),
-            Form::Prefix(name, inner) => format!("({name} {})", self.form(inner, false, indent)?),
-            Form::List(items) => self.list(item.start, items, local, false, indent)?,
+            Form::Atom(text) => self.atom(item, text, head, indent)?,
+            Form::Str(text) => {
+                self.uses("str");
+                format!("(str {})", self.string(text, indent))
+            }
+            Form::Comment(text) => {
+                self.uses("comment");
+                format!("(comment {})", self.string(text, indent))
+            }
+            Form::Prefix(name, inner) => {
+                self.uses(name);
+                let inner = self.form(inner, false, *name == "function", indent)?;
+                format!("({name} {inner})")
+            }
+            Form::List(items) => {
+                let (sites, functions) = declared(items, local);
+                let names: Vec<&str> = sites.iter().filter_map(|site| atom(site)).collect();
+                let hidden = outside(items, &names)
+                    .into_iter()
+                    .flat_map(|(value, read)| {
+                        read.into_iter()
+                            .map(move |name| (value.start, value.end, name))
+                    })
+                    .collect();
+                let sites: Vec<(&Item, bool)> =
+                    sites.into_iter().map(|site| (site, functions)).collect();
+                match self.enter(&sites, hidden, line)? {
+                    Some(formals) => {
+                        let body = self.list(item.start, items, local, false, indent);
+                        self.frames.borrow_mut().pop();
+                        let body = body?;
+                        let body = body
+                            .strip_prefix('(')
+                            .and_then(|rows| rows.strip_suffix(')'))
+                            .unwrap_or(&body);
+                        format!("({{{formals}}}: {body})")
+                    }
+                    None => self.list(item.start, items, local, false, indent)?,
+                }
+            }
         })
     }
 
@@ -392,7 +1210,7 @@ impl Emitter<'_> {
                     return self.list(item.start, definitions, false, true, indent);
                 }
             }
-            self.form(item, children_local, indent)
+            self.form(item, children_local, index == 0, indent)
         };
         if rows.len() <= 1 {
             let parts = (0..items.len())
@@ -401,10 +1219,12 @@ impl Emitter<'_> {
             return Ok(format!("[{}]", parts.join(" ")));
         }
         let pad = " ".repeat(indent + 2);
+        self.uses("rows");
         let mut out = String::from("(rows [\n");
         for row in &rows {
             out.push_str(&pad);
             if row.blank {
+                self.uses("blank");
                 out.push_str("blank");
             } else {
                 let parts = (row.first..row.first + row.items.len())
@@ -417,7 +1237,10 @@ impl Emitter<'_> {
                     format!("[{}]", parts.join(" "))
                 };
                 match row.at {
-                    Some(at) => out.push_str(&format!("(at {at} {body})")),
+                    Some(at) => {
+                        self.uses("at");
+                        out.push_str(&format!("(at {at} {body})"));
+                    }
                     None => out.push_str(&body),
                 }
             }

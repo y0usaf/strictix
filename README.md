@@ -114,6 +114,23 @@ derive is kept as `rows`, `inline`, `at`, `below` (TypeScript's break after
 the first file, renames, `\ No newline at end of file`) is an error naming the
 line. The Luau and JavaScript importers print every tree back as the printer
 would and refuse the file at the first line that differs from the source.
+Lisp names are Nix bindings too: `import lisp` prints the whole data file,
+`{defun, getf, kw, ...}: ({f, g}: [ ... ])`, its formals the constructors and
+the `generators.lisp` globals the file uses (Common Lisp symbols, `loop`
+keywords, tomoe's and ekko's API, mirrored in the importer's `CL`, `LOOP`,
+`TOMOE` and `EKKO`). A form that binds names (the file's definitions, lambda
+lists, `let`, `let*`, `flet`, `labels`, `macrolet`, `destructuring-bind`,
+`multiple-value-bind`, `dolist`, `dotimes`, the stream macros, `loop`
+variables) is a lambda of them; a list's head resolves in the function
+namespace, other symbols as variables first. A name that is a Nix keyword, a
+constructor or a global gets a trailing `'`, as does a rebinding its own
+initializer reads; `+x+` and `*x*` are `constant x` and `special x`, the
+operators Nix cannot spell strings, a keyword `kw`, `#:x` `uninterned`, a
+character `char`, a ratio, `Nd0` and `#x` number `ratio`, `double` and `hex`,
+and a `loop` clause its words. Symbols nothing binds that are no global
+(listed together in one error), a name Nix cannot spell, a package-qualified
+symbol, other reader syntax, a name declared twice in one form and a name a
+nearer Nix binding shadows are errors.
 GLSL is read for meaning, not layout: `import glsl` prints a shader as a
 function of the generator's constructors and of the shader itself, `{fn,
 vec2, mix, ...}: self: let inherit (self) PAL hash; in {defines, consts,

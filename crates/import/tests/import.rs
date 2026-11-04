@@ -1,29 +1,83 @@
 use strictix_import::{data_file, expression};
 
 #[test]
-fn lisp_lists_are_nix_lists_and_breaks_are_rows() {
+fn lisp_bound_names_are_nix_lambdas_and_free_symbols_are_formals() {
     let source = "(in-package #:user)\n\n(defun f (x)\n  \"Doc.\"\n  (list 'x #'car -1 2.5))\n";
     assert_eq!(
         expression("lisp", source, &[]).unwrap(),
-        "[\n  [\"in-package\" \"#:user\"]\n  blank\n  (rows [\n    [\"defun\" \"f\" [\"x\"]]\n    (str \"Doc.\")\n    [[\"list\" (quote \"x\") (function \"car\") (-1) \"2.5\"]]\n  ])\n]"
+        "{\n  blank,\n  car,\n  defun,\n  function,\n  in-package,\n  list,\n  quote,\n  rows,\n  str,\n  uninterned,\n  ...\n}: ({f}: [\n  [in-package (uninterned \"user\")]\n  blank\n  ({x}: rows [\n    [defun f [x]]\n    (str \"Doc.\")\n    [[list (quote x) (function car) (-1) 2.5]]\n  ])\n])"
+    );
+}
+
+#[test]
+fn lisp_a_function_name_and_a_variable_of_the_same_symbol_are_two_nix_names() {
+    assert_eq!(
+        expression("lisp", "(defun f (list) (list list))\n", &[]).unwrap(),
+        "{\n  defun,\n  list,\n  ...\n}: ({f}: [\n  ({list'}: [defun f [list'] [list list']])\n])"
+    );
+    assert_eq!(
+        expression("lisp", "(flet ((g (y &optional (z 1)) (list y z))) (g 1))\n", &[]).unwrap(),
+        "{\n  and-optional,\n  flet,\n  list,\n  ...\n}: [\n  ({g}: [flet [({y, z}: [g [y and-optional [z 1]] [list y z]])] [g 1]])\n]"
+    );
+}
+
+#[test]
+fn lisp_a_rebinding_read_from_outside_its_form_is_primed() {
+    assert_eq!(
+        expression("lisp", "(defun f (m)\n  (let ((m (list m)))\n    m))\n", &[]).unwrap(),
+        "{\n  defun,\n  let',\n  list,\n  rows,\n  ...\n}: ({f}: [\n  ({m}: rows [\n    [defun f [m]]\n    ({m'}: rows [\n      [let' [[m' [list m]]]]\n      m'\n    ])\n  ])\n])"
+    );
+}
+
+#[test]
+fn lisp_loop_variables_earmuffs_and_reader_literals_are_typed() {
+    assert_eq!(
+        expression("lisp", "(loop for (a . b) on nil collect a)\n", &[]).unwrap(),
+        "{\n  collect,\n  dot,\n  for,\n  loop,\n  nil,\n  on,\n  ...\n}: [\n  ({a, b}: [loop for [a dot b] on nil collect a])\n]"
+    );
+    assert_eq!(
+        expression("lisp", "(defvar *x* 1)\n(defun f () (list *x* +gap+ (+ 1 2)))\n", &[]).unwrap(),
+        "{\n  constant,\n  defun,\n  defvar,\n  gap,\n  list,\n  special,\n  ...\n}: ({x, f}: [\n  [defvar (special x) 1]\n  [defun f [] [list (special x) (constant gap) [\"+\" 1 2]]]\n])"
+    );
+    assert_eq!(
+        expression("lisp", "(list :a #\\Space 1/2 1d0 #xFF)\n", &[]).unwrap(),
+        "{\n  char,\n  double,\n  hex,\n  kw,\n  list,\n  ratio,\n  ...\n}: [\n  [list (kw \"a\") (char \"Space\") (ratio 1 2) (double 1) (hex 255)]\n]"
     );
 }
 
 #[test]
 fn lisp_indentation_off_the_rules_is_kept_with_at() {
-    let source = "(foo a\n       b)\n";
     assert_eq!(
-        expression("lisp", source, &[]).unwrap(),
-        "[\n  (rows [\n    [\"foo\" \"a\"]\n    (at 7 \"b\")\n  ])\n]"
+        expression("lisp", "(list nil\n   t)\n", &[]).unwrap(),
+        "{\n  at,\n  list,\n  nil,\n  rows,\n  t,\n  ...\n}: [\n  (rows [\n    [list nil]\n    (at 3 t)\n  ])\n]"
     );
 }
 
 #[test]
+fn lisp_names_nothing_declares_and_names_nix_cannot_hold_are_errors() {
+    assert!(expression("lisp", "(frobnicate x)\n", &[])
+        .unwrap_err()
+        .contains("`frobnicate`, `x` are bound nowhere"));
+    assert!(expression("lisp", "(defun f (a$b) a$b)\n", &[])
+        .unwrap_err()
+        .contains("cannot spell"));
+    assert!(expression("lisp", "(cl:car nil)\n", &[])
+        .unwrap_err()
+        .contains("reader syntax"));
+    assert!(expression("lisp", "(defun f (char) (char char 0))\n", &[])
+        .unwrap_err()
+        .contains("shadows"));
+    assert!(expression("lisp", "(let ((a 1) (a 2)) a)\n", &[])
+        .unwrap_err()
+        .contains("declared twice"));
+}
+
+#[test]
 fn lisp_spacing_the_printer_cannot_reproduce_is_an_error() {
-    assert!(expression("lisp", "(a  b)\n", &[])
+    assert!(expression("lisp", "(list  t)\n", &[])
         .unwrap_err()
         .contains("separated by"));
-    assert!(expression("lisp", "(a) (b)\n", &[])
+    assert!(expression("lisp", "(list) (list)\n", &[])
         .unwrap_err()
         .contains("share a line"));
 }
@@ -78,12 +132,12 @@ fn holes_become_interpolations() {
 #[test]
 fn a_data_file_takes_the_constructors_it_uses() {
     assert_eq!(
-        data_file("lisp", "(a b)\n", &[]).unwrap(),
-        "_: [\n  [\"a\" \"b\"]\n]\n"
+        data_file("lisp", "(1 2)\n", &[]).unwrap(),
+        "_: [\n  [1 2]\n]\n"
     );
     assert_eq!(
-        data_file("lisp", "(a\n \"b\")\n", &[]).unwrap(),
-        "{\n  rows,\n  str,\n  ...\n}: [\n  (rows [\n    \"a\"\n    (str \"b\")\n  ])\n]\n"
+        data_file("lisp", "(list\n \"b\")\n", &[]).unwrap(),
+        "{\n  list,\n  rows,\n  str,\n  ...\n}: [\n  (rows [\n    list\n    (str \"b\")\n  ])\n]\n"
     );
 }
 
