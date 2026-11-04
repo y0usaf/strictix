@@ -479,33 +479,54 @@ fn python_template_placeholders_are_a_constructor() {
 }
 
 #[test]
-fn javascript_statements_expressions_and_layout() {
-    let source = "#!/usr/bin/env node\n\nimport { join } from \"node:path\";\n\nconst { a, b } = x;\nlet n;\nasync function f(s) {\n  if (!s) return;\n  try { n = await g(s, -1); } catch {}\n  const o = { k: [1, \"v\"], \"q-r\": {\n    m: (n = s.t?.u) >= 0\n  }};\n  return o.k.length +\n    typeof n;\n}\n";
+fn javascript_names_are_nix_bindings_and_operators_infix_lists() {
+    let source = "#!/usr/bin/env node\n\nimport { join } from \"node:path\";\n\nconst { a, b: [c] } = process;\nlet n;\nasync function f(s, obj) {\n  if (!s) return;\n  try { n = await join(s, -1, 0.5); } catch {}\n  const o = { k: [1, \"v\", null], \"q-r\": {\n    m: (n = s.t?.u) >= 0 && (a || c)\n  }};\n  return o.k.length +\n    typeof n;\n}\n";
     assert_eq!(
         expression("javascript", source, &[]).unwrap(),
-        "[\n  (comment \"#!/usr/bin/env node\")\n  blank\n  (import' [\"join\"] \"node:path\")\n  blank\n  (const (obj [\"a\" \"b\"]) \"x\")\n  (let' \"n\" null)\n  (async (function \"f\" [\"s\"] [\n(if' (not \"s\") (return null))\n(try' (inline [(op [\"n\" \"=\" (await [\"g\" \"s\" (-1)])])]) null (inline []))\n(const \"o\" (obj [[\"k\" (array [1 (str \"v\")])] [(str \"q-r\") (obj (rows [\n[\"m\" (op [(paren (op [\"n\" \"=\" \"s.t?.u\"])) \">=\" 0])]\n]))]]))\n(return (op (rows [\n\"o.k.length\"\n\"+\"\n(typeof \"n\")\n])))\n]))\n]"
+        "{\n  array,\n  async,\n  await,\n  blank,\n  call,\n  comment,\n  const,\n  dot,\n  function,\n  if',\n  import',\n  inline,\n  let',\n  not,\n  null',\n  obj,\n  optional,\n  process,\n  return,\n  rows,\n  str,\n  try',\n  typeof,\n  ...\n}: ({join, a, c, n, f}: [\n(comment \"#!/usr/bin/env node\")\nblank\n(import' [join] \"node:path\")\nblank\n(const (obj [a [\"b\" (array [c])]]) process)\n(let' n null)\n(async (function f ({s, obj', o}: {params = [s obj']; body = [\n(if' (not s) (return null))\n(try' (inline [[n \"=\" (await (call join [s (-1) 0.5]))]]) (inline []))\n(const o (obj [[\"k\" (array [1 (str \"v\") null'])] [(str \"q-r\") (obj (rows [\n[\"m\" [[n \"=\" (optional (dot s \"t\") \"u\")] \">=\" 0 \"&&\" [a \"||\" c]]]\n]))]]))\n(return (rows [\n(dot o \"k.length\")\n\"+\"\n(typeof n)\n]))\n];})))\n])"
     );
 }
 
 #[test]
-fn javascript_layout_the_printer_cannot_reproduce_is_an_error() {
-    assert!(expression("javascript", "f(a,b);\n", &[])
+fn javascript_what_the_tree_cannot_hold_is_an_error() {
+    assert!(expression("javascript", "const f = 1;\nf(f,f);\n", &[])
         .unwrap_err()
-        .contains("line 1"));
+        .contains("line 2"));
     assert!(expression("javascript", "const o = {a: 1};\n", &[]).is_err());
-    assert!(expression("javascript", "if (a) f();\n", &[])
+    assert!(expression("javascript", "let a;\nif (a) a = 1;\n", &[])
         .unwrap_err()
         .contains("without braces"));
     assert!(expression("javascript", "const s = 'x';\n", &[])
         .unwrap_err()
         .contains("single-quoted"));
+    assert!(expression("javascript", "g(1);\n", &[])
+        .unwrap_err()
+        .contains("declared nowhere"));
+    assert!(expression("javascript", "const $x = 1;\n", &[])
+        .unwrap_err()
+        .contains("cannot spell"));
+    assert!(
+        expression("javascript", "const a = 1;\nconst b = (a) + 1;\n", &[])
+            .unwrap_err()
+            .contains("(a) + 1")
+    );
+    assert!(
+        expression("javascript", "function f() {}\nfunction f() {}\n", &[])
+            .unwrap_err()
+            .contains("declared twice")
+    );
+    assert!(
+        expression("javascript", "const a = 1;\nconst b = a +\n  a + a;\n", &[])
+            .unwrap_err()
+            .contains("some operators")
+    );
 }
 
 #[test]
-fn javascript_data_file_leaves_null_to_nix() {
+fn javascript_data_file_is_the_program_function() {
     assert_eq!(
         data_file("javascript", "let n;\n", &[]).unwrap(),
-        "{\n  let',\n  ...\n}: [\n  (let' \"n\" null)\n]\n"
+        "{\n  let',\n  ...\n}: ({n}: [\n(let' n null)\n])\n"
     );
 }
 

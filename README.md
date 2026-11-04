@@ -160,6 +160,17 @@ with a trailing `'`; a name nothing declares that is not one of those globals,
 a use of a name before the local Nix would bind it to, a global function,
 parentheses StyLua removes and an `if` or cast operand without parentheses are
 errors.
+JavaScript keeps its layout but is printed like GLSL as a function of the
+constructors and Node globals it uses, `{call, dot, process, ...}: ({buf,
+handle}: [ ... ])`: the program, a function or arrow, a braced body and a
+`catch` that declare names are lambdas of them (a function's returning
+`{params = [...]; body = ...;}`), a name that is a Nix keyword or an attribute
+of `generators.javascript` is spelled with a trailing `'`, a member path is
+`dot` or `optional` with a property string, a call `call f [args]`, and
+operators infix lists nested only where precedence needs parentheses (the
+printer adds prettier's own); a name nothing declares that is not one of the
+generator's globals, a name Nix cannot spell (`$x`), parentheses the printer
+would not write and an unbraced body that is an operation are errors.
 tree-sitter-glsl reads `(float(x) + y)` as a broken cast, so the importer
 parses a constructor call of a builtin scalar type (`float(`, `int(`, `uint(`,
 `bool(`, `double(`) as a call of an identifier, keeping its source bytes.
