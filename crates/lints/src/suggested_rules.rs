@@ -347,7 +347,7 @@ pub(crate) fn syntax_tree(root: &SyntaxNode) -> bool {
                 Some(Expr::Let(scope)) => scope.body().map(unwrap_parens),
                 other => other,
             };
-            constructors && matches!(body, Some(Expr::Attrset(_)))
+            constructors && matches!(body, Some(Expr::Attrset(_) | Expr::List(_)))
         }
         _ => false,
     }

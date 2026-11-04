@@ -27,6 +27,8 @@ pub const LANGUAGES: [&str; 11] = [
     "vbs",
 ];
 
+const BOUND: [&str; 1] = ["glsl"];
+
 pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     match language {
         "glsl" => glsl::import(source, holes),
@@ -49,7 +51,7 @@ pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<Stri
 
 pub fn data_file(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
     let expression = expression(language, source, holes)?;
-    if language == "glsl" {
+    if BOUND.contains(&language) {
         return Ok(format!("{expression}\n"));
     }
     let names = constructors(&expression);
