@@ -28,7 +28,13 @@ impl Rule for ScatteredDocumentation {
         false
     }
 
-    fn check_path(&self, path: &Path, config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+    fn check_path(
+        &self,
+        path: &Path,
+        _source: &str,
+        config: &LintConfig,
+        diags: &mut Vec<Diagnostic>,
+    ) {
         if !path
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))

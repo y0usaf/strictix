@@ -6,7 +6,7 @@ use strictix_lints::scattered_documentation::ScatteredDocumentation;
 
 fn reported(path: &str, config: &LintConfig) -> usize {
     let mut diags = Vec::new();
-    ScatteredDocumentation {}.check_path(Path::new(path), config, &mut diags);
+    ScatteredDocumentation {}.check_path(Path::new(path), "", config, &mut diags);
     diags.len()
 }
 

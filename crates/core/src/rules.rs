@@ -101,18 +101,23 @@ pub trait Rule: Send + Sync {
         self.check_file(model, config, diags);
     }
 
+    /// Inspect a file the walk reached that is not Nix: its path and its
+    /// text (empty when it is not UTF-8).
     fn check_path(
         &self,
         _path: &std::path::Path,
+        _source: &str,
         _config: &LintConfig,
         _diags: &mut Vec<Diagnostic>,
     ) {
     }
 }
 
+/// Run every enabled rule's [Rule::check_path] over one non-Nix file.
 pub fn run_path_rules(
     rules: &[Box<dyn Rule>],
     path: &std::path::Path,
+    source: &str,
     config: &LintConfig,
 ) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
@@ -120,9 +125,10 @@ pub fn run_path_rules(
         if config.is_enabled(rule.code())
             && (rule.default_enabled() || config.enabled.iter().any(|code| code == rule.code()))
         {
-            rule.check_path(path, config, &mut diags);
+            rule.check_path(path, source, config, &mut diags);
         }
     }
+    diags.sort_by_key(|d| d.range.start());
     diags
 }
 

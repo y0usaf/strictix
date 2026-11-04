@@ -298,7 +298,7 @@ the binding copies verbatim, and is withheld otherwise.
 
 ## Rules
 
-105 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
+106 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
@@ -307,7 +307,7 @@ the binding copies verbatim, and is withheld otherwise.
 | Hallucination checks | unknown-option, option-type-mismatch, unknown-builtin, unknown-lib-type |
 | Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, duplicate-function-argument, dynamic-import, suspicious-import-argument, suspicious-recursion, unsafe-with-shadowing, shallow-merge-overwrite (opt-in), discouraged-lib-type, masked-generator |
 | Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in), constant-option (opt-in) |
-| Layout | scattered-documentation (opt-in), unformatted-file (opt-in) |
+| Layout | scattered-documentation (opt-in), unformatted-file (opt-in), wrapped-prose (opt-in) |
 | Maintainability | cyclomatic-complexity, cognitive-complexity |
 | Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, singleton-attrset (opt-in), singleton-list (opt-in), templated-bindings (opt-in), collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data, codec-candidate, duplicate-definitions (opt-in) |
 
@@ -478,6 +478,16 @@ file. Without `command` it does nothing. It has no automatic fix: run the
 formatter. A formatted tree is one `strictix merge` records no file of
 verbatim, since merge keeps the original text of every file the formatter
 would change.
+
+`wrapped-prose` is opt-in and, like `scattered-documentation`, reads the
+files the walk reaches that are not `.nix`: in a Markdown file (`.md`,
+`.markdown`) it reports each paragraph or list item that continues on the next
+line through a soft line break, which renders as a space, once per paragraph.
+Fenced and indented code, HTML blocks (`<pre>` through its closing tag,
+others to the next blank line), tables, headings, quotes, setext underlines,
+thematic breaks and link reference definitions keep their lines, and a hard
+break (two trailing spaces or a backslash) is not reported. Join each
+paragraph and item into one line; the rendered document does not change.
 
 `discouraged-lib-type` flags `types.attrs`, which merges definitions
 shallowly and does not discharge `mkIf`/`mkDefault`, and fixes it to

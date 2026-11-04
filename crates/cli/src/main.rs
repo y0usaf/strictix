@@ -346,10 +346,11 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
     let path_results: Vec<FileResult> = others
         .iter()
         .filter_map(|path| {
-            let diagnostics = strictix_core::rules::run_path_rules(&rules, path, &config);
+            let source = std::fs::read_to_string(path).unwrap_or_default();
+            let diagnostics = strictix_core::rules::run_path_rules(&rules, path, &source, &config);
             (!diagnostics.is_empty()).then(|| FileResult {
                 path: path.clone(),
-                source: std::fs::read_to_string(path).unwrap_or_default(),
+                source,
                 diagnostics,
                 read_error: None,
                 fixes_applied: 0,

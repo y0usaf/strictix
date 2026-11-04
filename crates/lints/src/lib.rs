@@ -50,6 +50,7 @@ pub mod templated_bindings;
 pub mod unexpected_function_argument;
 pub mod unformatted_file;
 pub mod unused_option;
+pub mod wrapped_prose;
 
 use advanced_rules::{
     BuiltinArity, DuplicateFunctionArgument, DynamicImport, SuspiciousImportArgument,
@@ -118,6 +119,7 @@ use templated_bindings::TemplatedBindings;
 use unexpected_function_argument::UnexpectedFunctionArgument;
 use unformatted_file::UnformattedFile;
 use unused_option::UnusedOption;
+use wrapped_prose::WrappedProse;
 
 /// The full builtin registry, in declaration order.
 ///
@@ -235,5 +237,6 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         HandWrittenLuaData,
         ScatteredDocumentation,
         UnformattedFile,
+        WrappedProse,
     }
 }
