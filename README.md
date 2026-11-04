@@ -431,6 +431,8 @@ rule runs by default.
 Config (strictix.toml) toggles rules; .strictixignore prunes paths.
 `[lint] generated = ["path/prefix", ...]` marks generated data files (matched like
 `[schemas]` prefixes) so `hand-maintained-data-file` skips them.
+A `[lint.<rule-code>]` section holds that rule's settings, such as
+`[lint.constant-option] readers = 3`; a rule documents the settings it reads.
 `[codecs.<id>] extensions = ["json"]` sections enable `codec-candidate`, which flags literal data texts and data files of those extensions and adds a `codec` object to `--format json` output for a converter to rewrite them as Nix values. A codec section with `generator = "lispSource"` also flags `generators.lispSource (import ./x.data.nix)`, a line list, as a `file` candidate with the `lines` loader, for the converter to replace with the syntax tree `strictix import` prints.
 For a one-off finding, put a full-line `# strictix: disable-next-line=CODE`
 comment immediately above the code it reports. The directive is intentionally

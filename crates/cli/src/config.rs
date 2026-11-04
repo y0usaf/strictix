@@ -23,7 +23,8 @@
 //! and the `[schemas]` section of `"path prefix" = "options.json"` pairs
 //! (`""` turns the schema rules off under that prefix), and
 //! `[codecs.<id>]` sections with an `extensions` string array and an optional
-//! `generator` string. Unknown keys in
+//! `generator` string, and `[lint.<rule-code>]` sections of per-rule settings
+//! (a string value is unquoted, any other value kept as written). Unknown keys in
 //! `[lint]` and unknown sections are ignored; missing keys are fine.
 //!
 //! ponytail: no trailing comments, no multiline arrays, no other TOML
@@ -94,7 +95,10 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
             continue;
         }
         let codec = section.strip_prefix("codecs.").map(str::to_owned);
-        if section != "lint" && section != "schemas" && codec.is_none() {
+        let rule = section
+            .strip_prefix("lint.")
+            .map(|code| code.trim_matches('"').to_owned());
+        if section != "lint" && section != "schemas" && codec.is_none() && rule.is_none() {
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
@@ -102,6 +106,18 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
         };
         let key = key.trim();
         let value = value.trim();
+        if let Some(code) = rule {
+            let setting = if value.starts_with('"') {
+                parse_toml_string(value).map_err(|e| format!("line {}: {e}", line_no + 1))?
+            } else {
+                value.to_owned()
+            };
+            config
+                .settings
+                .retain(|(c, k, _)| !(*c == code && k == key));
+            config.settings.push((code, key.to_owned(), setting));
+            continue;
+        }
         if let Some(id) = codec {
             if key == "generator" {
                 let generator =
@@ -203,4 +219,24 @@ fn parse_toml_string(value: &str) -> Result<String, String> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_config;
+
+    #[test]
+    fn rule_sections_hold_settings() {
+        let config = parse_config(
+            "[lint]\nenabled = [\"constant-option\"]\n\n[lint.constant-option]\nreaders = 3\n\n[lint.\"scattered-documentation\"]\nfile = \"modules/README.md\"\n",
+        )
+        .unwrap();
+        assert_eq!(config.enabled, ["constant-option"]);
+        assert_eq!(config.setting_usize("constant-option", "readers"), Some(3));
+        assert_eq!(
+            config.setting_str("scattered-documentation", "file"),
+            Some("modules/README.md")
+        );
+        assert_eq!(config.setting_str("constant-option", "file"), None);
+    }
 }

@@ -28,6 +28,7 @@ pub struct LintConfig {
     /// enables `codec-candidate`.
     pub codecs: Vec<(String, Vec<String>)>,
     pub codec_generators: Vec<(String, String)>,
+    pub settings: Vec<(String, String, String)>,
 }
 
 impl LintConfig {
@@ -81,5 +82,25 @@ impl LintConfig {
     pub fn with_schema(mut self, path: impl Into<PathBuf>) -> Self {
         self.schema = Some(path.into());
         self
+    }
+
+    pub fn with_setting(mut self, code: &str, key: &str, value: impl Into<String>) -> Self {
+        self.settings.retain(|(c, k, _)| !(c == code && k == key));
+        self.settings
+            .push((code.to_owned(), key.to_owned(), value.into()));
+        self
+    }
+
+    #[must_use]
+    pub fn setting_str(&self, code: &str, key: &str) -> Option<&str> {
+        self.settings
+            .iter()
+            .find(|(c, k, _)| c == code && k == key)
+            .map(|(_, _, value)| value.as_str())
+    }
+
+    #[must_use]
+    pub fn setting_usize(&self, code: &str, key: &str) -> Option<usize> {
+        self.setting_str(code, key)?.parse().ok()
     }
 }
