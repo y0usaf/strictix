@@ -308,7 +308,7 @@ the binding copies verbatim, and is withheld otherwise.
 | Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, duplicate-function-argument, dynamic-import, suspicious-import-argument, suspicious-recursion, unsafe-with-shadowing, shallow-merge-overwrite (opt-in), discouraged-lib-type, masked-generator |
 | Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in), constant-option (opt-in) |
 | Maintainability | cyclomatic-complexity, cognitive-complexity |
-| Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data, codec-candidate, duplicate-definitions (opt-in) |
+| Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, singleton-attrset (opt-in), collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data, codec-candidate, duplicate-definitions (opt-in) |
 
 `cognitive-complexity` warns when a lambda scores above **5**. It counts
 control-flow nesting, conditional helpers (`lib.mkIf`, `lib.optional*`),
@@ -415,6 +415,24 @@ whose convention is that a value several modules share stays an option.
 The `defined` list (`defined = ["a.b"]`) names options that something outside
 the linted files defines, such as a module from a flake input that a linted
 module imports, so an evaluation of the configurations can supply them.
+
+`singleton-attrset` is opt-in: it reports an attribute-set binding whose
+value is a set of exactly one binding written over several lines,
+`x = {\n  y = v;\n};`, and fixes the whole chain of such sets into one
+attribute path, `x.y = v;`, moving the value's lines out by the two columns
+each dissolved set indented them (unless a quoted string spans lines or a
+line sits further out). Nix builds the same value, and the two lines of
+braces each set cost are gone. It leaves alone a `let` binding, a binding
+of a `rec` set, a binding with a sibling that starts with the same name
+(`repeated-keys` keeps that grouping), a set written on one line, a set
+holding an `inherit` and any comment the rewrite would drop. A finding
+inside another's rewrite gets its fix on the next `strictix fix` pass. The
+`exempt` list skips files whose path ends with one of its entries:
+
+```toml
+[lint.singleton-attrset]
+exempt = ["flake.nix", ".data.nix"]
+```
 
 `discouraged-lib-type` flags `types.attrs`, which merges definitions
 shallowly and does not discharge `mkIf`/`mkDefault`, and fixes it to
