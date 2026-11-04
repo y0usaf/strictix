@@ -147,9 +147,11 @@ value when the importer can infer the value's type by the generator's rules
 indexing, builtins and every arithmetic, matrix, comparison and logical
 operator) and `typed type value` only when it cannot (a macro's result);
 layout, blank lines, redundant parentheses and literal spelling are dropped,
-and a global that is not one `const` name, a name declared twice, a name the
-generator or Nix already uses, a name nothing declares, a suffixed float or a
-bare nested block is an error.
+and a global that is not one `const` name, a const whose value has another
+type than its declaration, a name declared twice, a name the generator or Nix
+already uses, a name nothing declares, a field that is not a swizzle, a
+swizzle of an infix expression, a literal or an increment, a suffixed float or
+a bare nested block is an error.
 TypeScript keeps its layout and reads names like GLSL: `import ts` prints the
 whole data file, `{call, dot, string, ...}: ({toolRenderers, failed, ...}: [
 ... ])`. Every identifier and type name is a Nix variable: the file, a block,
@@ -219,11 +221,6 @@ and the generator does not list, `local` outside a function, `export` and
 other declarations, a function inside a function, a name set inside `$(...)`,
 braces or backslashes the printer would not write, a heredoc whose delimiter is
 not single-quoted, `[[`, `$((...))` and backquotes are errors.
-and a global that is not one `const` name, a const whose value has another
-type than its declaration, a name declared twice, a name the generator or Nix
-already uses, a name nothing declares, a field that is not a swizzle, a
-swizzle of an infix expression, a literal or an increment, a suffixed float or
-a bare nested block is an error.
 tree-sitter-glsl reads `(float(x) + y)` as a broken cast, so the importer
 parses a constructor call of a builtin scalar type (`float(`, `int(`, `uint(`,
 `bool(`, `double(`) as a call of an identifier, keeping its source bytes.
