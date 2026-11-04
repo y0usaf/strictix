@@ -13,7 +13,7 @@ const NIX_KEYWORDS: [&str; 11] = [
     "assert", "else", "if", "in", "inherit", "let", "or", "rec", "then", "with", "self",
 ];
 
-const CONSTRUCTORS: [&str; 37] = [
+const CONSTRUCTORS: [&str; 36] = [
     "fn",
     "local",
     "set",
@@ -44,7 +44,6 @@ const CONSTRUCTORS: [&str; 37] = [
     "macro",
     "array",
     "index",
-    "swizzle",
     "math",
     "rgb",
     "render",
@@ -110,6 +109,132 @@ fn reserved(name: &str) -> bool {
         || arity(name).is_some()
 }
 
+const VECTORS: [(&str, &str); 4] = [
+    ("vec", "float"),
+    ("ivec", "int"),
+    ("uvec", "uint"),
+    ("bvec", "bool"),
+];
+
+const NUMBERS: [&str; 3] = ["int", "uint", "float"];
+
+fn vector(ty: &str) -> Option<(&'static str, usize)> {
+    VECTORS.iter().find_map(|(prefix, scalar)| {
+        let size = ty.strip_prefix(prefix)?.parse().ok()?;
+        (2..=4).contains(&size).then_some((*scalar, size))
+    })
+}
+
+fn shape(ty: &str) -> Option<(usize, usize)> {
+    let rest = ty.strip_prefix("mat")?;
+    let (columns, rows) = rest.split_once('x').unwrap_or((rest, rest));
+    let size = |text: &str| text.parse().ok().filter(|size| (2..=4).contains(size));
+    Some((size(columns)?, size(rows)?))
+}
+
+fn scalar_of(ty: &str) -> Option<&'static str> {
+    SCALARS
+        .into_iter()
+        .find(|scalar| *scalar == ty)
+        .or_else(|| vector(ty).map(|(scalar, _)| scalar))
+        .or_else(|| shape(ty).map(|_| "float"))
+}
+
+fn dimension(ty: &str) -> Option<usize> {
+    if SCALARS.contains(&ty) {
+        Some(1)
+    } else {
+        vector(ty).map(|(_, size)| size)
+    }
+}
+
+fn vector_of(scalar: &str, size: usize) -> String {
+    if size == 1 {
+        return scalar.to_owned();
+    }
+    let prefix = VECTORS
+        .iter()
+        .find(|(_, one)| *one == scalar)
+        .map_or("vec", |(prefix, _)| prefix);
+    format!("{prefix}{size}")
+}
+
+fn swizzle(name: &str) -> Option<usize> {
+    if !(1..=4).contains(&name.len()) {
+        return None;
+    }
+    ["xyzw", "rgba", "stpq"].iter().find_map(|set| {
+        let places: Option<Vec<usize>> = name.chars().map(|letter| set.find(letter)).collect();
+        places
+            .and_then(|places| places.into_iter().max())
+            .map(|reach| reach + 1)
+    })
+}
+
+fn within(kinds: &[&str], ty: &str) -> bool {
+    scalar_of(ty).is_some_and(|scalar| kinds.contains(&scalar))
+}
+
+fn integral(ty: &str) -> bool {
+    within(&["int", "uint"], ty) && shape(ty).is_none()
+}
+
+fn componentwise(left: &str, right: &str) -> Option<String> {
+    let with = |scalar: &str, other: &str| {
+        dimension(scalar) == Some(1) && scalar_of(other) == Some(scalar)
+    };
+    if left == right || with(right, left) {
+        Some(left.to_owned())
+    } else {
+        with(left, right).then(|| right.to_owned())
+    }
+}
+
+fn matrix_of(columns: usize, rows: usize) -> String {
+    if columns == rows {
+        format!("mat{columns}")
+    } else {
+        format!("mat{columns}x{rows}")
+    }
+}
+
+fn linear(left: &str, right: &str) -> Option<String> {
+    match (shape(left), shape(right)) {
+        (Some((columns, rows)), Some((others, inner))) => {
+            (columns == inner).then(|| matrix_of(others, rows))
+        }
+        (Some((columns, rows)), None) => {
+            (right == vector_of("float", columns)).then(|| vector_of("float", rows))
+        }
+        (None, Some((columns, rows))) => {
+            (left == vector_of("float", rows)).then(|| vector_of("float", columns))
+        }
+        (None, None) => None,
+    }
+}
+
+fn combine(operator: &str, left: &str, right: &str) -> Option<String> {
+    let numeric = within(&NUMBERS, left) && within(&NUMBERS, right);
+    let matrix = shape(left).is_some() || shape(right).is_some();
+    let scalar = dimension(left) == Some(1) || dimension(right) == Some(1);
+    match operator {
+        "*" if numeric && matrix && !scalar => linear(left, right),
+        "*" | "/" | "+" | "-" if numeric => componentwise(left, right),
+        "%" | "&" | "^" | "|" if integral(left) && integral(right) => componentwise(left, right),
+        "<<" | ">>"
+            if integral(left)
+                && integral(right)
+                && (dimension(right) == Some(1) || dimension(right) == dimension(left)) =>
+        {
+            Some(left.to_owned())
+        }
+        "<" | ">" | "<=" | ">=" if left == right && NUMBERS.contains(&left) => Some("bool".into()),
+        "==" | "!=" if left == right => Some("bool".into()),
+        "&&" | "||" | "^^" if left == "bool" && right == "bool" => Some("bool".into()),
+        _ => None,
+    }
+}
+
 struct Emitter<'s> {
     source: &'s str,
     holes: &'s [String],
@@ -117,6 +242,7 @@ struct Emitter<'s> {
     scopes: RefCell<Vec<Vec<String>>>,
     used: RefCell<BTreeSet<String>>,
     selves: RefCell<BTreeSet<String>>,
+    types: RefCell<BTreeMap<String, String>>,
 }
 
 #[derive(Default)]
@@ -135,6 +261,7 @@ pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
         scopes: RefCell::new(Vec::new()),
         used: RefCell::new(BTreeSet::new()),
         selves: RefCell::new(BTreeSet::new()),
+        types: RefCell::new(BTreeMap::new()),
     };
     let items = named(tree.root_node());
     for node in &items {
@@ -422,26 +549,84 @@ impl Emitter<'_> {
         }
     }
 
-    fn inferred(&self, node: Node<'_>) -> bool {
+    fn type_of(&self, node: Node<'_>) -> Option<String> {
         let node = unparen(node);
+        let part = |name: &str| node.child_by_field_name(name);
         match node.kind() {
-            "number_literal" | "true" | "false" => {
-                self.number(node).is_ok() || node.kind() != "number_literal"
+            "number_literal" => self.number(node).ok().map(|(_, kind)| kind.to_owned()),
+            "true" | "false" => Some("bool".into()),
+            "identifier" => {
+                let name = self.text(node);
+                let bound = self
+                    .scopes
+                    .borrow()
+                    .iter()
+                    .any(|scope| scope.iter().any(|one| one == name));
+                if bound {
+                    None
+                } else {
+                    self.types.borrow().get(name).cloned()
+                }
             }
             "unary_expression" => {
-                node.child_by_field_name("argument")
-                    .is_some_and(|argument| unparen(argument).kind() == "number_literal")
-                    && node
-                        .child_by_field_name("operator")
-                        .is_some_and(|operator| self.text(operator) == "-")
+                let operand = self.type_of(part("argument")?)?;
+                let fits = match self.text(part("operator")?) {
+                    "-" => within(&NUMBERS, &operand),
+                    "!" => operand == "bool",
+                    "~" => integral(&operand),
+                    _ => false,
+                };
+                fits.then_some(operand)
             }
-            "call_expression" => node
-                .child_by_field_name("function")
-                .is_some_and(|function| {
-                    (function.kind() == "identifier" && is_type(self.text(function)))
-                        || self.array_type(function).is_some()
-                }),
-            _ => false,
+            "binary_expression" => combine(
+                self.text(part("operator")?),
+                &self.type_of(part("left")?)?,
+                &self.type_of(part("right")?)?,
+            ),
+            "conditional_expression" => {
+                let yes = self.type_of(part("consequence")?)?;
+                (self.type_of(part("alternative")?)? == yes).then_some(yes)
+            }
+            "field_expression" => {
+                let (scalar, size) = vector(&self.type_of(part("argument")?)?)?;
+                let name = self.text(part("field")?);
+                (swizzle(name)? <= size).then(|| vector_of(scalar, name.len()))
+            }
+            "subscript_expression" => {
+                let base = self.type_of(part("argument")?)?;
+                if let Some((element, _)) = base.split_once('[') {
+                    Some(element.to_owned())
+                } else if let Some((_, rows)) = shape(&base) {
+                    Some(vector_of("float", rows))
+                } else {
+                    vector(&base).map(|(scalar, _)| scalar.to_owned())
+                }
+            }
+            "call_expression" => {
+                let function = part("function")?;
+                if let Some((base, size)) = self.array_type(function) {
+                    return Some(format!("{base}[{size}]"));
+                }
+                let name = self.text(function);
+                if function.kind() != "identifier" || self.globals.contains(name) {
+                    return None;
+                }
+                if is_type(name) {
+                    return Some(name.to_owned());
+                }
+                let arguments = named(part("arguments")?);
+                let at = match name {
+                    "length" | "distance" | "dot" => return Some("float".into()),
+                    "cross" => return Some("vec3".into()),
+                    "texture" => return Some("vec4".into()),
+                    "step" => 1,
+                    "smoothstep" => 2,
+                    _ if arity(name).is_some() => 0,
+                    _ => return None,
+                };
+                self.type_of(*arguments.get(at)?)
+            }
+            _ => None,
         }
     }
 
@@ -471,28 +656,27 @@ impl Emitter<'_> {
             "field_expression" => {
                 let base = unparen(self.field(node, "argument")?);
                 let name = self.text(self.field(node, "field")?);
-                let plain = name.chars().all(|c| "xyzw".contains(c));
+                if swizzle(name).is_none() {
+                    return self.refuse(node, "a field that is not a swizzle");
+                }
                 let selectable = match base.kind() {
-                    "identifier" | "subscript_expression" | "field_expression" => true,
-                    "call_expression" => {
-                        base.child_by_field_name("function")
-                            .is_some_and(|function| {
-                                function.kind() == "identifier" && !is_type(self.text(function))
-                            })
-                    }
+                    "identifier"
+                    | "subscript_expression"
+                    | "field_expression"
+                    | "call_expression"
+                    | "conditional_expression" => true,
+                    "unary_expression" => base
+                        .child_by_field_name("argument")
+                        .is_some_and(|argument| unparen(argument).kind() != "number_literal"),
                     _ => false,
                 };
-                let base = self.expression(base)?;
-                if plain && selectable {
-                    Ok(format!("{base}.{name}"))
-                } else {
-                    Ok(format!(
-                        "({} {} {})",
-                        self.uses("swizzle"),
-                        base,
-                        self.string(name)
-                    ))
+                if !selectable {
+                    return self.refuse(
+                        node,
+                        "a swizzle of an infix expression, a literal or an increment",
+                    );
                 }
+                Ok(format!("{}.{name}", self.expression(base)?))
             }
             "subscript_expression" => Ok(format!(
                 "({} {} {})",
@@ -716,18 +900,30 @@ impl Emitter<'_> {
             return self.refuse(node, "a const without a value");
         };
         let expression = self.expression(value)?;
-        let written = if self.inferred(value) {
-            expression
-        } else if size.is_some() {
-            return self.refuse(node, "an array const whose value is not its constructor");
-        } else {
-            format!(
+        let declared = match size {
+            Some(size) => format!("{ty}[{size}]"),
+            None => ty.clone(),
+        };
+        let written = match self.type_of(value) {
+            Some(found) if found == declared => expression,
+            Some(found) => {
+                return self.refuse(
+                    node,
+                    &format!("a {declared} const whose value is a {found}"),
+                )
+            }
+            None if size.is_some() => {
+                return self.refuse(node, "an array const whose value is not its constructor")
+            }
+            None => format!(
                 "({} {} {expression})",
                 self.uses("typed"),
                 self.type_name(ty)
-            )
+            ),
         };
-        Ok((self.text(name).to_owned(), written))
+        let name = self.text(name).to_owned();
+        self.types.borrow_mut().insert(name.clone(), declared);
+        Ok((name, written))
     }
 
     fn function(&self, node: Node<'_>) -> Result<(String, String), String> {
@@ -810,8 +1006,12 @@ impl Emitter<'_> {
             scopes: RefCell::new(vec![params.clone()]),
             used: RefCell::new(BTreeSet::new()),
             selves: RefCell::new(BTreeSet::new()),
+            types: self.types.clone(),
         };
         let body = inner.expression(init)?;
+        if let Some(ty) = inner.type_of(init).filter(|_| params.is_empty()) {
+            self.types.borrow_mut().insert(name.clone(), ty);
+        }
         self.used.borrow_mut().extend(inner.used.into_inner());
         self.selves.borrow_mut().extend(inner.selves.into_inner());
         if params.is_empty() {

@@ -139,7 +139,13 @@ function body or a block that declares names is a lambda whose formals are its
 parameters and locals (`({c, v}: [(local v uvec2 ...) ...])`), a global is
 inherited from `self`, and a builtin, type or prelude uniform is a formal, so
 every name is a Nix variable. Numbers and booleans are native Nix values,
-operators infix lists nested only where precedence needs parentheses;
+operators infix lists nested only where precedence needs parentheses, and a
+swizzle in any of GLSL's three letter sets is an attribute of the value it
+selects from (`(vec3 p 1.0).bgr`, `(index M 0).ts`). A constant is its bare
+value when the importer can infer the value's type by the generator's rules
+(literals, constructors, other constants and non-macro defines, swizzles,
+indexing, builtins and every arithmetic, matrix, comparison and logical
+operator) and `typed type value` only when it cannot (a macro's result);
 layout, blank lines, redundant parentheses and literal spelling are dropped,
 and a global that is not one `const` name, a name declared twice, a name the
 generator or Nix already uses, a name nothing declares, a suffixed float or a
@@ -213,6 +219,11 @@ and the generator does not list, `local` outside a function, `export` and
 other declarations, a function inside a function, a name set inside `$(...)`,
 braces or backslashes the printer would not write, a heredoc whose delimiter is
 not single-quoted, `[[`, `$((...))` and backquotes are errors.
+and a global that is not one `const` name, a const whose value has another
+type than its declaration, a name declared twice, a name the generator or Nix
+already uses, a name nothing declares, a field that is not a swizzle, a
+swizzle of an infix expression, a literal or an increment, a suffixed float or
+a bare nested block is an error.
 tree-sitter-glsl reads `(float(x) + y)` as a broken cast, so the importer
 parses a constructor call of a builtin scalar type (`float(`, `int(`, `uint(`,
 `bool(`, `double(`) as a call of an identifier, keeping its source bytes.

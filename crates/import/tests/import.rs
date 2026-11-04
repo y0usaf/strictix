@@ -359,7 +359,16 @@ fn glsl_locals_and_parameters_are_nix_bindings() {
     let source = "#define SCALE(c) ((c) / 255.0)\nconst float A = 0.50;\nconst vec2 P[2] = vec2[2](vec2(0.0), vec2(1.0, -1.0));\nconst float B = A * 2.0;\n// the falloff\nfloat f(in vec2 p, float k) {\n    float c = cos(k), s[2];\n    if (k < 0.0) return -(p.x + k);\n    else if (k > 1e-5) { float d = c - k; s[0] = d - (k - c); }\n    for (int i = 0; i < 3; i++) c += P[i].x * float(i) > 0.0 ? f(p.yx, k) : SCALE(1.0);\n    return c * (s[1] / 2.0);\n}\n";
     assert_eq!(
         expression("glsl", source, &[]).unwrap(),
-        "{\n  array,\n  commented,\n  cond,\n  cos,\n  float,\n  fn,\n  for,\n  if',\n  ifElse,\n  in',\n  inc,\n  index,\n  int,\n  local,\n  macro,\n  neg,\n  return,\n  set,\n  sized,\n  typed,\n  update,\n  vec2,\n  ...\n}: self: let\n  inherit (self) A P SCALE f;\nin {\n  defines = {\n    SCALE = (macro ({c}: [c \"/\" 255.0]));\n  };\n  consts = {\n    A = 0.5;\n    B = (typed float [A \"*\" 2.0]);\n    P = (array vec2 [(vec2 0.0) (vec2 1.0 (-1.0))]);\n  };\n  fns = {\n    f = (commented \"the falloff\" (fn float [{p = (in' vec2);} {k = float;}] ({p, k, c, s}: [\n(local c float (cos k))\n(local s (sized float 2) null)\n(ifElse [k \"<\" 0.0] [\n(return (neg [p.x \"+\" k]))\n] (if' [k \">\" 1.0e-5] ({d}: [\n(local d float [c \"-\" k])\n(set (index s 0) [d \"-\" [k \"-\" c]])\n])))\n(for ({i}: {\n init = (local i int 0);\n test = [i \"<\" 3];\n step = (inc i);\n body = [\n(update c \"+=\" (cond [(index P i).x \"*\" (float i) \">\" 0.0] (f p.yx k) (SCALE 1.0)))\n];\n}))\n(return [c \"*\" [(index s 1) \"/\" 2.0]])\n])));\n  };\n}"
+        "{\n  array,\n  commented,\n  cond,\n  cos,\n  float,\n  fn,\n  for,\n  if',\n  ifElse,\n  in',\n  inc,\n  index,\n  int,\n  local,\n  macro,\n  neg,\n  return,\n  set,\n  sized,\n  update,\n  vec2,\n  ...\n}: self: let\n  inherit (self) A P SCALE f;\nin {\n  defines = {\n    SCALE = (macro ({c}: [c \"/\" 255.0]));\n  };\n  consts = {\n    A = 0.5;\n    B = [A \"*\" 2.0];\n    P = (array vec2 [(vec2 0.0) (vec2 1.0 (-1.0))]);\n  };\n  fns = {\n    f = (commented \"the falloff\" (fn float [{p = (in' vec2);} {k = float;}] ({p, k, c, s}: [\n(local c float (cos k))\n(local s (sized float 2) null)\n(ifElse [k \"<\" 0.0] [\n(return (neg [p.x \"+\" k]))\n] (if' [k \">\" 1.0e-5] ({d}: [\n(local d float [c \"-\" k])\n(set (index s 0) [d \"-\" [k \"-\" c]])\n])))\n(for ({i}: {\n init = (local i int 0);\n test = [i \"<\" 3];\n step = (inc i);\n body = [\n(update c \"+=\" (cond [(index P i).x \"*\" (float i) \">\" 0.0] (f p.yx k) (SCALE 1.0)))\n];\n}))\n(return [c \"*\" [(index s 1) \"/\" 2.0]])\n])));\n  };\n}"
+    );
+}
+
+#[test]
+fn glsl_every_value_has_its_swizzles_and_a_constant_its_inferred_type() {
+    let source = "#define SCALE(c) ((c) / 255.0)\n#define K 2.0\nconst vec2 O = vec2(0.5).ts;\nconst float A = K * 0.5 + length(O);\nconst mat2 M = mat2(A);\nconst vec2 R = O * M;\nconst float C = SCALE(A);\nvec3 f(vec2 p) {\n    return vec3(-p.st, 1.0).bgr + (p.x > 0.0 ? p : M[0]).xyx + cross(vec3(p, 1.0), vec3(1.0)).zyx;\n}\n";
+    assert_eq!(
+        expression("glsl", source, &[]).unwrap(),
+        "{\n  cond,\n  cross,\n  float,\n  fn,\n  index,\n  length,\n  macro,\n  mat2,\n  neg,\n  return,\n  typed,\n  vec2,\n  vec3,\n  ...\n}: self: let\n  inherit (self) A K M O SCALE;\nin {\n  defines = {\n    K = 2.0;\n    SCALE = (macro ({c}: [c \"/\" 255.0]));\n  };\n  consts = {\n    A = [K \"*\" 0.5 \"+\" (length O)];\n    C = (typed float (SCALE A));\n    M = (mat2 A);\n    O = (vec2 0.5).ts;\n    R = [O \"*\" M];\n  };\n  fns = {\n    f = (fn vec3 [{p = vec2;}] ({p}: [\n(return [(vec3 (neg p.st) 1.0).bgr \"+\" (cond [p.x \">\" 0.0] p (index M 0)).xyx \"+\" (cross (vec3 p 1.0) (vec3 1.0)).zyx])\n]));\n  };\n}"
     );
 }
 
@@ -382,6 +391,21 @@ fn glsl_what_a_keyed_shader_cannot_express_is_an_error() {
     .unwrap_err()
     .contains("declared twice"));
     assert!(expression("glsl", "const float a = 1.0f;\n", &[]).is_err());
+    assert!(expression("glsl", "const float a = 1;\n", &[])
+        .unwrap_err()
+        .contains("whose value is a int"));
+    assert!(expression(
+        "glsl",
+        "float f(vec2 a, vec2 b) {\n    return (a + b).x;\n}\n",
+        &[]
+    )
+    .unwrap_err()
+    .contains("a swizzle of an infix expression"));
+    assert!(
+        expression("glsl", "float f(vec4 a) {\n    return a.xg;\n}\n", &[])
+            .unwrap_err()
+            .contains("not a swizzle")
+    );
     assert!(expression("glsl", "const float a = 1.0;\n// trailing\n", &[]).is_err());
     assert!(expression("glsl", "void f() {\n    { a = 1.0; }\n}\n", &[]).is_err());
     assert!(
