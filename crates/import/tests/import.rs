@@ -115,25 +115,61 @@ fn luau_what_the_bound_form_cannot_express_is_an_error() {
 }
 
 #[test]
-fn vbs_statements_expressions_and_header_comments() {
+fn vbs_names_are_nix_bindings_and_globals_are_formals() {
     let source = "' Play.\n\nOption Explicit\nDim a, b\nSet a = CreateObject(\"X.Y\")\nIf a.Count <> 0 Then\n\t' Go.\n\tb = \"say \"\"hi\"\"\" & a.Run(1, True)\nElse\n\tWScript.Quit 1\nEnd If\n";
     assert_eq!(
         expression("vbs", source, &[]).unwrap(),
-        "[\n  (comment \"' Play.\")\n  blank\n  (option \"Explicit\")\n  (dim [\"a\" \"b\"])\n  (set \"a\" [\"CreateObject\" (str \"X.Y\")])\n  (ifElse (op [\"a.Count\" \"<>\" \"0\"]) [\n(comment \"' Go.\")\n(assign \"b\" (op [(str \"say \\\"hi\\\"\") \"&\" [\"a.Run\" \"1\" \"True\"]]))\n] [\n[\"WScript.Quit\" \"1\"]\n])\n]"
+        "{\n  CreateObject,\n  WScript,\n  assign,\n  blank,\n  call,\n  comment,\n  dim,\n  dot,\n  ifElse,\n  optionExplicit,\n  set,\n  str,\n  ...\n}: ({a, b}: [\n  (comment \"Play.\")\n  blank\n  optionExplicit\n  (dim [a b])\n  (set a (call CreateObject [(str \"X.Y\")]))\n  (ifElse [(dot a \"Count\") \"<>\" 0] [\n    (comment \"Go.\")\n    (assign b [(str \"say \\\"hi\\\"\") \"&\" (call (dot a \"Run\") [1 true])])\n  ] [\n    (call (dot WScript \"Quit\") [1])\n  ])\n])"
     );
 }
 
 #[test]
-fn vbs_layout_the_printer_cannot_reproduce_is_an_error() {
-    assert!(expression("vbs", "x  = 1\n", &[])
+fn vbs_procedures_bind_their_parameters_and_locals() {
+    let source = "Dim str\nSub Greet(who, ByVal n)\n\tDim line\n\tline = who & n\n\tWScript.Echo line\nEnd Sub\nFunction Twice(n)\n\tTwice = n * 2\nEnd Function\nGreet str, Twice(1)\n";
+    assert_eq!(
+        expression("vbs", source, &[]).unwrap(),
+        "{\n  WScript,\n  assign,\n  byVal,\n  call,\n  dim,\n  dot,\n  function,\n  sub,\n  ...\n}: ({str', Greet, Twice}: [\n  (dim [str'])\n  (sub Greet [{who = null;} {n = byVal;}] ({who, n, line}: [\n    (dim [line])\n    (assign line [who \"&\" n])\n    (call (dot WScript \"Echo\") [line])\n  ]))\n  (function Twice [{n = null;}] ({n}: [\n    (assign Twice [n \"*\" 2])\n  ]))\n  (call Greet [str' (call Twice [1])])\n])"
+    );
+}
+
+#[test]
+fn vbs_operators_are_infix_lists_by_vbscript_precedence() {
+    let source =
+        "Dim a, b, c, x\nx = Not a = b And c\nx = (a + b) * -c\nx = a - (b - c)\nx = -a ^ 2\n";
+    assert_eq!(
+        expression("vbs", source, &[]).unwrap(),
+        "{\n  assign,\n  dim,\n  neg,\n  not,\n  ...\n}: ({a, b, c, x}: [\n  (dim [a b c x])\n  (assign x [(not [a \"=\" b]) \"And\" c])\n  (assign x [[a \"+\" b] \"*\" (neg c)])\n  (assign x [a \"-\" [b \"-\" c]])\n  (assign x (neg [a \"^\" 2]))\n])"
+    );
+}
+
+#[test]
+fn vbs_what_the_printer_cannot_reproduce_or_nothing_declares_is_an_error() {
+    for source in [
+        "Dim a, b\na = (a * b) + b\n",
+        "Dim x\nx  = 1\n",
+        "Dim x\nx = 1 ' one\n",
+    ] {
+        assert!(expression("vbs", source, &[])
+            .unwrap_err()
+            .contains("would not give this layout back"));
+    }
+    assert!(
+        expression("vbs", "Dim x\nIf x Then\n    x = 1\nEnd If\n", &[])
+            .unwrap_err()
+            .contains("line 3")
+    );
+    assert!(expression("vbs", "Dim x\nx = y\n", &[])
         .unwrap_err()
-        .contains("would not give this layout back"));
-    assert!(expression("vbs", "x = 1 ' one\n", &[])
+        .contains("nothing declares"));
+    assert!(expression("vbs", "Dim x, x\n", &[])
         .unwrap_err()
-        .contains("would not give this layout back"));
-    assert!(expression("vbs", "If x Then\n    y\nEnd If\n", &[])
+        .contains("declared twice"));
+    assert!(expression("vbs", "WScript.Quit(1)\n", &[])
         .unwrap_err()
-        .contains("line 2"));
+        .contains("in parentheses"));
+    assert!(expression("vbs", "Dim x\nx = 007\n", &[])
+        .unwrap_err()
+        .contains("plain integer"));
 }
 
 #[test]

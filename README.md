@@ -212,6 +212,20 @@ read as markup the printer does not write (a stray `*`, `` ` ``, `\`, `<`
 or `&`, `~~`, `](`, `][`, `![`, an `_` at the edge of a word) is an error, as
 is every other inline node (escapes, entities, HTML, autolinks, reference
 links, strikethrough).
+VBScript is read for its names too: `import vbs` prints a script as a
+function of the constructors and of the VBScript and WScript globals it uses,
+`{CreateObject, WScript, dim, ...}: ({sh, wav}: [ ... ])`. The script and each
+`Sub` or `Function` body is a lambda of the names it declares (its `Dim`s,
+wherever they stand, its procedures, a procedure's parameters), so every name
+is a Nix variable and one the generator or Nix already uses is spelled with a
+trailing `'`. A member is `dot base "A.B"`, a call `call f [args]` (written
+`f args` as a statement), integers and booleans are Nix values, and operators
+are infix lists nested only where VBScript's precedence needs parentheses; the
+importer re-reads each operator run by that precedence, since the grammar binds
+`Not` looser than VBScript does. A name nothing declares that is not a known
+global, a name declared twice, a number other than a plain integer, `ElseIf`,
+`Call`, a statement call with parenthesized arguments and any layout the
+printer would not give back are errors.
 
 `strictix check` and `strictix fix` lint a merged file binding by binding, as
 the files its manifest names: each binding is restored in memory and linted
