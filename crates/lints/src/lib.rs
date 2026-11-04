@@ -45,6 +45,7 @@ pub mod singleton_optionals;
 mod static_binding;
 pub mod style_rules;
 pub mod suggested_rules;
+pub mod templated_bindings;
 pub mod unexpected_function_argument;
 pub mod unused_option;
 
@@ -110,6 +111,7 @@ use suggested_rules::{
     AssertFalse, DuplicateLiteralListItem, LiteralDivisionByZero, RedundantBooleanComparison,
     UnnecessaryRec, UnusedRecBinding,
 };
+use templated_bindings::TemplatedBindings;
 use unexpected_function_argument::UnexpectedFunctionArgument;
 use unused_option::UnusedOption;
 
@@ -221,6 +223,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         SingletonOptionals,
         SingletonAttrset,
         SingletonList,
+        TemplatedBindings,
         MaskedGenerator,
         HandWrittenConfig,
         HandMaintainedDataFile,
