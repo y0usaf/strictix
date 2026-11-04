@@ -140,6 +140,26 @@ parentheses, unary operators constructors (`not`, `await`, `typeof`,
 `spread`, ...), and parentheses that differ from those the printer writes
 (prettier's: mixed `&&` and `||`, `??` in a ternary branch, `as` in an
 operand, an inline ternary or object arrow body, ...) are an error.
+`import luau` prints a whole data file too, a function of the constructors
+and globals it uses returning the file's block, `{dot, local, tern, WindowCx,
+...}: ({last, note}: [ ... ])`. A local, local function or type alias is a Nix
+binding: a block that declares names (the file, a function body, a branch, a
+loop body) is a lambda whose formals are exactly those names, a function's
+parameters and a loop's variables are listed in order as one-attribute sets
+(`[{cx = WindowCx;} {id = null;}]`, `null` when unannotated) and bound by the
+body's lambda, and the Luau and Tern globals and builtin types the files use
+(`tern`, `string`, `table'`, `pcall`, `number`, `WindowCx`, ...) are formals
+taken from `generators.luau`. A field path is `dot base "session:focused"`
+on a bound name, a literal `str`, `long`, a Nix number (`hex 57344` for
+`0xE000`), boolean or `nil`; operators are infix lists parsed by Luau
+precedence, nested only where the grouping needs parentheses, and `paren`
+keeps only parentheses that truncate a call to one value or that StyLua keeps
+around a binary expression precedence already groups. A name that is a Nix
+keyword or an attribute of `generators.luau` (`type`, `table`) is spelled
+with a trailing `'`; a name nothing declares that is not one of those globals,
+a use of a name before the local Nix would bind it to, a global function,
+parentheses StyLua removes and an `if` or cast operand without parentheses are
+errors.
 tree-sitter-glsl reads `(float(x) + y)` as a broken cast, so the importer
 parses a constructor call of a builtin scalar type (`float(`, `int(`, `uint(`,
 `bool(`, `double(`) as a call of an identifier, keeping its source bytes.
@@ -196,8 +216,9 @@ constructors returning an attribute set (a syntax tree built from a generator's 
 often as the code uses it), including such a binding of a merged file; the
 schema rules do not read that file as a module. `duplicate-function-argument` skips that
 syntax-tree file too, where a constructor takes the same name twice as often
-as the code does (Luau's `name = name` is `field "name" "name"`).
-`shadowed-formal` skips it as well: its nested block lambdas bind the names each block of the code declares, so an inner block's local shadows an outer one exactly where the code's own scoping does.
+as the code does (Luau's `f(x, x)` is `[f x x]`). `shadowed-formal` skips it as well: its nested
+block lambdas bind the names each block of the code declares, so an inner
+block's local shadows an outer one exactly where the code's own scoping does.
 
 `singleton-optionals` simplifies `lib.optionals condition [value]` to
 `lib.optional condition value`. Qualified calls have an automatic fix that

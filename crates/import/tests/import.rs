@@ -60,35 +60,58 @@ fn a_data_file_takes_the_constructors_it_uses() {
 }
 
 #[test]
-fn luau_statements_expressions_and_layout() {
-    let source = "--!strict\nlocal last: number? = nil\n\nlocal function f(cx: WindowCx): { [string]: boolean }\n\tif cx then\n\t\treturn { a = 1, [k] = \"x\" }\n\telseif not cx then\n\t\tcx:go(#t + 1) -- note\n\telse\n\t\treturn\n\tend\n\treturn {}\nend\n";
+fn luau_names_are_nix_bindings() {
+    let source = "--!strict\nlocal last: number? = nil\n\nlocal function f(cx: WindowCx, rows): { [string]: boolean }\n\tif cx then\n\t\treturn { a = 1, [last] = \"x\" }\n\telseif not cx then\n\t\tcx.session:go(#rows + 1) -- note\n\telse\n\t\treturn\n\tend\n\tfor _, type in ipairs(rows) do\n\t\tlocal with = type\n\t\tlast = with\n\tend\n\treturn {}\nend\n";
     assert_eq!(
         expression("luau", source, &[]).unwrap(),
-        "[\n  (comment \"--!strict\")\n  (local (typed \"last\" (opt \"number\")) \"nil\")\n  blank\n  (localFunction \"f\" (typed [(typed \"cx\" \"WindowCx\")] (table [(pair \"string\" \"boolean\")])) [\n(ifElse \"cx\" [\n(return (table [(field \"a\" 1) (pair \"k\" (str \"x\"))]))\n] (ifElse (unary \"not\" \"cx\") [\n(trailing [\"cx:go\" (infix [(unary \"#\" \"t\") \"+\" 1])] \"-- note\")\n] [\n\"return\"\n]))\n(return (table []))\n])\n]"
+        "{\n  WindowCx,\n  assign,\n  blank,\n  boolean,\n  comment,\n  dot,\n  field,\n  for,\n  ifElse,\n  infix,\n  ipairs,\n  len,\n  local,\n  localFunction,\n  nil,\n  not,\n  number,\n  opt,\n  pair,\n  return,\n  str,\n  string,\n  table,\n  trailing,\n  typed,\n  ...\n}: ({last, f}: [\n  (comment \"--!strict\")\n  (local (typed last (opt number)) nil)\n  blank\n  (localFunction f (typed [{cx = WindowCx;} {rows' = null;}] (table [(pair string boolean)])) ({cx, rows'}: [\n(ifElse cx [\n(return (table [(field \"a\" 1) (pair last (str \"x\"))]))\n] (ifElse (not cx) [\n(trailing [(dot cx \"session:go\") (infix [(len rows') \"+\" 1])] \"-- note\")\n] [\nreturn\n]))\n(for [{_ = null;} {type' = null;}] [ipairs rows'] ({_, type', with'}: [\n(local with' type')\n(assign last with')\n]))\n(return (table []))\n]))\n])"
+    );
+}
+
+#[test]
+fn luau_operators_parse_by_precedence() {
+    let source = "local t = (1 + 2) * -3 .. (if tern then \"\" else \"b\") .. (tern :: number)\nlocal u = (t == 1 and t) or t ~= 0x1F and (tostring(t)) and not (t or t) and -t ^ 2\n";
+    assert_eq!(
+        expression("luau", source, &[]).unwrap(),
+        "{\n  cast,\n  hex,\n  ifExpr,\n  infix,\n  local,\n  neg,\n  not,\n  number,\n  paren,\n  str,\n  tern,\n  tostring,\n  ...\n}: ({t, u}: [\n  (local t (infix [(infix [1 \"+\" 2]) \"*\" (-3) \"..\" (ifExpr [tern (str \"\") (str \"b\")]) \"..\" (cast tern number)]))\n  (local u (infix [(paren (infix [t \"==\" 1 \"and\" t])) \"or\" t \"~=\" (hex 31) \"and\" (paren [tostring t]) \"and\" (not (infix [t \"or\" t])) \"and\" (neg (infix [t \"^\" 2]))]))\n])"
     );
 }
 
 #[test]
 fn luau_line_breaks_are_rows() {
-    let source = "f(\n\tx,\n\t\"a\"\n\t\t.. b\n)\nlocal t = {\n\ta = '\"',\n\n\t\"\\u{2061}\",\n}\nlocal s = if a\n\tthen b\n\telse c\n";
+    let source = "tern.on(\n\t\"x\",\n\t\"a\"\n\t\t.. tern.y\n)\nlocal t = {\n\ta = '\"',\n\n\t\"\\u{2061}\",\n}\nlocal s = if t\n\tthen t\n\telse t\n";
     assert_eq!(
         expression("luau", source, &[]).unwrap(),
-        "[\n  (rows [\"f\" \"x\" (rows (infix [(str \"a\") \"..\" \"b\"]))])\n  (local \"t\" (rows (table [\n(field \"a\" (str \"\\\"\"))\nblank\n(str [(unicode \"2061\")])\n])))\n  (local \"s\" (rows (ifExpr [[\"a\"] [\"b\"] [\"c\"]])))\n]"
+        "{\n  blank,\n  dot,\n  field,\n  ifExpr,\n  infix,\n  local,\n  rows,\n  str,\n  table,\n  tern,\n  unicode,\n  ...\n}: ({t, s}: [\n  (rows [(dot tern \"on\") (str \"x\") (rows (infix [(str \"a\") \"..\" (dot tern \"y\")]))])\n  (local t (rows (table [\n(field \"a\" (str \"\\\"\"))\nblank\n(str [(unicode \"2061\")])\n])))\n  (local s (rows (ifExpr [[t] [t] [t]])))\n])"
     );
 }
 
 #[test]
-fn luau_layout_the_printer_cannot_reproduce_is_an_error() {
-    assert!(expression("luau", "local x  = 1\n", &[])
-        .unwrap_err()
-        .contains("the printer writes"));
-    assert!(expression("luau", "f \"x\"\n", &[])
-        .unwrap_err()
-        .contains("a call without parentheses"));
-    assert!(expression("luau", "local s = 'x'\n", &[])
-        .unwrap_err()
-        .contains("the printer writes"));
-    assert_eq!(expression("luau", "\n", &[]).unwrap(), "[blank]");
+fn luau_what_the_bound_form_cannot_express_is_an_error() {
+    let refused = |source: &str, why: &str| {
+        assert!(
+            expression("luau", source, &[]).unwrap_err().contains(why),
+            "{source}"
+        )
+    };
+    refused("local x = x\n", "before the local of its block");
+    refused("print(1)\n", "neither declared nor a global");
+    refused("function f() end\n", "a global function");
+    refused(
+        "local x = (tern)\n",
+        "parentheses the printer does not write",
+    );
+    refused(
+        "local x = 1 + if tern then 1 else 2\n",
+        "without parentheses",
+    );
+    refused("local x  = 1\n", "the printer writes");
+    refused("tern \"x\"\n", "a call without parentheses");
+    refused("local s = 'x'\n", "the printer writes");
+    assert_eq!(
+        data_file("luau", "\n", &[]).unwrap(),
+        "{\n  blank,\n  ...\n}: [blank]\n"
+    );
 }
 
 #[test]

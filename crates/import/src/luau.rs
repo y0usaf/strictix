@@ -1,35 +1,164 @@
+use std::cell::RefCell;
+use std::collections::BTreeSet;
+
 use tree_sitter::Node;
 
 use crate::{line_of, nix};
 
+const NIX_KEYWORDS: [&str; 13] = [
+    "assert", "else", "false", "if", "in", "inherit", "let", "null", "or", "rec", "then", "true",
+    "with",
+];
+
+const CONSTRUCTORS: [&str; 37] = [
+    "assign",
+    "blank",
+    "cast",
+    "comment",
+    "dot",
+    "field",
+    "fn",
+    "for",
+    "forRange",
+    "hex",
+    "idx",
+    "if'",
+    "ifElse",
+    "ifExpr",
+    "infix",
+    "len",
+    "local",
+    "localFunction",
+    "long",
+    "neg",
+    "nil",
+    "not",
+    "opt",
+    "pair",
+    "paren",
+    "render",
+    "return",
+    "rows",
+    "str",
+    "table",
+    "trailing",
+    "tuple",
+    "type",
+    "typed",
+    "unicode",
+    "update",
+    "while",
+];
+
+const GLOBALS: [&str; 30] = [
+    "AgentBlock",
+    "AgentFinishedEvent",
+    "AgentStateEvent",
+    "CommandFinishedEvent",
+    "FocusEvent",
+    "PaneInfo",
+    "PickItem",
+    "ProcessResult",
+    "StatusPaneInfo",
+    "StatusSegment",
+    "TabEvent",
+    "TabInfo",
+    "WindowCx",
+    "any",
+    "boolean",
+    "ipairs",
+    "math",
+    "number",
+    "os",
+    "pairs",
+    "pcall",
+    "proproblems",
+    "require",
+    "string",
+    "table",
+    "tern",
+    "tonumber",
+    "tostring",
+    "type",
+    "utf8",
+];
+
+fn precedence(operator: &str) -> Option<u8> {
+    Some(match operator {
+        "or" => 1,
+        "and" => 2,
+        "<" | ">" | "<=" | ">=" | "~=" | "==" => 3,
+        ".." => 4,
+        "+" | "-" => 5,
+        "*" | "/" | "//" | "%" => 6,
+        "^" => 8,
+        _ => return None,
+    })
+}
+
+const UNARY: u8 = 7;
+
+fn right_associative(operator: &str) -> bool {
+    matches!(operator, ".." | "^")
+}
+
+fn spelled(name: &str) -> String {
+    if NIX_KEYWORDS.contains(&name) || CONSTRUCTORS.contains(&name) {
+        format!("{name}'")
+    } else {
+        name.to_owned()
+    }
+}
+
 pub fn import(source: &str, holes: &[String]) -> Result<String, String> {
     let tree = crate::parse(&tree_sitter_luau::LANGUAGE.into(), source)?;
-    let importer = Importer { source, holes };
-    let nodes = named(tree.root_node());
-    let Some(first) = nodes.first() else {
-        if source.bytes().all(|b| b == b'\n') {
-            return Ok(format!("[{}]", vec!["blank"; source.len()].join(" ")));
-        }
-        return Err("the file holds no statement".into());
+    let importer = Importer {
+        source,
+        holes,
+        scopes: RefCell::new(Vec::new()),
+        globals: RefCell::new(BTreeSet::new()),
     };
-    if first.start_byte() != 0 {
-        return Err("the file must start with its first statement".into());
-    }
-    let entries = importer.entries(&nodes, 0)?;
-    let text: String = entries
-        .iter()
-        .map(|entry| format!("{}\n", entry.text))
+    let nodes = named(tree.root_node());
+    let body = match nodes.first() {
+        None if source.bytes().all(|b| b == b'\n') => {
+            format!("[{}]", vec!["blank"; source.len()].join(" "))
+        }
+        None => return Err("the file holds no statement".into()),
+        Some(first) if first.start_byte() != 0 => {
+            return Err("the file must start with its first statement".into())
+        }
+        Some(_) => {
+            let (formals, entries) = importer.scoped(&nodes, Vec::new(), 0)?;
+            let text: String = entries
+                .iter()
+                .map(|entry| format!("{}\n", entry.text))
+                .collect();
+            if text != source {
+                return Err(mismatch(source, &text));
+            }
+            let list: String = entries
+                .iter()
+                .map(|entry| format!("  {}\n", entry.nix))
+                .collect();
+            lambda(&formals, format!("[\n{list}]"))
+        }
+    };
+    let mut formals: BTreeSet<String> = nix::identifiers(&body)
+        .into_iter()
+        .filter(|name| CONSTRUCTORS.contains(&name.as_str()))
         .collect();
-    if text != source {
-        return Err(mismatch(source, &text));
+    formals.extend(importer.globals.into_inner());
+    let formals: String = formals.iter().map(|name| format!("  {name},\n")).collect();
+    Ok(format!("{{\n{formals}  ...\n}}: {body}"))
+}
+
+fn lambda(formals: &[String], list: String) -> String {
+    if formals.is_empty() {
+        list
+    } else {
+        let names: Vec<String> = formals.iter().map(|name| spelled(name)).collect();
+        format!("({{{}}}: {list})", names.join(", "))
     }
-    Ok(format!(
-        "[\n{}]",
-        entries
-            .iter()
-            .map(|entry| format!("  {}\n", entry.nix))
-            .collect::<String>()
-    ))
 }
 
 fn mismatch(source: &str, text: &str) -> String {
@@ -44,9 +173,16 @@ fn mismatch(source: &str, text: &str) -> String {
     format!("line {line}: the printer writes {printed:?}, the source has {found:?}")
 }
 
+struct Scope {
+    declared: BTreeSet<String>,
+    visible: BTreeSet<String>,
+}
+
 struct Importer<'s> {
     source: &'s str,
     holes: &'s [String],
+    scopes: RefCell<Vec<Scope>>,
+    globals: RefCell<BTreeSet<String>>,
 }
 
 struct Out {
@@ -146,8 +282,28 @@ fn escape(text: &str, mark: char) -> String {
     out
 }
 
-fn left_associative(op: &str) -> bool {
-    !matches!(op, ".." | "^")
+fn float(text: &str) -> bool {
+    let Some((whole, fraction)) = text.split_once('.') else {
+        return false;
+    };
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    digits(whole)
+        && digits(fraction)
+        && (whole == "0" || !whole.starts_with('0'))
+        && !fraction.ends_with('0')
+        && whole.len() + fraction.len() <= 15
+}
+
+fn prefix_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "identifier"
+            | "function_call"
+            | "dot_index_expression"
+            | "method_index_expression"
+            | "bracket_index_expression"
+            | "parenthesized_expression"
+    )
 }
 
 impl Importer<'_> {
@@ -163,19 +319,114 @@ impl Importer<'_> {
         nix::string(text, self.holes, 0)
     }
 
-    fn atom(&self, text: &str) -> Out {
-        Out::new(
-            nix::int(text).unwrap_or_else(|| self.string(text)),
-            text.to_owned(),
-        )
-    }
-
     fn refuse<T>(&self, node: Node<'_>, what: &str) -> Result<T, String> {
         Err(format!("{}: {what} ({})", self.at(node), node.kind()))
     }
 
     fn broken(&self, from: usize, to: usize) -> bool {
         self.source[from..to].contains('\n')
+    }
+
+    fn name(&self, node: Node<'_>) -> Result<String, String> {
+        let name = self.text(node);
+        if node.kind() != "identifier"
+            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return self.refuse(node, "a name Nix cannot spell");
+        }
+        Ok(name.to_owned())
+    }
+
+    fn reference(&self, node: Node<'_>) -> Result<Out, String> {
+        let name = self.name(node)?;
+        let scopes = self.scopes.borrow();
+        let luau = scopes.iter().rposition(|s| s.visible.contains(&name));
+        let bound = scopes.iter().rposition(|s| s.declared.contains(&name));
+        if luau != bound {
+            return self.refuse(
+                node,
+                &format!(
+                    "`{name}` is used before the local of its block that Nix would bind it to"
+                ),
+            );
+        }
+        if luau.is_none() {
+            if !GLOBALS.contains(&name.as_str()) {
+                return self.refuse(
+                    node,
+                    &format!("`{name}` is neither declared nor a global of generators.luau"),
+                );
+            }
+            self.globals.borrow_mut().insert(spelled(&name));
+        }
+        Ok(Out::new(spelled(&name), name))
+    }
+
+    fn reveal(&self, names: &[String]) {
+        if let Some(scope) = self.scopes.borrow_mut().last_mut() {
+            scope.visible.extend(names.iter().cloned());
+        }
+    }
+
+    fn declared(&self, node: Node<'_>) -> Result<(Vec<String>, bool), String> {
+        match node.kind() {
+            "variable_declaration" => {
+                let parts = named(node);
+                let Some(assignment) = parts.first() else {
+                    return Ok((Vec::new(), false));
+                };
+                let Some(list) = named(*assignment).into_iter().next() else {
+                    return Ok((Vec::new(), false));
+                };
+                let mut out = Vec::new();
+                let mut typed = false;
+                for child in children(list) {
+                    match child.kind() {
+                        ":" => typed = true,
+                        "," => {}
+                        _ if typed => typed = false,
+                        _ => out.push(self.name(child)?),
+                    }
+                }
+                Ok((out, false))
+            }
+            "function_declaration" if self.token(node, "local").is_some() => {
+                Ok((vec![self.name(self.field(node, "name")?)?], false))
+            }
+            "type_definition" => match named(node).first() {
+                Some(name) => Ok((vec![self.name(*name)?], true)),
+                None => Ok((Vec::new(), false)),
+            },
+            _ => Ok((Vec::new(), false)),
+        }
+    }
+
+    fn scoped(
+        &self,
+        nodes: &[Node<'_>],
+        given: Vec<String>,
+        depth: usize,
+    ) -> Result<(Vec<String>, Vec<Out>), String> {
+        let mut order = given.clone();
+        let mut visible: BTreeSet<String> = given.into_iter().collect();
+        for node in nodes {
+            let (declared, hoisted) = self.declared(*node)?;
+            for name in declared {
+                if hoisted {
+                    visible.insert(name.clone());
+                }
+                if !order.contains(&name) {
+                    order.push(name);
+                }
+            }
+        }
+        self.scopes.borrow_mut().push(Scope {
+            declared: order.iter().cloned().collect(),
+            visible,
+        });
+        let entries = self.entries(nodes, depth);
+        self.scopes.borrow_mut().pop();
+        Ok((order, entries?))
     }
 
     fn entries(&self, nodes: &[Node<'_>], depth: usize) -> Result<Vec<Out>, String> {
@@ -209,8 +460,8 @@ impl Importer<'_> {
         Ok(out)
     }
 
-    fn body(&self, nodes: &[Node<'_>], depth: usize) -> Result<Out, String> {
-        let entries = self.entries(nodes, depth + 1)?;
+    fn block(&self, nodes: &[Node<'_>], depth: usize, given: Vec<String>) -> Result<Out, String> {
+        let (formals, entries) = self.scoped(nodes, given, depth + 1)?;
         let nix: String = entries.iter().map(|e| format!("{}\n", e.nix)).collect();
         let text: String = entries
             .iter()
@@ -223,7 +474,7 @@ impl Importer<'_> {
             })
             .collect();
         Ok(Out::new(
-            format!("[\n{nix}]"),
+            lambda(&formals, format!("[\n{nix}]")),
             format!("{text}{}", newline(depth)),
         ))
     }
@@ -258,13 +509,9 @@ impl Importer<'_> {
                     text.to_owned(),
                 ))
             }
-            "break_statement" | "continue_statement" => {
-                let word = self.text(node);
-                Ok(Out::new(self.string(word), word.to_owned()))
-            }
             "function_call" => self.expression(node, depth),
             "return_statement" => match named(node).as_slice() {
-                [] => Ok(Out::new("\"return\"".into(), "return".into())),
+                [] => Ok(Out::new("return".into(), "return".into())),
                 [list] if list.kind() == "expression_list" => {
                     let values = self.list(*list, depth)?;
                     Ok(Out::new(
@@ -308,7 +555,7 @@ impl Importer<'_> {
             "while_statement" => {
                 let condition = self.field(node, "condition")?;
                 let test = self.expression(condition, depth)?;
-                let body = self.loop_body(node, depth)?;
+                let body = self.loop_body(node, depth, Vec::new())?;
                 Ok(Out::new(
                     format!("(while {} {})", test.nix, body.nix),
                     format!("while {} do{}end", test.text, body.text),
@@ -319,15 +566,13 @@ impl Importer<'_> {
                 let [name, value] = parts.as_slice() else {
                     return self.refuse(node, "a type definition the printer does not write");
                 };
-                if name.kind() != "identifier"
-                    || children(node).first().map(|c| c.kind()) != Some("type")
-                {
+                if children(node).first().map(|c| c.kind()) != Some("type") {
                     return self.refuse(node, "a type definition the printer does not write");
                 }
                 let value = self.type_(*value, depth)?;
-                let name = self.text(*name);
+                let name = self.name(*name)?;
                 Ok(Out::new(
-                    format!("(type {} {})", self.string(name), value.nix),
+                    format!("(type {} {})", spelled(&name), value.nix),
                     format!("type {name} = {}", value.text),
                 ))
             }
@@ -348,8 +593,21 @@ impl Importer<'_> {
         Ok(many(values))
     }
 
-    fn variables(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
+    fn targets(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
         let mut outs: Vec<Out> = Vec::new();
+        for child in children(node) {
+            match child.kind() {
+                "," => {}
+                _ if child.is_named() => outs.push(self.expression(child, depth)?),
+                _ => return self.refuse(child, "an assignment target the printer does not write"),
+            }
+        }
+        Ok(names(outs))
+    }
+
+    fn locals(&self, node: Node<'_>, depth: usize) -> Result<(Out, Vec<String>), String> {
+        let mut outs: Vec<Out> = Vec::new();
+        let mut declared = Vec::new();
         let mut typed = false;
         for child in children(node) {
             match child.kind() {
@@ -367,10 +625,14 @@ impl Importer<'_> {
                         format!("{}: {}", name.text, kind.text),
                     ));
                 }
-                _ => outs.push(self.expression(child, depth)?),
+                _ => {
+                    let name = self.name(child)?;
+                    outs.push(Out::new(spelled(&name), name.clone()));
+                    declared.push(name);
+                }
             }
         }
-        Ok(names(outs))
+        Ok((names(outs), declared))
     }
 
     fn assignment(&self, node: Node<'_>, depth: usize) -> Result<(Out, Out), String> {
@@ -378,7 +640,7 @@ impl Importer<'_> {
         let [targets, values] = parts.as_slice() else {
             return self.refuse(node, "an assignment the printer does not write");
         };
-        Ok((self.variables(*targets, depth)?, self.list(*values, depth)?))
+        Ok((self.targets(*targets, depth)?, self.list(*values, depth)?))
     }
 
     fn local(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
@@ -389,33 +651,55 @@ impl Importer<'_> {
         if assignment.kind() != "assignment_statement" {
             return self.refuse(node, "a local without a value");
         }
-        let (targets, values) = self.assignment(*assignment, depth)?;
+        let parts = named(*assignment);
+        let [targets, values] = parts.as_slice() else {
+            return self.refuse(node, "a local the printer does not write");
+        };
+        let values = self.list(*values, depth)?;
+        let (targets, declared) = self.locals(*targets, depth)?;
+        self.reveal(&declared);
         Ok(Out::new(
             format!("(local {} {})", targets.nix, values.nix),
             format!("local {} = {}", targets.text, values.text),
         ))
     }
 
-    fn signature(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
+    fn bound(
+        &self,
+        node: Node<'_>,
+        kind: Option<Node<'_>>,
+        depth: usize,
+    ) -> Result<(Out, String), String> {
+        let name = self.name(node)?;
+        let (nix, text) = match kind {
+            None => ("null".to_owned(), name.clone()),
+            Some(kind) => {
+                let kind = self.type_(kind, depth)?;
+                (kind.nix, format!("{name}: {}", kind.text))
+            }
+        };
+        Ok((
+            Out::new(format!("{{{} = {nix};}}", spelled(&name)), text),
+            name,
+        ))
+    }
+
+    fn signature(&self, node: Node<'_>, depth: usize) -> Result<(Out, Vec<String>), String> {
         if named(node).iter().any(|c| c.kind() == "generic_type_list") {
             return self.refuse(node, "generic parameters the printer does not write");
         }
         let parameters = self.field(node, "parameters")?;
         let mut outs = Vec::new();
+        let mut given = Vec::new();
         for parameter in named(parameters) {
             let parts = named(parameter);
-            outs.push(match parts.as_slice() {
-                [name] => self.expression(*name, depth)?,
-                [name, kind] => {
-                    let name = self.expression(*name, depth)?;
-                    let kind = self.type_(*kind, depth)?;
-                    Out::new(
-                        format!("(typed {} {})", name.nix, kind.nix),
-                        format!("{}: {}", name.text, kind.text),
-                    )
-                }
+            let (out, name) = match parts.as_slice() {
+                [name] => self.bound(*name, None, depth)?,
+                [name, kind] => self.bound(*name, Some(*kind), depth)?,
                 _ => return self.refuse(parameter, "a parameter the printer does not write"),
-            });
+            };
+            outs.push(out);
+            given.push(name);
         }
         let joined = join(&outs, " ", ", ");
         let params = Out::new(format!("[{}]", joined.nix), format!("({})", joined.text));
@@ -425,75 +709,51 @@ impl Importer<'_> {
             .skip(1)
             .find(|c| c.is_named() && c.kind() != "block" && c.kind() != "comment");
         match returns {
-            None => Ok(params),
+            None => Ok((params, given)),
             Some(kind) => {
                 let kind = self.type_(kind, depth)?;
-                Ok(Out::new(
-                    format!("(typed {} {})", params.nix, kind.nix),
-                    format!("{}: {}", params.text, kind.text),
+                Ok((
+                    Out::new(
+                        format!("(typed {} {})", params.nix, kind.nix),
+                        format!("{}: {}", params.text, kind.text),
+                    ),
+                    given,
                 ))
             }
         }
     }
 
-    fn function_body(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
+    fn function(&self, node: Node<'_>, depth: usize) -> Result<(Out, Out), String> {
+        let (signature, given) = self.signature(node, depth)?;
         let parameters = self.field(node, "parameters")?;
         let end = self.token(node, "end").ok_or("a function without end")?;
         let nodes = self.between(node, parameters.end_byte(), end.start_byte());
         if nodes.is_empty() {
-            return Ok(Out::new("[]".into(), " ".into()));
+            let formals: Vec<String> = given;
+            return Ok((
+                signature,
+                Out::new(lambda(&formals, "[]".into()), " ".into()),
+            ));
         }
-        self.body(&nodes, depth)
+        Ok((signature, self.block(&nodes, depth, given)?))
     }
 
     fn declaration(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
-        let local = self.token(node, "local").is_some();
-        let name = self.field(node, "name")?;
-        let name = self.path(name).ok_or_else(|| {
-            format!(
-                "{}: a function name the printer does not write",
-                self.at(name)
-            )
-        })?;
-        let signature = self.signature(node, depth)?;
-        let body = self.function_body(node, depth)?;
-        let (constructor, keyword) = if local {
-            ("localFunction", "local function")
-        } else {
-            ("function", "function")
-        };
+        if self.token(node, "local").is_none() {
+            return self.refuse(node, "a global function the printer does not write");
+        }
+        let name = self.name(self.field(node, "name")?)?;
+        self.reveal(std::slice::from_ref(&name));
+        let (signature, body) = self.function(node, depth)?;
         Ok(Out::new(
             format!(
-                "({constructor} {} {} {})",
-                self.string(&name),
+                "(localFunction {} {} {})",
+                spelled(&name),
                 signature.nix,
                 body.nix
             ),
-            format!("{keyword} {name}{}{}end", signature.text, body.text),
+            format!("local function {name}{}{}end", signature.text, body.text),
         ))
-    }
-
-    fn path(&self, node: Node<'_>) -> Option<String> {
-        match node.kind() {
-            "identifier" => Some(self.text(node).to_owned()),
-            "dot_index_expression" | "method_index_expression" => {
-                let table = node.child_by_field_name("table")?;
-                let name = node
-                    .child_by_field_name("field")
-                    .or_else(|| node.child_by_field_name("method"))?;
-                let mark = if node.kind() == "dot_index_expression" {
-                    "."
-                } else {
-                    ":"
-                };
-                let base = self.path(table)?;
-                if base.contains(':') {
-                    return None;
-                }
-                Some(format!("{base}{mark}{}", self.text(name)))
-            }
-            _ => None,
-        }
     }
 
     fn clause(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
@@ -510,7 +770,7 @@ impl Importer<'_> {
                 .token(node, "end")
                 .map_or(node.end_byte(), |e| e.start_byte()),
         };
-        let body = self.body(&self.between(node, then.end_byte(), end), depth)?;
+        let body = self.block(&self.between(node, then.end_byte(), end), depth, Vec::new())?;
         let head = format!("{} then{}", test.text, body.text);
         let (nix, tail) = match alternatives.as_slice() {
             [] => (format!("(if' {} {})", test.nix, body.nix), "end".to_owned()),
@@ -522,7 +782,8 @@ impl Importer<'_> {
                 )
             }
             [_] => {
-                let otherwise = self.body(&self.region(node, &alternatives, 0), depth)?;
+                let otherwise =
+                    self.block(&self.region(node, &alternatives, 0), depth, Vec::new())?;
                 (
                     format!("(ifElse {} {} {})", test.nix, body.nix, otherwise.nix),
                     format!("else{}end", otherwise.text),
@@ -561,7 +822,11 @@ impl Importer<'_> {
         let condition = self.field(first, "condition")?;
         let test = self.expression(condition, depth)?;
         let then = self.token(first, "then").ok_or("an elseif without then")?;
-        let body = self.body(&self.region(node, alternatives, then.end_byte()), depth)?;
+        let body = self.block(
+            &self.region(node, alternatives, then.end_byte()),
+            depth,
+            Vec::new(),
+        )?;
         let head = format!("{} then{}", test.text, body.text);
         let (nix, tail) = match rest {
             [] => (format!("(if' {} {})", test.nix, body.nix), "end".to_owned()),
@@ -573,7 +838,7 @@ impl Importer<'_> {
                 )
             }
             [_] => {
-                let otherwise = self.body(&self.region(node, rest, 0), depth)?;
+                let otherwise = self.block(&self.region(node, rest, 0), depth, Vec::new())?;
                 (
                     format!("(ifElse {} {} {})", test.nix, body.nix, otherwise.nix),
                     format!("else{}end", otherwise.text),
@@ -584,20 +849,20 @@ impl Importer<'_> {
         Ok(Out::new(nix, format!("{head}{tail}")))
     }
 
-    fn loop_body(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
+    fn loop_body(&self, node: Node<'_>, depth: usize, given: Vec<String>) -> Result<Out, String> {
         let open = self.token(node, "do").ok_or("a loop without do")?;
         let end = self.token(node, "end").ok_or("a loop without end")?;
-        self.body(
+        self.block(
             &self.between(node, open.end_byte(), end.start_byte()),
             depth,
+            given,
         )
     }
 
     fn for_statement(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
         let clause = self.field(node, "clause")?;
-        let body = self.loop_body(node, depth)?;
         if clause.kind() == "for_numeric_clause" {
-            let name = self.text(self.field(clause, "name")?).to_owned();
+            let (name, given) = self.bound(self.field(clause, "name")?, None, depth)?;
             let mut bounds = vec![
                 self.expression(self.field(clause, "start")?, depth)?,
                 self.expression(self.field(clause, "end")?, depth)?,
@@ -606,55 +871,104 @@ impl Importer<'_> {
                 bounds.push(self.expression(step, depth)?);
             }
             let bounds = many(bounds);
+            let body = self.loop_body(node, depth, vec![given])?;
             return Ok(Out::new(
-                format!(
-                    "(forRange {} {} {})",
-                    self.string(&name),
-                    bounds.nix,
-                    body.nix
-                ),
-                format!("for {name} = {} do{}end", bounds.text, body.text),
+                format!("(forRange {} {} {})", name.nix, bounds.nix, body.nix),
+                format!("for {} = {} do{}end", name.text, bounds.text, body.text),
             ));
         }
-        let (targets, values) = self.assignment(clause, depth)?;
+        let parts = named(clause);
+        let [targets, values] = parts.as_slice() else {
+            return self.refuse(clause, "a for clause the printer does not write");
+        };
+        let values = self.list(*values, depth)?;
+        let mut outs = Vec::new();
+        let mut given = Vec::new();
+        for target in named(*targets) {
+            let (out, name) = self.bound(target, None, depth)?;
+            outs.push(out);
+            given.push(name);
+        }
+        let joined = join(&outs, " ", ", ");
+        let body = self.loop_body(node, depth, given)?;
         Ok(Out::new(
-            format!("(for {} {} {})", targets.nix, values.nix, body.nix),
-            format!("for {} in {} do{}end", targets.text, values.text, body.text),
+            format!("(for [{}] {} {})", joined.nix, values.nix, body.nix),
+            format!("for {} in {} do{}end", joined.text, values.text, body.text),
+        ))
+    }
+
+    fn prefix(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
+        if node.kind() != "parenthesized_expression" {
+            return self.expression(node, depth);
+        }
+        let parts = named(node);
+        let [inner] = parts.as_slice() else {
+            return self.refuse(node, "parentheses the printer does not write");
+        };
+        if prefix_kind(inner.kind()) {
+            return self.refuse(node, "parentheses StyLua removes");
+        }
+        let inner = self.expression(*inner, depth)?;
+        Ok(Out::new(inner.nix, format!("({})", inner.text)))
+    }
+
+    fn index(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
+        let mark = if node.kind() == "method_index_expression" {
+            ":"
+        } else {
+            "."
+        };
+        let table = self.field(node, "table")?;
+        let op = self.token(node, mark).ok_or("an index without its mark")?;
+        if mark == ":" && self.broken(table.end_byte(), op.start_byte()) {
+            let base = self.prefix(table, depth)?;
+            let name = self.text(self.field(node, "method")?);
+            return Ok(Out::new(
+                format!(
+                    "(rows (dot {} {}))",
+                    base.nix,
+                    self.string(&format!(":{name}"))
+                ),
+                format!("{}{}:{name}", base.text, newline(depth + 1)),
+            ));
+        }
+        let mut segments = Vec::new();
+        let mut base = node;
+        loop {
+            let (field, mark) = match base.kind() {
+                "dot_index_expression" => ("field", "."),
+                "method_index_expression" if base.id() == node.id() => ("method", ":"),
+                _ => break,
+            };
+            let name = self.field(base, field)?;
+            segments.push(format!("{mark}{}", self.text(name)));
+            base = self.field(base, "table")?;
+        }
+        segments.reverse();
+        let path = segments.concat();
+        if path.contains('\n') || self.broken(base.end_byte(), node.end_byte()) {
+            return self.refuse(node, "a field path broken over lines");
+        }
+        let base = self.prefix(base, depth)?;
+        let spelled_path = path.strip_prefix('.').unwrap_or(&path);
+        Ok(Out::new(
+            format!("(dot {} {})", base.nix, self.string(spelled_path)),
+            format!("{}{path}", base.text),
         ))
     }
 
     fn expression(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
         match node.kind() {
-            "identifier" | "number" | "nil" | "true" | "false" | "vararg_expression" => {
-                Ok(self.atom(self.text(node)))
+            "identifier" => self.reference(node),
+            "number" => self.number(node, false),
+            "nil" => Ok(Out::new("nil".into(), "nil".into())),
+            "true" | "false" => {
+                let word = self.text(node);
+                Ok(Out::new(word.to_owned(), word.to_owned()))
             }
-            "dot_index_expression" | "method_index_expression" => {
-                if let Some(path) = self.path(node) {
-                    return Ok(Out::new(self.string(&path), path));
-                }
-                let table = self.expression(self.field(node, "table")?, depth)?;
-                let (name, constructor, mark) = match node.kind() {
-                    "dot_index_expression" => (self.field(node, "field")?, "dot", "."),
-                    _ => (self.field(node, "method")?, "colon", ":"),
-                };
-                let name = self.text(name);
-                let base = Out::new(
-                    format!("({constructor} {} {})", table.nix, self.string(name)),
-                    format!("{}{mark}{name}", table.text),
-                );
-                let op = self.token(node, mark).ok_or("an index without its mark")?;
-                if node.kind() == "method_index_expression"
-                    && self.broken(self.field(node, "table")?.end_byte(), op.start_byte())
-                {
-                    return Ok(Out::new(
-                        format!("(rows {})", base.nix),
-                        format!("{}{}:{name}", table.text, newline(depth + 1)),
-                    ));
-                }
-                Ok(base)
-            }
+            "dot_index_expression" | "method_index_expression" => self.index(node, depth),
             "bracket_index_expression" => {
-                let table = self.expression(self.field(node, "table")?, depth)?;
+                let table = self.prefix(self.field(node, "table")?, depth)?;
                 let key = self.expression(self.field(node, "field")?, depth)?;
                 Ok(Out::new(
                     format!("(idx {} {})", table.nix, key.nix),
@@ -665,32 +979,22 @@ impl Importer<'_> {
             "string" => self.string_literal(node),
             "table_constructor" => self.table(node, depth, false),
             "binary_expression" => self.binary(node, depth),
-            "unary_expression" => {
-                let op = children(node)
-                    .first()
-                    .map(|c| self.text(*c).to_owned())
-                    .unwrap_or_default();
-                let operand = self.expression(self.field(node, "operand")?, depth)?;
-                let space = if op == "not" { " " } else { "" };
-                Ok(Out::new(
-                    format!("(unary {} {})", self.string(&op), operand.nix),
-                    format!("{op}{space}{}", operand.text),
-                ))
-            }
+            "unary_expression" => self.unary(node, depth),
             "parenthesized_expression" => {
                 let parts = named(node);
-                let [inner] = parts.as_slice() else {
-                    return self.refuse(node, "parentheses the printer does not write");
-                };
-                let inner = self.expression(*inner, depth)?;
-                Ok(Out::new(
-                    format!("(paren {})", inner.nix),
-                    format!("({})", inner.text),
-                ))
+                match parts.as_slice() {
+                    [inner] if inner.kind() == "function_call" => {
+                        let inner = self.call(*inner, depth)?;
+                        Ok(Out::new(
+                            format!("(paren {})", inner.nix),
+                            format!("({})", inner.text),
+                        ))
+                    }
+                    _ => self.refuse(node, "parentheses the printer does not write"),
+                }
             }
             "function_definition" => {
-                let signature = self.signature(node, depth)?;
-                let body = self.function_body(node, depth)?;
+                let (signature, body) = self.function(node, depth)?;
                 Ok(Out::new(
                     format!("(fn {} {})", signature.nix, body.nix),
                     format!("function{}{}end", signature.text, body.text),
@@ -713,15 +1017,85 @@ impl Importer<'_> {
         }
     }
 
+    fn number(&self, node: Node<'_>, negative: bool) -> Result<Out, String> {
+        let text = self.text(node);
+        let sign = if negative { "-" } else { "" };
+        if let Some(int) = nix::int(&format!("{sign}{text}")) {
+            return Ok(Out::new(int, format!("{sign}{text}")));
+        }
+        if float(text) {
+            let nix = if negative {
+                format!("(-{text})")
+            } else {
+                text.to_owned()
+            };
+            return Ok(Out::new(nix, format!("{sign}{text}")));
+        }
+        if let Some(digits) = text.strip_prefix("0x") {
+            if let Ok(value) = u64::from_str_radix(digits, 16) {
+                if format!("{value:X}") == digits && value < 1 << 62 {
+                    let hex = format!("(hex {value})");
+                    let nix = if negative {
+                        format!("(neg {hex})")
+                    } else {
+                        hex
+                    };
+                    return Ok(Out::new(nix, format!("{sign}{text}")));
+                }
+            }
+        }
+        self.refuse(node, "a number spelling the printer does not write")
+    }
+
+    fn unary(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
+        let op = children(node)
+            .first()
+            .map(|c| self.text(*c).to_owned())
+            .unwrap_or_default();
+        let operand = self.field(node, "operand")?;
+        if op == "-" && operand.kind() == "number" {
+            return self.number(operand, true);
+        }
+        let constructor = match op.as_str() {
+            "not" => "not",
+            "-" => "neg",
+            "#" => "len",
+            _ => return self.refuse(node, "a unary operator the printer does not write"),
+        };
+        let value = if operand.kind() == "parenthesized_expression" {
+            let parts = named(operand);
+            let inner = match parts.as_slice() {
+                [inner]
+                    if matches!(inner.kind(), "if_expression" | "cast_expression")
+                        || inner.kind() == "binary_expression"
+                            && precedence(&self.operator(*inner)).is_some_and(|s| s < UNARY) =>
+                {
+                    self.expression(*inner, depth)?
+                }
+                _ => return self.refuse(operand, "parentheses the printer does not write"),
+            };
+            Out::new(inner.nix, format!("({})", inner.text))
+        } else if matches!(operand.kind(), "if_expression" | "cast_expression") {
+            return self.refuse(operand, "an if or cast operand without parentheses");
+        } else {
+            self.expression(operand, depth)?
+        };
+        let space = if op == "not" { " " } else { "" };
+        Ok(Out::new(
+            format!("({constructor} {})", value.nix),
+            format!("{op}{space}{}", value.text),
+        ))
+    }
+
     fn call(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
         let callee_node = self.field(node, "name")?;
-        let callee = self.expression(callee_node, depth)?;
+        let callee = self.prefix(callee_node, depth)?;
         let arguments = self.field(node, "arguments")?;
         let open = children(arguments).into_iter().next();
         if open.map(|o| o.kind()) != Some("(") {
             return self.refuse(node, "a call without parentheses");
         }
-        let inner = if callee.nix.starts_with("(rows (colon") {
+        let inner = if callee.nix.starts_with("(rows (dot") {
             depth + 1
         } else {
             depth
@@ -755,7 +1129,6 @@ impl Importer<'_> {
             format!("{}({})", callee.text, joined.text),
         ))
     }
-
     fn string_literal(&self, node: Node<'_>) -> Result<Out, String> {
         if named(node).iter().any(|c| c.kind() == "interpolation") {
             return self.refuse(node, "an interpolated string");
@@ -976,7 +1349,19 @@ impl Importer<'_> {
 
     fn type_(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
         match node.kind() {
-            "identifier" | "builtin_type" => Ok(self.atom(self.text(node))),
+            "identifier" => self.reference(node),
+            "builtin_type" if self.text(node) == "nil" => Ok(Out::new("nil".into(), "nil".into())),
+            "builtin_type" => {
+                let name = self.text(node).to_owned();
+                if !GLOBALS.contains(&name.as_str()) {
+                    return self.refuse(
+                        node,
+                        &format!("`{name}` is not a global of generators.luau"),
+                    );
+                }
+                self.globals.borrow_mut().insert(spelled(&name));
+                Ok(Out::new(spelled(&name), name))
+            }
             "optional_type" => {
                 let parts = named(node);
                 let [inner] = parts.as_slice() else {
@@ -1005,38 +1390,42 @@ impl Importer<'_> {
     }
 
     fn binary(&self, node: Node<'_>, depth: usize) -> Result<Out, String> {
-        let op = self.operator(node);
-        let mut operands = Vec::new();
-        self.flatten(node, &op, &mut operands);
-        let broken = operands
+        let mut leaves = Vec::new();
+        let mut operators = Vec::new();
+        self.flatten(node, &mut leaves, &mut operators);
+        let broken = leaves
             .windows(2)
-            .any(|pair| self.broken(pair[0].end_byte(), pair[1].start_byte()));
+            .any(|pair| self.broken(pair[0].0.end_byte(), pair[1].0.start_byte()));
         let inner = if broken { depth + 1 } else { depth };
-        let outs = operands
+        let outs = leaves
             .iter()
-            .map(|o| self.expression(*o, inner))
+            .map(|(leaf, operator, left)| self.operand(*leaf, operator, *left, inner))
             .collect::<Result<Vec<_>, _>>()?;
-        let quoted = self.string(&op);
-        let nix = outs
-            .iter()
-            .map(|o| o.nix.as_str())
-            .collect::<Vec<_>>()
-            .join(&format!(" {quoted} "));
+        let mut nix = outs[0].nix.clone();
+        for (operator, out) in operators.iter().zip(&outs[1..]) {
+            nix.push_str(&format!(" {} {}", self.string(operator), out.nix));
+        }
         if broken {
-            let rest: String = outs[1..]
+            if operators.iter().any(|operator| operator != &operators[0]) {
+                return self.refuse(
+                    node,
+                    "an infix expression of several operators broken over lines",
+                );
+            }
+            let rest: String = operators
                 .iter()
-                .map(|o| format!("{}{op} {}", newline(inner), o.text))
+                .zip(&outs[1..])
+                .map(|(operator, out)| format!("{}{operator} {}", newline(inner), out.text))
                 .collect();
             return Ok(Out::new(
                 format!("(rows (infix [{nix}]))"),
                 format!("{}{rest}", outs[0].text),
             ));
         }
-        let text = outs
-            .iter()
-            .map(|o| o.text.as_str())
-            .collect::<Vec<_>>()
-            .join(&format!(" {op} "));
+        let mut text = outs[0].text.clone();
+        for (operator, out) in operators.iter().zip(&outs[1..]) {
+            text.push_str(&format!(" {operator} {}", out.text));
+        }
         Ok(Out::new(format!("(infix [{nix}])"), text))
     }
 
@@ -1048,24 +1437,70 @@ impl Importer<'_> {
             .unwrap_or_default()
     }
 
-    fn flatten<'t>(&self, node: Node<'t>, op: &str, out: &mut Vec<Node<'t>>) {
+    fn flatten<'t>(
+        &self,
+        node: Node<'t>,
+        leaves: &mut Vec<(Node<'t>, String, bool)>,
+        operators: &mut Vec<String>,
+    ) {
+        let operator = self.operator(node);
         let (Some(left), Some(right)) = (
             node.child_by_field_name("left"),
             node.child_by_field_name("right"),
         ) else {
-            out.push(node);
+            leaves.push((node, operator, true));
             return;
         };
-        let same = |n: Node<'_>| n.kind() == "binary_expression" && self.operator(n) == op;
-        if left_associative(op) && same(left) {
-            self.flatten(left, op, out);
-        } else {
-            out.push(left);
+        for (child, is_left) in [(left, true), (right, false)] {
+            if child.kind() == "binary_expression" {
+                self.flatten(child, leaves, operators);
+            } else {
+                leaves.push((child, operator.clone(), is_left));
+            }
+            if is_left {
+                operators.push(operator.clone());
+            }
         }
-        if !left_associative(op) && same(right) {
-            self.flatten(right, op, out);
-        } else {
-            out.push(right);
+    }
+
+    fn operand(
+        &self,
+        node: Node<'_>,
+        operator: &str,
+        left: bool,
+        depth: usize,
+    ) -> Result<Out, String> {
+        if precedence(operator).is_none() {
+            return self.refuse(node, &format!("`{operator}` is not a binary operator"));
+        }
+        if matches!(node.kind(), "if_expression" | "cast_expression") {
+            return self.refuse(node, "an if or cast operand without parentheses");
+        }
+        if node.kind() != "parenthesized_expression" {
+            return self.expression(node, depth);
+        }
+        let parts = named(node);
+        let [inner] = parts.as_slice() else {
+            return self.refuse(node, "parentheses the printer does not write");
+        };
+        match inner.kind() {
+            "binary_expression" => {
+                let level = precedence(&self.operator(*inner)).unwrap_or(0);
+                let tight = precedence(operator).unwrap_or(0);
+                let needed = level < tight || level == tight && left == right_associative(operator);
+                let group = self.binary(*inner, depth)?;
+                let nix = if needed {
+                    group.nix
+                } else {
+                    format!("(paren {})", group.nix)
+                };
+                Ok(Out::new(nix, format!("({})", group.text)))
+            }
+            "if_expression" | "cast_expression" => {
+                let inner = self.expression(*inner, depth)?;
+                Ok(Out::new(inner.nix, format!("({})", inner.text)))
+            }
+            _ => self.expression(node, depth),
         }
     }
 
