@@ -540,7 +540,7 @@ fn split_restores_an_import_inherited_from() {
     );
     let merged = read_tree(&dir)["flake.nix"].clone();
     assert!(
-        merged.contains("inherit (modules_x_data) model vocabulary;"),
+        merged.contains("inherit (x_data) model vocabulary;"),
         "{merged}"
     );
 
@@ -556,6 +556,113 @@ fn split_restores_an_import_inherited_from() {
         before,
         "split restores every file byte for byte"
     );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A binding is named by the fewest trailing path components no other binding
+/// and no identifier of the merged code shares.
+#[test]
+fn merge_names_bindings_by_their_shortest_unique_path_suffix() {
+    let dir = temp_tree(
+        "merge-names",
+        &[
+            (
+                "flake.nix",
+                "{\n  description = \"t\";\n  outputs = inputs: import ./modules/outputs.nix inputs;\n}\n",
+            ),
+            (
+                "modules/outputs.nix",
+                "inputs: {\n  a = import ./tomoe/bar.data.nix;\n  b = import ./lisp/bar.data.nix;\n  c = import ./tomoe/hud.data.nix;\n  d = import ./core/packages.nix;\n  packages = 1;\n}\n",
+            ),
+            ("modules/tomoe/bar.data.nix", "1\n"),
+            ("modules/lisp/bar.data.nix", "2\n"),
+            ("modules/tomoe/hud.data.nix", "3\n"),
+            ("modules/core/packages.nix", "4\n"),
+        ],
+    );
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let merged = read_tree(&dir)["flake.nix"].clone();
+    for binding in [
+        "a = tomoe_bar_data;",
+        "b = lisp_bar_data;",
+        "c = hud_data;",
+        "d = core_packages;",
+    ] {
+        assert!(merged.contains(binding), "{binding}\n{merged}");
+    }
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(read_tree(&dir), before, "split restores every file");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Lockfiles a package manager writes are not Nix, so merge leaves them beside
+/// the merged file at their paths, rebasing the paths that name them, and split
+/// gives the tree back.
+#[test]
+fn merge_leaves_lockfiles_at_their_paths() {
+    let dir = temp_tree(
+        "merge-lockfiles",
+        &[
+            (
+                "flake.nix",
+                "{\n  description = \"t\";\n  outputs = inputs: import ./modules/outputs.nix inputs;\n}\n",
+            ),
+            (
+                "modules/outputs.nix",
+                "inputs: {\n  npm = ./app/package-lock.json;\n  cargo = ./app/Cargo.lock;\n}\n",
+            ),
+            ("modules/app/package-lock.json", "{\"lockfileVersion\": 3}\n"),
+            ("modules/app/Cargo.lock", "version = 4\n"),
+        ],
+    );
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let after = read_tree(&dir);
+    assert_eq!(
+        after.keys().collect::<Vec<_>>(),
+        [
+            "flake.nix",
+            "modules/app/Cargo.lock",
+            "modules/app/package-lock.json"
+        ],
+        "the lockfiles stay"
+    );
+    assert_eq!(
+        after["modules/app/Cargo.lock"],
+        before["modules/app/Cargo.lock"]
+    );
+    let merged = &after["flake.nix"];
+    assert!(
+        merged.contains("npm = ./modules/app/package-lock.json;"),
+        "{merged}"
+    );
+    assert!(
+        merged.contains("cargo = ./modules/app/Cargo.lock;"),
+        "{merged}"
+    );
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(read_tree(&dir), before, "split restores every file");
     std::fs::remove_dir_all(dir).unwrap();
 }
 

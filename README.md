@@ -42,9 +42,16 @@ every `.nix` file reached through a relative path literal given to
 `import`/`callPackage`, listed in a module list, bound as a module value
 (`nixosModules.x = ./x.nix;`, or a `let` name used only in module lists), or
 named by a string (`"modules/x.nix"`, `"${self}/modules/x.nix"`) becomes one
-`let` binding named after its path; other relative paths are rebased to the
-output's directory, and strings are kept as written: the manifest path names
-the binding. `--expand NAME` evaluates, with `nix eval`, calls of a
+`let` binding named by the fewest trailing components of its path (without
+`.nix` and a final `/default`, other characters as `_`) that no other binding
+and no identifier of the merged files shares, so `modules/tomoe/bar.data.nix`
+is `bar_data`, or `tomoe_bar_data` beside a `lisp/bar.data.nix` or code that
+says `bar_data`, and no binding shadows or is shadowed by a name the code
+uses; other relative paths are rebased to the output's directory, and
+strings are kept as written: the manifest path names the binding. Files that
+are not Nix, such as the `package-lock.json` or `Cargo.lock` a package
+manager writes, are never merged: a path naming one is rebased, so the file
+stays beside the output at its path and the tool keeps rewriting it there. `--expand NAME` evaluates, with `nix eval`, calls of a
 discovery function `NAME` (e.g. a `listFilesRecursive` helper) bound in the
 top-level `let` of any reached file shaped `[ARG:] let ... in BODY`, in that
 `let`'s scope with paths relative to that file and `ARG` given the flake

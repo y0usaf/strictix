@@ -726,20 +726,75 @@ const KEYWORDS: &[&str] = &[
     "if", "then", "else", "assert", "with", "let", "in", "rec", "inherit", "or",
 ];
 
-fn mangle(rel: &str) -> String {
+/// The path components a binding name is built from: the file's path without
+/// `.nix` and a trailing `/default`, each component's non-alphanumeric
+/// characters written as `_`.
+fn name_parts(rel: &str) -> Vec<String> {
     let stem = rel.strip_suffix(".nix").unwrap_or(rel);
     let stem = stem.strip_suffix("/default").unwrap_or(stem);
-    let mut name: String = stem
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
+    stem.split('/')
+        .map(|part| {
+            part.chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect()
+        })
+        .collect()
+}
+
+/// The name of the last `depth` components (all of them when `depth` is
+/// larger), or None when that is no identifier: empty, starting with a digit
+/// or a keyword. With every component it is made one, as `_2026` or `in_`.
+fn suffix_name(parts: &[String], depth: usize) -> Option<String> {
+    let all = depth >= parts.len();
+    let mut name = parts[parts.len() - depth.min(parts.len())..].join("_");
+    let invalid = name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit());
+    if !all && (invalid || KEYWORDS.contains(&name.as_str())) {
+        return None;
+    }
+    if invalid {
         name.insert(0, '_');
     }
     if KEYWORDS.contains(&name.as_str()) {
         name.push('_');
     }
-    name
+    Some(name)
+}
+
+/// Each file's binding name: the fewest trailing path components that make an
+/// identifier no other file's name and no identifier of the merged sources
+/// shares, so a binding neither collides nor shadows or is shadowed by a name
+/// the code uses (`bar_data` for `modules/desktop/tomoe/lisp/bar.data.nix`,
+/// `lisp_bar` when another `bar` or the identifier `bar` exists).
+fn short_names(files: &[&String], taken: &HashSet<&String>) -> Vec<String> {
+    let parts: Vec<Vec<String>> = files.iter().map(|file| name_parts(file)).collect();
+    let mut depth = vec![1; files.len()];
+    loop {
+        let names: Vec<String> = parts
+            .iter()
+            .zip(depth.iter_mut())
+            .map(|(parts, depth)| loop {
+                if let Some(name) = suffix_name(parts, *depth) {
+                    break name;
+                }
+                *depth += 1;
+            })
+            .collect();
+        let mut count: HashMap<&str, usize> = HashMap::new();
+        for name in &names {
+            *count.entry(name).or_default() += 1;
+        }
+        let mut grown = false;
+        for (i, name) in names.iter().enumerate() {
+            let clash = count[name.as_str()] > 1 || taken.contains(name);
+            if clash && depth[i] < parts[i].len() {
+                depth[i] += 1;
+                grown = true;
+            }
+        }
+        if !grown {
+            return names;
+        }
+    }
 }
 
 fn string_refs(analysis: &Analysis, files: &BTreeSet<String>) -> Vec<String> {
@@ -1263,11 +1318,8 @@ fn bind_names(
         .collect();
     let mut names = HashMap::new();
     let mut used = HashSet::new();
-    for file in bound {
-        names.insert(
-            (*file).clone(),
-            fresh_name(&mangle(file), &taken, &mut used),
-        );
+    for (file, short) in bound.iter().zip(short_names(bound, &taken)) {
+        names.insert((*file).clone(), fresh_name(&short, &taken, &mut used));
     }
     let keyer = fresh_name("merge_keyed_module", &taken, &mut used);
     let manifest = fresh_name("merge_manifest", &taken, &mut used);
