@@ -40,6 +40,7 @@ pub mod schema;
 pub mod shallow_merge_overwrite;
 pub mod simplification_rules;
 pub mod singleton_attrset;
+pub mod singleton_list;
 pub mod singleton_optionals;
 mod static_binding;
 pub mod style_rules;
@@ -97,6 +98,7 @@ use simplification_rules::{
     NegationSimplification, TrivialLet,
 };
 use singleton_attrset::SingletonAttrset;
+use singleton_list::SingletonList;
 use singleton_optionals::SingletonOptionals;
 use strictix_core::rules::Rule;
 use style_rules::{
@@ -218,6 +220,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         OptionalListArgument,
         SingletonOptionals,
         SingletonAttrset,
+        SingletonList,
         MaskedGenerator,
         HandWrittenConfig,
         HandMaintainedDataFile,

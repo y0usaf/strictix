@@ -130,7 +130,7 @@ fn dedent(value: &str, by: usize) -> Option<String> {
     Some(out)
 }
 
-fn exempt(model: &SemanticModel<'_>, config: &LintConfig, code: &str) -> bool {
+pub(crate) fn exempt(model: &SemanticModel<'_>, config: &LintConfig, code: &str) -> bool {
     let Some(path) = model.path() else {
         return false;
     };
