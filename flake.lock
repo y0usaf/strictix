@@ -38,22 +38,25 @@
     },
     "nix-generators": {
       "inputs": {
+        "iets": [
+          "iets"
+        ],
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1793796554,
-        "narHash": "sha256-AfBfjQ09dJI3COoLO3/rgkqo7MRSlTQYP2s8ZoGezW4=",
-        "ref": "refs/heads/main",
-        "rev": "6f9a519147c9b8211daddcb4c539bacd437cb1aa",
-        "revCount": 1,
-        "type": "git",
-        "url": "file:///home/y0usaf/dev/developing/nix-generators"
+        "lastModified": 1793800992,
+        "narHash": "sha256-EuOFm5eCctf3MAPm1mUakLBGrgGbMA1N5pcmjeT4JXw=",
+        "owner": "y0usaf",
+        "repo": "nix-generators",
+        "rev": "66690dca1e0bbceb0e7ae84b944a2eb726c37930",
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "file:///home/y0usaf/dev/developing/nix-generators"
+        "owner": "y0usaf",
+        "repo": "nix-generators",
+        "type": "github"
       }
     },
     "nixpkgs": {

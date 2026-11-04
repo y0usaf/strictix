@@ -5,8 +5,9 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     nix-generators = {
-      url = "git+file:///home/y0usaf/dev/developing/nix-generators";
+      url = "github:y0usaf/nix-generators";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.iets.follows = "iets";
     };
 
     iets = {
