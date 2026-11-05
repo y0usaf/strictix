@@ -213,9 +213,12 @@ fn manifest_paths(manifest: Option<Expr<'_>>, source: &str) -> HashMap<String, S
     })
 }
 
-type MergedModule<'t> = (String, &'t SyntaxNode, Option<String>);
+pub(crate) type MergedModule<'t> = (String, &'t SyntaxNode, Option<String>);
 
-fn merged_modules<'t>(tree: &'t SyntaxNode, source: &str) -> Option<Vec<MergedModule<'t>>> {
+pub(crate) fn merged_modules<'t>(
+    tree: &'t SyntaxNode,
+    source: &str,
+) -> Option<Vec<MergedModule<'t>>> {
     let Expr::Let(top) = Root::cast(tree)?.expr()? else {
         return None;
     };

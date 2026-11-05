@@ -38,6 +38,7 @@ pub mod non_boolean_condition;
 pub mod non_callable_application;
 pub mod path_rules;
 pub mod reference_rules;
+pub mod repeated_dynamic_path;
 pub mod scattered_documentation;
 pub mod schema;
 pub mod shallow_merge_overwrite;
@@ -82,13 +83,13 @@ use file_rules::{
     SelfReferentialLet, ShadowedBinding, ShadowedFormal, UnnecessaryOr, UnusedFormal,
     UnusedInherit, UnusedLambdaParam, UnusedLetBinding,
 };
+use flake_inputs::FlakeInputWithoutNixpkgsFollows;
 use ill_typed_binop::IllTypedBinop;
 use ill_typed_unary_op::IllTypedUnaryOp;
 use interpolation_rules::{CoercedInterpolation, RedundantInterpolation, RedundantQuotedAttr};
 use invalid_list_access::InvalidListAccess;
 use lib_type_rules::{DiscouragedLibType, UnknownLibType};
 use lua_data_rules::HandWrittenLuaData;
-use flake_inputs::FlakeInputWithoutNixpkgsFollows;
 use machine_local_default::MachineLocalDefault;
 use missing_attribute::MissingAttribute;
 use missing_function_argument::MissingFunctionArgument;
@@ -99,6 +100,7 @@ use non_boolean_condition::NonBooleanCondition;
 use non_callable_application::NonCallableApplication;
 use path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
 use reference_rules::{UndefinedVariable, UnknownBuiltin};
+use repeated_dynamic_path::RepeatedDynamicPath;
 use scattered_documentation::ScatteredDocumentation;
 use schema::{OptionTypeMismatch, UnknownOption};
 use shallow_merge_overwrite::ShallowMergeOverwrite;
@@ -206,6 +208,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         RedundantBooleanComparison,
         DuplicateLiteralListItem,
         DuplicateDefinitions,
+        RepeatedDynamicPath,
         CircularLet,
         CyclomaticComplexity,
         CognitiveComplexity,

@@ -310,7 +310,7 @@ the binding copies verbatim, and is withheld otherwise.
 
 ## Rules
 
-108 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
+112 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
@@ -318,7 +318,7 @@ the binding copies verbatim, and is withheld otherwise.
 | Certain evaluation errors | self-referential-let, circular-let, undefined-variable, non-boolean-condition, ill-typed-binop, ill-typed-unary-op, non-callable-application, literal-division-by-zero, coerced-interpolation, assert-false, duplicate-attribute, duplicate-formal, dangling-path, missing-import, import-cycle, missing-function-argument, unexpected-function-argument, missing-attribute, builtin-argument-type, builtin-arity, invalid-list-access, invalid-list-to-attrs-entry, replace-strings-length-mismatch, invalid-builtin-range |
 | Hallucination checks | unknown-option, option-type-mismatch, unknown-builtin, unknown-lib-type |
 | Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, duplicate-function-argument, dynamic-import, suspicious-import-argument, suspicious-recursion, unsafe-with-shadowing, shallow-merge-overwrite (opt-in), discouraged-lib-type, masked-generator, flake-input-without-nixpkgs-follows, machine-local-default |
-| Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in), constant-option (opt-in) |
+| Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in), constant-option (opt-in), repeated-dynamic-path (opt-in) |
 | Layout | scattered-documentation (opt-in), unformatted-file (opt-in), wrapped-prose (opt-in) |
 | Maintainability | cyclomatic-complexity, cognitive-complexity |
 | Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, singleton-attrset (opt-in), singleton-list (opt-in), templated-bindings (opt-in), collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data, codec-candidate, duplicate-definitions (opt-in) |
@@ -352,6 +352,22 @@ a generated prefix. Its threshold is the setting `min-leaves` (default 8):
 `[lint.duplicate-definitions] min-leaves = 6` reports subtrees of six
 identical leaves and root attrsets sharing six. `~/finix` holds none at 6;
 at 5 its only overlaps are coincidences (two models of one context window).
+
+`repeated-dynamic-path` (opt-in) flags an option path with a computed
+segment that at least `min-modules` (default 4) modules spell out, such as
+`manzil.users.${config.user.name}.files` in eighty of them: the path up to the
+first segment that is a whole interpolated attribute path (`${a.b}`, not a bare
+`${name}`), without a leading `config.`, counted once per module (a file, or a
+top-level binding of a merged file). The fix it names is one option with a
+static path, a `deferredModule` that keeps each definition as written, set
+once as the target's value through `lib.mkAliasDefinitions`, which passes
+the definitions on in module order, so the target merges what it merged
+before. `~/finix` declares `user.files`, `user.persist` and `user.account`
+that way, for 86 modules that spelled out
+`manzil.users.${config.user.name}.files`,
+`finix.persistence.allowlist.users.${config.user.name}` or
+`users.users.${config.user.name}`; all four of its systems evaluated to the
+same store paths after the change.
 
 `duplicate-literal-list-item` skips a list of only strings that is the whole
 of a `*.data.nix` file (a text kept one line per string, where blank and
