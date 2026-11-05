@@ -37,6 +37,7 @@ pub mod node_rules;
 pub mod non_boolean_condition;
 pub mod non_callable_application;
 pub mod path_rules;
+pub mod per_system_input_lookup;
 pub mod reference_rules;
 pub mod repeated_dynamic_path;
 pub mod scattered_documentation;
@@ -99,6 +100,7 @@ use node_rules::{AssertTrue, ConstantIf, ConstantIfBranches, Tautology};
 use non_boolean_condition::NonBooleanCondition;
 use non_callable_application::NonCallableApplication;
 use path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
+use per_system_input_lookup::PerSystemInputLookup;
 use reference_rules::{UndefinedVariable, UnknownBuiltin};
 use repeated_dynamic_path::RepeatedDynamicPath;
 use scattered_documentation::ScatteredDocumentation;
@@ -209,6 +211,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         DuplicateLiteralListItem,
         DuplicateDefinitions,
         RepeatedDynamicPath,
+        PerSystemInputLookup,
         CircularLet,
         CyclomaticComplexity,
         CognitiveComplexity,
