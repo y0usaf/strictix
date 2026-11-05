@@ -21,6 +21,7 @@ pub mod duplicate_inherit;
 pub mod duplicate_list_to_attrs_name;
 pub mod file_rules;
 pub mod flake_inputs;
+pub mod ignored_function_argument;
 pub mod ill_typed_binop;
 pub mod ill_typed_unary_op;
 pub mod interpolation_rules;
@@ -85,6 +86,7 @@ use file_rules::{
     UnusedInherit, UnusedLambdaParam, UnusedLetBinding,
 };
 use flake_inputs::FlakeInputWithoutNixpkgsFollows;
+use ignored_function_argument::IgnoredFunctionArgument;
 use ill_typed_binop::IllTypedBinop;
 use ill_typed_unary_op::IllTypedUnaryOp;
 use interpolation_rules::{CoercedInterpolation, RedundantInterpolation, RedundantQuotedAttr};
@@ -149,6 +151,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         InvalidListAccess,
         MissingFunctionArgument,
         UnexpectedFunctionArgument,
+        IgnoredFunctionArgument,
         BuiltinArity,
         DuplicateFunctionArgument,
         DynamicImport,

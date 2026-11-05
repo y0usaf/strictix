@@ -310,7 +310,7 @@ the binding copies verbatim, and is withheld otherwise.
 
 ## Rules
 
-113 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
+114 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
@@ -321,7 +321,7 @@ the binding copies verbatim, and is withheld otherwise.
 | Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in), constant-option (opt-in), repeated-dynamic-path (opt-in), per-system-input-lookup (opt-in) |
 | Layout | scattered-documentation (opt-in), unformatted-file (opt-in), wrapped-prose (opt-in) |
 | Maintainability | cyclomatic-complexity, cognitive-complexity |
-| Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, singleton-attrset (opt-in), singleton-list (opt-in), templated-bindings (opt-in), collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data, codec-candidate, duplicate-definitions (opt-in) |
+| Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, singleton-attrset (opt-in), singleton-list (opt-in), templated-bindings (opt-in), collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data, codec-candidate, duplicate-definitions (opt-in), ignored-function-argument |
 
 `cognitive-complexity` warns when a lambda scores above **5**. It counts
 control-flow nesting, conditional helpers (`lib.mkIf`, `lib.optional*`),
@@ -383,6 +383,17 @@ to take it; the fix trusts the setting that the argument maps each input to
 its packages for the same system. `~/finix` had 56 such lookups; with
 `inputPackages` passed to its modules none remain, and its four systems and
 the phone's packages and activation evaluate as before.
+
+`ignored-function-argument` simplifies a call that passes an attribute
+set literal to a `{a, ...}:` function with no `@` name: the attributes its
+pattern does not name are invisible to it, so `shared {inherit lib pkgs;}` to
+`{lib, ...}:` becomes `shared {inherit lib;}`. The function is a lambda, a
+local binding of one (so a merged file's top-level bindings count), or
+`import` of a project file whose expression is one. The fix rewrites an
+`inherit` with the names that remain, or removes it, and removes a binding,
+with the whitespace before each; a dropped value holding a comment keeps the
+report without a fix. On `~/finix` it fixed the eight calls of the hosts'
+`shared.nix` helpers, whose pattern takes only `lib`.
 
 `duplicate-literal-list-item` skips a list of only strings that is the whole
 of a `*.data.nix` file (a text kept one line per string, where blank and
