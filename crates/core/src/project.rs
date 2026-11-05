@@ -123,13 +123,23 @@ impl ProjectContext {
     }
 }
 
-fn normalize(path: &Path) -> PathBuf {
+/// Lexically resolve `.` and `..`, as Nix does for path literals: a merged
+/// file's split modules live only in memory, so the filesystem cannot walk
+/// their `..`. A leading `..` that climbs above a relative path is kept.
+pub fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
-                out.pop();
+                if matches!(
+                    out.components().next_back(),
+                    None | Some(std::path::Component::ParentDir)
+                ) {
+                    out.push("..");
+                } else {
+                    out.pop();
+                }
             }
             other => out.push(other.as_os_str()),
         }

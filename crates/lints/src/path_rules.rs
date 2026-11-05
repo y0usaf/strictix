@@ -12,7 +12,7 @@ use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
     fix::Fix,
-    project::ProjectContext,
+    project::{normalize, ProjectContext},
     rules::Rule,
     semantic::SemanticModel,
 };
@@ -86,7 +86,7 @@ impl DanglingPath {
                 std::path::PathBuf::from(text)
             } else {
                 let Some(dir) = file.parent() else { continue };
-                dir.join(text)
+                normalize(&dir.join(text))
             };
             let is_dir = match std::fs::metadata(&resolved) {
                 Ok(meta) => Some(meta.is_dir()),

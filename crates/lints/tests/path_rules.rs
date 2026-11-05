@@ -35,7 +35,7 @@ fn dangling_path_flags_missing_relative_path_with_resolved_absolute() {
     assert_eq!(diags.len(), 1);
     assert_eq!(diags[0].code, "dangling-path");
     assert_eq!(diags[0].severity_str(), "error");
-    let resolved = anchor.parent().unwrap().join("./missing.nix");
+    let resolved = anchor.parent().unwrap().join("missing.nix");
     assert_eq!(
         diags[0].message,
         format!(
@@ -64,6 +64,14 @@ fn dangling_path_flags_missing_absolute_path() {
 fn dangling_path_is_silent_for_existing_path() {
     let anchor = lintme();
     assert!(check(&DanglingPath {}, "./exists.nix", Some(&anchor)).is_empty());
+}
+
+/// A merged file's split modules sit in directories that exist only in
+/// memory; `..` out of one must resolve lexically, as Nix resolves it.
+#[test]
+fn dangling_path_resolves_parent_dirs_through_virtual_directories() {
+    let anchor = lintme().parent().unwrap().join("no/such/dir/module.nix");
+    assert!(check(&DanglingPath {}, "../../../exists.nix", Some(&anchor)).is_empty());
 }
 
 #[test]
