@@ -41,6 +41,7 @@ pub mod path_rules;
 pub mod per_system_input_lookup;
 pub mod reference_rules;
 pub mod repeated_dynamic_path;
+pub mod repeated_let_value;
 pub mod scattered_documentation;
 pub mod schema;
 pub mod shallow_merge_overwrite;
@@ -105,6 +106,7 @@ use path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
 use per_system_input_lookup::PerSystemInputLookup;
 use reference_rules::{UndefinedVariable, UnknownBuiltin};
 use repeated_dynamic_path::RepeatedDynamicPath;
+use repeated_let_value::RepeatedLetValue;
 use scattered_documentation::ScatteredDocumentation;
 use schema::{OptionTypeMismatch, UnknownOption};
 use shallow_merge_overwrite::ShallowMergeOverwrite;
@@ -214,6 +216,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         DuplicateLiteralListItem,
         DuplicateDefinitions,
         RepeatedDynamicPath,
+        RepeatedLetValue,
         PerSystemInputLookup,
         CircularLet,
         CyclomaticComplexity,

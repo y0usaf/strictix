@@ -310,7 +310,7 @@ the binding copies verbatim, and is withheld otherwise.
 
 ## Rules
 
-114 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
+115 builtin rules (`strictix list`), plus the pipeline-level `syntax-error` diagnostic:
 
 | Family | Rules |
 | --- | --- |
@@ -318,7 +318,7 @@ the binding copies verbatim, and is withheld otherwise.
 | Certain evaluation errors | self-referential-let, circular-let, undefined-variable, non-boolean-condition, ill-typed-binop, ill-typed-unary-op, non-callable-application, literal-division-by-zero, coerced-interpolation, assert-false, duplicate-attribute, duplicate-formal, dangling-path, missing-import, import-cycle, missing-function-argument, unexpected-function-argument, missing-attribute, builtin-argument-type, builtin-arity, invalid-list-access, invalid-list-to-attrs-entry, replace-strings-length-mismatch, invalid-builtin-range |
 | Hallucination checks | unknown-option, option-type-mismatch, unknown-builtin, unknown-lib-type |
 | Traps | shadowed-binding, shadowed-formal, rebound-constant, bare-import-in-list, accidental-path-division, optional-list-argument, repeated-keys, unquoted-uri, search-path-reference, duplicate-inherit, unnecessary-or, duplicate-list-to-attrs-name, duplicate-function-argument, dynamic-import, suspicious-import-argument, suspicious-recursion, unsafe-with-shadowing, shallow-merge-overwrite (opt-in), discouraged-lib-type, masked-generator, flake-input-without-nixpkgs-follows, machine-local-default |
-| Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in), constant-option (opt-in), repeated-dynamic-path (opt-in), per-system-input-lookup (opt-in) |
+| Modules | mixed-module-syntax, config-dependent-imports, unused-option (opt-in), never-enabled-option (opt-in), constant-option (opt-in), repeated-dynamic-path (opt-in), repeated-let-value (opt-in), per-system-input-lookup (opt-in) |
 | Layout | scattered-documentation (opt-in), unformatted-file (opt-in), wrapped-prose (opt-in) |
 | Maintainability | cyclomatic-complexity, cognitive-complexity |
 | Simplification | constant-if, constant-if-branches, constant-boolean-not, constant-boolean-binop, boolean-if, tautology, assert-true, negation-simplification, trivial-let, identity-lambda, empty-attrset-merge, empty-list-concat, singleton-list-concat, singleton-optionals, singleton-attrset (opt-in), singleton-list (opt-in), templated-bindings (opt-in), collapsible-let-in, empty-let-in, eta-reduction, empty-pattern, redundant-pattern-bind, empty-inherit, useless-parens, useless-has-attr, redundant-boolean-comparison, redundant-interpolation, redundant-quoted-attr, duplicate-literal-list-item, manual-inherit, manual-inherit-from, manual-hasattr, manual-getattr, manual-optional, manual-gen-attrs, manual-file-contents, deprecated-is-null, deprecated-to-path, hand-written-config, hand-maintained-data-file, hand-written-lua-data, codec-candidate, duplicate-definitions (opt-in), ignored-function-argument |
@@ -368,6 +368,14 @@ that way, for 86 modules that spelled out
 `finix.persistence.allowlist.users.${config.user.name}` or
 `users.users.${config.user.name}`; all four of its systems evaluated to the
 same store paths after the change.
+
+`repeated-let-value` (opt-in) flags a value that `let` bindings compute in
+at least `min-modules` (default 4) modules, compared by its normalized text
+whatever the name: `~/finix` computed `"/run/user/${toString user.uid}"` as
+`runtimeDir` in four modules (and two more spellings of it elsewhere) before
+it became the read-only option `user.runtimeDir`. Aliases (`config.user.name`),
+literals, plain strings and `import ./x.nix ARGS` are not computations: the
+imported file is the one definition the modules read.
 
 `per-system-input-lookup` (opt-in) flags
 `flakeInputs.tomoe.packages.${pkgs.stdenv.hostPlatform.system}`: a lookup of
