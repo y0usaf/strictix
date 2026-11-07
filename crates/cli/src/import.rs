@@ -155,7 +155,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
             .iter()
             .filter(|name| {
                 known.is_none_or(|known| !known.contains(*name))
-                    && model.is_bound(name, site.range.start())
+                    && model.resolve_lexical(name, site.range.start()).is_some()
             })
             .cloned()
             .collect();
@@ -166,6 +166,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
         report.kept.push((target, reason));
     }
 
+    let mut spliced: BTreeSet<PathBuf> = BTreeSet::new();
     let mut rewritten: Vec<(PathBuf, String)> = Vec::new();
     for (module, source, tree) in &modules {
         let local: Vec<(&PathBuf, &Site)> = sites
@@ -187,7 +188,18 @@ pub fn run(options: &Options) -> Result<Report, String> {
         }
         let needs_generators = local.iter().any(|(_, site)| !site.bound);
         let formal = if needs_generators {
-            Some(formal_spot(tree)?)
+            match formal_spot(tree) {
+                Ok(at) => Some(at),
+                Err(reason) => {
+                    for (target, found) in &by_target {
+                        report.kept.push((
+                            (*target).clone(),
+                            format!("{}:{}: {reason}", module.display(), found[0].line),
+                        ));
+                    }
+                    continue;
+                }
+            }
         } else {
             None
         };
@@ -203,6 +215,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
             } else {
                 None
             };
+            spliced.insert(target.clone());
             for site in found {
                 let replacement = match (hoisted_name.as_deref(), site.place) {
                     (Some(name), Place::Text) => name.to_owned(),
@@ -253,7 +266,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
             .map_err(|e| format!("cannot write {}: {e}", module.display()))?;
         report.modules.push(module);
     }
-    for target in calls.keys() {
+    for target in &spliced {
         std::fs::remove_file(target)
             .map_err(|e| format!("cannot delete {}: {e}", target.display()))?;
         report.deleted.push(target.clone());
@@ -264,8 +277,8 @@ pub fn run(options: &Options) -> Result<Report, String> {
         .map(|path| path.display().to_string())
         .collect();
     let _ = merge::format_files(&options.root, &paths);
-    report.inlined = calls
-        .keys()
+    report.inlined = spliced
+        .iter()
         .map(|target| {
             (
                 imported
@@ -471,6 +484,27 @@ fn dotted(expr: Expr<'_>, source: &str) -> Option<String> {
     }
 }
 
+/// The names a tree leaves to the set it is applied to: its outer lambda's
+/// formals, which the importers write from the names the source leaves free.
+fn formals_of(tree: &str) -> Option<Vec<String>> {
+    let parsed = parse(tree);
+    if parsed.error_nodes().next().is_some() {
+        return None;
+    }
+    let Expr::Lambda(lambda) = unparen(Root::cast(&parsed)?.expr()?) else {
+        return None;
+    };
+    let LambdaParam::Formals(formals, _) = lambda.param() else {
+        return None;
+    };
+    Some(
+        formals
+            .params()
+            .map(|param| param.name.text(tree).to_owned())
+            .collect(),
+    )
+}
+
 /// What a file becomes: a generator syntax tree with the constructors it
 /// names, or a value a value generator prints.
 enum Imported {
@@ -567,12 +601,39 @@ fn convert(target: &Path) -> Result<Imported, String> {
         return Err(format!("no generator converts .{extension}"));
     };
     let tree = strictix_import::expression(language, &text, &[])?;
-    let names = strictix_import::constructors(&tree);
+    let names = formals_of(&tree).unwrap_or_else(|| strictix_import::constructors(&tree));
     Ok(Imported::Tree {
         language,
         tree,
         names,
     })
+}
+
+/// Evaluate an expression that is too large for an argument, through a
+/// temporary file.
+fn eval_expression(expression: &str) -> Result<(bool, String, String), String> {
+    let mut path = std::env::temp_dir();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    path.push(format!(
+        "strictix-import-{}-{unique}.nix",
+        std::process::id()
+    ));
+    std::fs::write(&path, expression)
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    let output = Command::new("nix")
+        .args(["eval", "--impure", "--json", "--file"])
+        .arg(&path)
+        .output()
+        .map_err(|e| format!("running nix eval: {e}"));
+    let _ = std::fs::remove_file(&path);
+    let output = output?;
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    ))
 }
 
 /// The attributes each generator set holds, so a tree's other formals can
@@ -592,18 +653,12 @@ fn generator_attrs(
         "let generators = {generators}; in {{ {} }}",
         fields.join(" ")
     );
-    let output = Command::new("nix")
-        .args(["eval", "--impure", "--json", "--expr", &expression])
-        .output()
-        .map_err(|e| format!("running nix eval: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "reading the generator sets failed:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+    let (ok, stdout, stderr) = eval_expression(&expression)?;
+    if !ok {
+        return Err(format!("reading the generator sets failed:\n{stderr}"));
     }
-    let json = JsonValue::parse(&String::from_utf8_lossy(&output.stdout))
-        .map_err(|e| format!("parsing nix eval output: {}", e.message))?;
+    let json =
+        JsonValue::parse(&stdout).map_err(|e| format!("parsing nix eval output: {}", e.message))?;
     let mut attrs = BTreeMap::new();
     for (language, names) in json
         .as_object()
@@ -722,22 +777,23 @@ fn check(
         "let generators = {generators}; in [\n{}\n]",
         checks.join("\n")
     );
-    let output = Command::new("nix")
-        .args(["eval", "--impure", "--json", "--expr", &expression])
-        .output()
-        .map_err(|e| format!("running nix eval: {e}"))?;
+    let (ok, stdout, _) = eval_expression(&expression)?;
     let targets: Vec<&PathBuf> = calls.keys().collect();
-    if output.status.success() {
-        let json = JsonValue::parse(&String::from_utf8_lossy(&output.stdout))
+    if ok {
+        let json = JsonValue::parse(&stdout)
             .map_err(|e| format!("parsing nix eval output: {}", e.message))?;
         let results = json.as_array().ok_or("the render check is not a list")?;
         let mut failures = Vec::new();
         for (index, result) in results.iter().enumerate() {
             if result.as_bool() != Some(true) {
                 let target = targets.get(index).ok_or("the render check is short")?;
+                let code = calls.get(*target).ok_or("the render check is long")?;
                 failures.push((
                     (*target).clone(),
-                    "the generator does not print this file byte for byte".to_owned(),
+                    format!(
+                        "the generator does not print this file byte for byte ({})",
+                        first_difference(generators, target, code)?
+                    ),
                 ));
             }
         }
@@ -749,29 +805,65 @@ fn check(
             "let generators = {generators}; in {}",
             comparison(target, code)
         );
-        let output = Command::new("nix")
-            .args(["eval", "--impure", "--raw", "--expr", &expression])
-            .output()
-            .map_err(|e| format!("running nix eval: {e}"))?;
-        let rendered = String::from_utf8_lossy(&output.stdout);
-        if !output.status.success() || rendered != "true" {
-            if std::env::var_os("STRICTIX_IMPORT_DEBUG").is_some() {
-                eprintln!(
-                    "--- {}\n{code}\n{}\n---",
-                    target.display(),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            let reason = if output.status.success() {
-                "the generator does not print this file byte for byte".to_owned()
-            } else {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                format!("the generator cannot print it: {}", last_error(&stderr))
-            };
-            failures.push((target.clone(), reason));
+        let (ok, stdout, stderr) = eval_expression(&expression)?;
+        if !ok {
+            failures.push((
+                target.clone(),
+                format!("the generator cannot print it: {}", last_error(&stderr)),
+            ));
+            continue;
+        }
+        if stdout.trim() != "true" {
+            failures.push((
+                target.clone(),
+                format!(
+                    "the generator does not print this file byte for byte ({})",
+                    first_difference(generators, target, code)?
+                ),
+            ));
         }
     }
     Ok(failures)
+}
+
+/// Where the generator's text leaves the file: both are printed and
+/// compared line by line.
+fn first_difference(generators: &str, target: &Path, code: &str) -> Result<String, String> {
+    let expression = format!("let generators = {generators}; in ({code})");
+    let (ok, stdout, stderr) = eval_expression(&expression)?;
+    if !ok {
+        return Ok(format!("it does not evaluate: {}", last_error(&stderr)));
+    }
+    let rendered =
+        JsonValue::parse(&stdout).map_err(|e| format!("parsing nix eval output: {}", e.message))?;
+    let rendered = rendered.as_str().unwrap_or_default();
+    let original = std::fs::read_to_string(target).map_err(|e| format!("cannot read: {e}"))?;
+    for (index, (printed, written)) in rendered.lines().zip(original.lines()).enumerate() {
+        if printed != written {
+            return Ok(format!(
+                "line {}: prints `{}` where the file has `{}`",
+                index + 1,
+                cut(printed),
+                cut(written)
+            ));
+        }
+    }
+    Ok(
+        match rendered.lines().count().cmp(&original.lines().count()) {
+            std::cmp::Ordering::Less => "it prints fewer lines".to_owned(),
+            std::cmp::Ordering::Greater => "it prints more lines".to_owned(),
+            std::cmp::Ordering::Equal => "the last line has no newline".to_owned(),
+        },
+    )
+}
+
+fn cut(line: &str) -> String {
+    let trimmed = line.trim_end();
+    if trimmed.chars().count() > 60 {
+        format!("{}…", trimmed.chars().take(60).collect::<String>())
+    } else {
+        trimmed.to_owned()
+    }
 }
 
 fn comparison(target: &Path, code: &str) -> String {
@@ -786,7 +878,8 @@ fn last_error(stderr: &str) -> String {
     stderr
         .lines()
         .map(str::trim)
-        .rfind(|line| !line.is_empty())
+        .rfind(|line| line.starts_with("error:"))
+        .or_else(|| stderr.lines().map(str::trim).rfind(|line| !line.is_empty()))
         .unwrap_or("nix could not evaluate it")
         .to_owned()
 }
