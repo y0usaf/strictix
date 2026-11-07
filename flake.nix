@@ -125,6 +125,32 @@
               iets eval --no-cache --impure --json -E "$check" | tee iets-out
               grep -qx true nix-out
               grep -qx true iets-out
+
+              mkdir -p letpristine letmodule
+              cp "$samples/lisp.lisp" letpristine/probe.lisp
+              cp "$samples/lisp.lisp" letmodule/probe.lisp
+              {
+                printf '{\n  lib,\n  ...\n}: let\n  helper = 1;\nin {\n'
+                printf '  a = builtins.readFile ./probe.lisp;\n'
+                printf '  b = builtins.readFile ./probe.lisp;\n'
+                printf '  inherit helper;\n}\n'
+              } > letmodule/mod.nix
+
+              strictix import --generators "($generators)" letmodule
+              strictix check letmodule
+
+              letcheck="
+                let
+                  generators = $generators;
+                  lib = import $lib;
+                  module = import ./letmodule/mod.nix { inherit generators lib; };
+                  original = builtins.readFile ./letpristine/probe.lisp;
+                in
+                module.a == original && module.b == original
+              "
+
+              nix eval --store dummy:// --impure --json --expr "$letcheck" | tee let-nix-out
+              grep -qx true let-nix-out
               touch $out
             '';      });
     };

@@ -248,12 +248,17 @@ pub fn run(options: &Options) -> Result<Report, String> {
         if let Some(at) = formal {
             edits.push((TextRange::new(at, at), "generators, ".to_owned()));
         }
-        if let (Some(body), false) = (body, hoisted.is_empty()) {
+        if let (Some((at, into_let)), false) = (body, hoisted.is_empty()) {
             let bindings: String = hoisted
                 .iter()
                 .map(|(name, value)| format!("  {name} = {value};\n"))
                 .collect();
-            edits.push((TextRange::new(body, body), format!("let\n{bindings}in\n")));
+            let text = if into_let {
+                bindings
+            } else {
+                format!("let\n{bindings}in\n")
+            };
+            edits.push((TextRange::new(at, at), text));
         }
         edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start()));
         let mut text = source.clone();
@@ -761,14 +766,26 @@ fn formal_spot(tree: &SyntaxNode) -> Result<u32, String> {
     spot.ok_or_else(|| "the formals list has no closing brace".to_owned())
 }
 
-/// Where the module's body starts: the value a `let` written inside the
-/// module's arguments goes in front of, so the bindings can see them.
-fn let_spot(tree: &SyntaxNode) -> Option<u32> {
+/// Where hoisted bindings go: before the `in` of the module's own top-level
+/// `let`, or else in front of the module's body in a new `let`, flagged by
+/// whether the spot is inside an existing `let`. Either way the bindings see
+/// the module's arguments.
+fn let_spot(tree: &SyntaxNode) -> Option<(u32, bool)> {
     let root = Root::cast(tree)?.expr()?;
-    match unparen(root) {
-        Expr::Lambda(lambda) => lambda.body().map(|body| body.content_range().start()),
-        _ => None,
+    let Expr::Lambda(lambda) = unparen(root) else {
+        return None;
+    };
+    let body = lambda.body()?;
+    if let Expr::Let(let_expr) = unparen(body) {
+        if let Some(token) = let_expr
+            .syntax()
+            .child_tokens()
+            .find(|token| token.kind() == SyntaxKind::KwIn)
+        {
+            return Some((token.range().start(), true));
+        }
     }
+    Some((body.content_range().start(), false))
 }
 
 /// Where a split tree goes: beside the file it replaces, named after it so
