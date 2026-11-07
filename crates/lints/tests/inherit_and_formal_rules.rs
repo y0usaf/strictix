@@ -107,15 +107,19 @@ fn shadowed_formal_has_its_own_diagnostic() {
 }
 
 #[test]
-fn shadowed_formal_exempts_a_data_file_of_a_syntax_tree() {
-    let at = |path: &str| {
-        let source = "{ local, ... }: ({ ok }: [ (local ok [ ]) (({ ok }: [ (local ok [ ]) ]) ) ])";
-        let tree = parse(source);
-        let model = SemanticModel::new(source, &tree).with_path(Some(std::path::Path::new(path)));
+fn shadowed_formal_exempts_a_generator_syntax_tree() {
+    let at = |source: &str| {
+        let parsed = parse(source);
+        let model = SemanticModel::new(source, &parsed);
         let mut diags = Vec::new();
         ShadowedFormal.check_file(&model, &LintConfig::default(), &mut diags);
         diags.len()
     };
-    assert_eq!(at("modules/catch-lua.data.nix"), 0);
-    assert_eq!(at("modules/catch-lua.nix"), 1);
+    let tree = "({ local, ... }: ({ ok }: [ (local ok [ ]) (({ ok }: [ (local ok [ ]) ]) ) ]))";
+    assert_eq!(
+        at(&format!("{{ config = generators.luau.render {tree}; }}")),
+        0,
+        "inner blocks shadow where the generated code scopes"
+    );
+    assert_eq!(at(&format!("{{ window = {tree}; }}")), 1);
 }

@@ -24,6 +24,7 @@ pub enum Command {
     Merge,
     /// Write a merged file's bindings back to their original files.
     Split,
+    /// Inline the files a module reads as the generator data that prints them.
     Import,
 }
 
@@ -69,6 +70,7 @@ pub struct Args {
     pub out: Option<String>,
     pub expand: Vec<String>,
     pub merged: Option<String>,
+    pub generators: Option<String>,
     pub dry_run: bool,
     pub help: bool,
     pub version: bool,
@@ -93,6 +95,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut out = None;
     let mut expand = Vec::new();
     let mut merged = None;
+    let mut generators = None;
     let mut dry_run = false;
     let mut help = false;
     let mut version = false;
@@ -137,6 +140,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 "--out" => out = Some(next_value(args, &mut i, "--out")?),
                 "--expand" => expand.push(next_value(args, &mut i, "--expand")?),
                 "--merged" => merged = Some(next_value(args, &mut i, "--merged")?),
+                "--generators" => generators = Some(next_value(args, &mut i, "--generators")?),
                 "--dry-run" => dry_run = true,
                 other => return Err(format!("unknown flag '{other}'")),
             }
@@ -164,6 +168,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         out,
         expand,
         merged,
+        generators,
         dry_run,
         help,
         version,
@@ -210,11 +215,12 @@ COMMANDS:
               (path: merge root, default .)
     split     Write the bindings of --merged back to their original files
               (path: merge root, default .)
-    import    Print LANGUAGE FILE as the Nix syntax tree finix's generators
-              render (LANGUAGE: glsl, javascript, lisp, lua, luau, markdown,
-              patch, python, shell, ts, vbs); a .nix FILE is read as a line
-              list, or as a file holding one generators.<name>Source call on
-              a line list, which is printed back with the call replaced
+    import    Inline every file a module reads as the generator data that
+              prints it: the path at the option becomes the finix generator
+              call, the source file is deleted, and no file is written
+              beside the module. Used by finix's `nix run .#lint` (glsl,
+              javascript, lisp, lua, luau, markdown, patch, python, shell,
+              ts, vbs and css)
 
 OPTIONS:
     -h, --help            Print this help
@@ -232,5 +238,7 @@ OPTIONS:
                           let of a merged file, into explicit module lists
                           (repeatable)
     --merged FILE         (split) root-relative merged file
+    --generators EXPR     (import) Nix expression for the finix generators
+                          (default: the root flake's nix-generators lib)
 "
 }

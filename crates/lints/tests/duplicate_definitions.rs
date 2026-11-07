@@ -52,8 +52,8 @@ fn generated_files_are_left_out_of_the_comparison() {
     let found = diagnostics(
         &[
             ("./a.nix", RECORD),
-            ("./locks/b.data.nix", RECORD),
-            ("./locks/c.data.nix", RECORD),
+            ("./locks/b.nix", RECORD),
+            ("./locks/c.nix", RECORD),
         ],
         &generated(&["locks"]),
     );
@@ -66,28 +66,25 @@ fn a_generated_prefix_spares_only_the_files_under_it() {
         &[
             ("./a.nix", RECORD),
             ("./b.nix", RECORD),
-            ("./locks/c.data.nix", RECORD),
+            ("./locks/c.nix", RECORD),
         ],
-        &generated(&["./locks/c.data.nix"]),
+        &generated(&["./locks/c.nix"]),
     );
     let files: Vec<&str> = found.iter().map(|(file, _)| file.as_str()).collect();
     assert_eq!(files, ["./a.nix", "./b.nix"], "{found:?}");
-    assert!(!found[0].1.message.contains("c.data.nix"), "{found:?}");
+    assert!(!found[0].1.message.contains("c.nix"), "{found:?}");
 }
 
 #[test]
 fn a_merged_binding_whose_manifest_path_is_generated_is_left_out() {
     let merged = format!(
-        "let\n  a = {RECORD};\n  b = {RECORD};\n  c = {RECORD};\n  merge_manifest = {{\n    files = {{\n      a = \"a.nix\";\n      b = \"locks/b.data.nix\";\n      c = \"locks/c.data.nix\";\n    }};\n  }};\nin\n  builtins.seq merge_manifest (a b c)\n"
+        "let\n  a = {RECORD};\n  b = {RECORD};\n  c = {RECORD};\n  merge_manifest = {{\n    files = {{\n      a = \"a.nix\";\n      b = \"locks/b.nix\";\n      c = \"locks/c.nix\";\n    }};\n  }};\nin\n  builtins.seq merge_manifest (a b c)\n"
     );
     let all = diagnostics(&[("./flake.nix", &merged)], &LintConfig::default());
     assert_eq!(all.len(), 3, "{all:?}");
     let found = diagnostics(&[("./flake.nix", &merged)], &generated(&["locks"]));
     assert!(found.is_empty(), "{found:?}");
-    let one = diagnostics(
-        &[("./flake.nix", &merged)],
-        &generated(&["locks/c.data.nix"]),
-    );
+    let one = diagnostics(&[("./flake.nix", &merged)], &generated(&["locks/c.nix"]));
     assert_eq!(one.len(), 2, "{one:?}");
     assert!(
         one.iter().all(|(_, d)| !d.message.contains("(line 4)")),

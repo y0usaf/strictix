@@ -412,12 +412,6 @@ pub(crate) fn callee_name<'s>(expr: Expr<'_>, source: &'s str) -> Option<&'s str
 /// packages, overlays, plain data — returns `None` and the write side
 /// never runs.
 pub(crate) fn module_attrset<'a>(model: &SemanticModel<'a>) -> Option<AttrsetExpr<'a>> {
-    let data = model
-        .path()
-        .is_some_and(|path| path.to_string_lossy().ends_with(".data.nix"));
-    if data && crate::suggested_rules::syntax_tree(model.root()) {
-        return None;
-    }
     let source = model.source();
     let mut expr = Root::cast(model.root())?.expr()?;
     let mut is_module = false;

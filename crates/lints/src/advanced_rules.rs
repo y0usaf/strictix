@@ -48,20 +48,18 @@ impl Rule for DuplicateFunctionArgument {
         "Duplicate function argument"
     }
     fn description(&self) -> &'static str {
-        "Flags a function application whose adjacent arguments are identical source expressions. A `*.data.nix` file that is a function returning a list, or a function of `...` constructors returning an attribute set, is exempt: it is a syntax tree built from a generator's constructors, where a constructor takes the same name twice as often as the code does (`name = name`)."
+        "Flags a function application whose adjacent arguments are identical source expressions. A generator syntax tree (the argument of a `generators.<language>.render` call) is exempt: a constructor takes the same name twice as often as the code does (`name = name`)."
     }
     fn severity(&self) -> Severity {
         Severity::Warning
     }
     fn check_file(&self, m: &SemanticModel, _: &LintConfig, d: &mut Vec<Diagnostic>) {
-        let data = m
-            .path()
-            .is_some_and(|path| path.to_string_lossy().ends_with(".data.nix"));
-        if data && crate::suggested_rules::syntax_tree(m.root()) {
-            return;
-        }
+        let trees = crate::suggested_rules::tree_ranges(m);
         let s = m.source();
         for n in nodes(m.root(), SyntaxKind::ApplyExpr) {
+            if crate::suggested_rules::in_ranges(&trees, n.range()) {
+                continue;
+            }
             let Some(a) = ApplyExpr::cast(n) else {
                 continue;
             };

@@ -24,14 +24,16 @@ fn flags_a_default_that_names_one_machine() {
     );
     assert_eq!(diags.len(), 1, "{diags:?}");
     assert_eq!(diags[0].code, "machine-local-default");
-    assert!(diags[0].message.contains("/home/y0usaf/Tokens"), "{}", diags[0].message);
+    assert!(
+        diags[0].message.contains("/home/y0usaf/Tokens"),
+        "{}",
+        diags[0].message
+    );
 }
 
 #[test]
 fn a_bare_string_default_is_flagged() {
-    let diags = check(
-        r#"{ lib, ... }: { options.x = lib.mkOption { default = "/root/key"; }; }"#,
-    );
+    let diags = check(r#"{ lib, ... }: { options.x = lib.mkOption { default = "/root/key"; }; }"#);
     assert_eq!(diags.len(), 1, "{diags:?}");
 }
 
@@ -49,9 +51,8 @@ fn interpolated_and_relative_defaults_are_silent() {
 
 #[test]
 fn a_string_outside_a_default_is_silent() {
-    let diags = check(
-        r#"{ lib, ... }: { options.x = lib.mkOption { description = "/home/y0usaf/x"; }; }"#,
-    );
+    let diags =
+        check(r#"{ lib, ... }: { options.x = lib.mkOption { description = "/home/y0usaf/x"; }; }"#);
     assert!(diags.is_empty(), "{diags:?}");
 }
 
@@ -62,8 +63,13 @@ fn the_allow_setting_matches_by_prefix() {
         "allow",
         "/home/y0usaf/Tokens/",
     );
-    let tree = parse(r#"{ lib, ... }: { options.x = lib.mkOption { default = "/home/y0usaf/Tokens/k"; }; }"#);
-    let model = SemanticModel::new(r#"{ lib, ... }: { options.x = lib.mkOption { default = "/home/y0usaf/Tokens/k"; }; }"#, &tree);
+    let tree = parse(
+        r#"{ lib, ... }: { options.x = lib.mkOption { default = "/home/y0usaf/Tokens/k"; }; }"#,
+    );
+    let model = SemanticModel::new(
+        r#"{ lib, ... }: { options.x = lib.mkOption { default = "/home/y0usaf/Tokens/k"; }; }"#,
+        &tree,
+    );
     let mut diags = Vec::new();
     MachineLocalDefault {}.check_file(&model, &config, &mut diags);
     assert!(diags.is_empty(), "{diags:?}");

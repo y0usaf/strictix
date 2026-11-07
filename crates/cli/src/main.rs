@@ -75,19 +75,42 @@ fn main() -> ExitCode {
 }
 
 fn run_import(args: &Args) -> ExitCode {
-    let [language, path] = args.paths.as_slice() else {
-        return usage_error("import requires LANGUAGE and FILE");
+    let options = import::Options {
+        root: command_root(args),
+        paths: args.paths.clone(),
+        generators: args.generators.clone(),
+        dry_run: args.dry_run,
     };
-    match import::run(&language.to_string_lossy(), path) {
-        Ok(nix) => {
-            print!("{nix}");
-            ExitCode::SUCCESS
-        }
+    let report = match import::run(&options) {
+        Ok(report) => report,
         Err(message) => {
-            eprintln!("error: {}: {message}", path.display());
-            ExitCode::FAILURE
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
         }
+    };
+    let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (language, _) in &report.inlined {
+        *counts.entry(language.as_str()).or_default() += 1;
     }
+    let languages: Vec<String> = counts
+        .iter()
+        .map(|(language, count)| format!("{language} {count}"))
+        .collect();
+    println!(
+        "inlined {} files into {} modules ({}); deleted {} files",
+        report.inlined.len(),
+        report.modules.len(),
+        if languages.is_empty() {
+            "nothing to convert".to_owned()
+        } else {
+            languages.join(", ")
+        },
+        report.deleted.len()
+    );
+    for (file, reason) in &report.kept {
+        println!("kept {}: {reason}", file.display());
+    }
+    ExitCode::SUCCESS
 }
 
 fn command_root(args: &Args) -> PathBuf {

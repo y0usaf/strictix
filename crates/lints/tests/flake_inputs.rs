@@ -85,7 +85,9 @@ fn a_source_only_input_is_exempt() {
 
 #[test]
 fn the_root_nixpkgs_itself_is_never_flagged() {
-    let diags = check(r#"{ inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"; outputs = _: {}; }"#);
+    let diags = check(
+        r#"{ inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"; outputs = _: {}; }"#,
+    );
     assert!(diags.is_empty(), "{diags:?}");
 }
 
@@ -97,11 +99,8 @@ fn a_file_without_a_nixpkgs_input_is_left_alone() {
 
 #[test]
 fn the_allow_setting_suppresses_an_input() {
-    let config = LintConfig::default().with_setting(
-        "flake-input-without-nixpkgs-follows",
-        "allow",
-        "tomoe",
-    );
+    let config =
+        LintConfig::default().with_setting("flake-input-without-nixpkgs-follows", "allow", "tomoe");
     let diags = check_with(
         r#"{
           inputs = {

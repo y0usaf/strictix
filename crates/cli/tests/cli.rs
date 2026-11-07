@@ -566,13 +566,23 @@ fn split_notes_a_manifest_entry_whose_binding_is_gone() {
         &dir,
         &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
     );
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let merged = std::fs::read_to_string(dir.join("flake.nix")).unwrap();
     let stripped = merged.replace("  modules_b =\n{config = {};}\n  ;\n", "");
     assert_ne!(merged, stripped, "the merged fixture holds modules_b");
     std::fs::write(dir.join("flake.nix"), stripped).unwrap();
     let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let report = stdout(&out);
     assert!(
         report.contains("the manifest names modules_b for modules/b.nix"),
@@ -599,13 +609,13 @@ fn split_restores_an_import_inherited_from() {
             ),
             (
                 "modules/a.nix",
-                "let\n  inherit (import ./x.data.nix) model vocabulary;\nin {\n  inherit model vocabulary;\n}\n",
+                "let\n  inherit (import ./x.nix) model vocabulary;\nin {\n  inherit model vocabulary;\n}\n",
             ),
             (
                 "modules/sub/b.nix",
-                "let\n  inherit (import ../x.data.nix) model;\nin\n  model\n",
+                "let\n  inherit (import ../x.nix) model;\nin\n  model\n",
             ),
-            ("modules/x.data.nix", "{\n  model = \"m\";\n  vocabulary = [\"v\"];\n}\n"),
+            ("modules/x.nix", "{\n  model = \"m\";\n  vocabulary = [\"v\"];\n}\n"),
         ],
     );
     let before = read_tree(&dir);
@@ -620,10 +630,7 @@ fn split_restores_an_import_inherited_from() {
         String::from_utf8_lossy(&out.stderr)
     );
     let merged = read_tree(&dir)["flake.nix"].clone();
-    assert!(
-        merged.contains("inherit (x_data) model vocabulary;"),
-        "{merged}"
-    );
+    assert!(merged.contains("inherit (x) model vocabulary;"), "{merged}");
 
     let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
     assert_eq!(
@@ -653,11 +660,11 @@ fn merge_names_bindings_by_their_shortest_unique_path_suffix() {
             ),
             (
                 "modules/outputs.nix",
-                "inputs: {\n  a = import ./tomoe/bar.data.nix;\n  b = import ./lisp/bar.data.nix;\n  c = import ./tomoe/hud.data.nix;\n  d = import ./core/packages.nix;\n  packages = 1;\n}\n",
+                "inputs: {\n  a = import ./tomoe/bar.nix;\n  b = import ./lisp/bar.nix;\n  c = import ./tomoe/hud.nix;\n  d = import ./core/packages.nix;\n  packages = 1;\n}\n",
             ),
-            ("modules/tomoe/bar.data.nix", "1\n"),
-            ("modules/lisp/bar.data.nix", "2\n"),
-            ("modules/tomoe/hud.data.nix", "3\n"),
+            ("modules/tomoe/bar.nix", "1\n"),
+            ("modules/lisp/bar.nix", "2\n"),
+            ("modules/tomoe/hud.nix", "3\n"),
             ("modules/core/packages.nix", "4\n"),
         ],
     );
@@ -674,9 +681,9 @@ fn merge_names_bindings_by_their_shortest_unique_path_suffix() {
     );
     let merged = read_tree(&dir)["flake.nix"].clone();
     for binding in [
-        "a = tomoe_bar_data;",
-        "b = lisp_bar_data;",
-        "c = hud_data;",
+        "a = tomoe_bar;",
+        "b = lisp_bar;",
+        "c = hud;",
         "d = core_packages;",
     ] {
         assert!(merged.contains(binding), "{binding}\n{merged}");

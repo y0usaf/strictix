@@ -16,9 +16,7 @@ use strictix_core::{
     rules::Rule,
     semantic::SemanticModel,
 };
-use strictix_syntax::{
-    AstNode, AttrItem, AttrName, Attrpath, Expr, Root, StringPart, TextRange,
-};
+use strictix_syntax::{AstNode, AttrItem, AttrName, Attrpath, Expr, Root, StringPart, TextRange};
 
 use crate::schema::unwrap_parens;
 
@@ -52,7 +50,8 @@ impl Rule for FlakeInputWithoutNixpkgsFollows {
 
     fn check_file(&self, model: &SemanticModel, config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         let source = model.source();
-        let Some(Expr::Attrset(flake)) = Root::cast(model.root()).and_then(|root| root.expr()) else {
+        let Some(Expr::Attrset(flake)) = Root::cast(model.root()).and_then(|root| root.expr())
+        else {
             return;
         };
         let Some(declared) = flake.items().find_map(|item| match item {
@@ -159,7 +158,9 @@ fn static_path(path: Option<Attrpath<'_>>, source: &str) -> Option<Vec<String>> 
         .elements()
         .map(|element| match element {
             AttrName::Ident(token) => Some(token.text(source).to_string()),
-            AttrName::Str(string) if !string.parts().any(|p| matches!(p, StringPart::Interp(_))) => {
+            AttrName::Str(string)
+                if !string.parts().any(|p| matches!(p, StringPart::Interp(_))) =>
+            {
                 let range = string.syntax().content_range();
                 let text = &source[range.start() as usize..range.end() as usize];
                 if text.contains('\\') {

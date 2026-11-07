@@ -13,7 +13,7 @@ use strictix_core::{
     semantic::SemanticModel,
 };
 use strictix_syntax::{
-    AstNode, ApplyExpr, AttrItem, AttrName, Attrpath, Expr, StringPart, SyntaxKind, TextRange,
+    ApplyExpr, AstNode, AttrItem, AttrName, Attrpath, Expr, StringPart, SyntaxKind, TextRange,
 };
 
 use crate::schema::unwrap_parens;
@@ -100,7 +100,9 @@ fn static_path(path: Option<Attrpath<'_>>, source: &str) -> Option<Vec<String>> 
         .elements()
         .map(|element| match element {
             AttrName::Ident(token) => Some(token.text(source).to_string()),
-            AttrName::Str(string) if !string.parts().any(|p| matches!(p, StringPart::Interp(_))) => {
+            AttrName::Str(string)
+                if !string.parts().any(|p| matches!(p, StringPart::Interp(_))) =>
+            {
                 let range = string.syntax().content_range();
                 let text = &source[range.start() as usize..range.end() as usize];
                 if text.contains('\\') {
@@ -128,8 +130,14 @@ fn literals<'a>(value: Expr<'a>, source: &'a str) -> Vec<(String, TextRange)> {
     }
 }
 
-fn string_text<'a>(string: strictix_syntax::StringExpr<'a>, source: &'a str) -> Option<(String, TextRange)> {
-    if string.parts().any(|part| matches!(part, StringPart::Interp(_))) {
+fn string_text<'a>(
+    string: strictix_syntax::StringExpr<'a>,
+    source: &'a str,
+) -> Option<(String, TextRange)> {
+    if string
+        .parts()
+        .any(|part| matches!(part, StringPart::Interp(_)))
+    {
         return None;
     }
     let range = string.syntax().content_range();

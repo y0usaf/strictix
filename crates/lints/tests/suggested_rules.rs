@@ -122,46 +122,30 @@ fn duplicate_literal_list_item_flags_repeated_primitives() {
     assert!(diagnostics.iter().all(|d| d.fix.is_none()));
 }
 
-fn run_at(source: &str, path: &str) -> Vec<Diagnostic> {
+fn in_tree(source: &str) -> Vec<Diagnostic> {
     let tree = parse(source);
-    let model = SemanticModel::new(source, &tree).with_path(Some(std::path::Path::new(path)));
+    let model = SemanticModel::new(source, &tree);
     let mut diagnostics = Vec::new();
     DuplicateLiteralListItem {}.check_file(&model, &LintConfig::default(), &mut diagnostics);
     diagnostics
 }
 
 #[test]
-fn duplicate_literal_list_item_exempts_a_data_file_of_lines() {
-    let lines = r#"[ "local x = 1" "" "end" "" "end" ]"#;
-    assert!(run_at(lines, "modules/init.lua.data.nix").is_empty());
-    assert_eq!(run_at(lines, "modules/init.nix").len(), 2);
-    assert_eq!(
-        run_at(r#"[ "a" "a" true ]"#, "modules/x.data.nix").len(),
-        1,
-        "a list with non-string items is not a line list"
-    );
-    assert_eq!(
-        run_at(r#"{ x = [ "a" "a" ]; }"#, "modules/x.data.nix").len(),
-        1,
-        "only the root list is exempt"
-    );
-}
-
-#[test]
-fn duplicate_literal_list_item_exempts_a_data_file_of_a_syntax_tree() {
-    let tree = r#"{ rows, ... }: [ (rows [ [ "+" "x" "x" ] ]) [ ":cpu" ":cpu" ] ]"#;
-    assert!(run_at(tree, "modules/lisp/bar.data.nix").is_empty());
-    assert_eq!(run_at(tree, "modules/bar.nix").len(), 2);
-    assert_eq!(
-        run_at(r#"{ x }: { y = [ "a" "a" ]; }"#, "modules/x.data.nix").len(),
-        1,
-        "a function returning an attribute set is not a syntax tree"
-    );
-    assert!(run_at(
-        r#"{ call, ... }: { consts = { A = [ "a" "*" "b" "*" "c" ]; }; }"#,
-        "modules/shaders/x.data.nix"
+fn duplicate_literal_list_item_exempts_a_generator_syntax_tree() {
+    assert!(in_tree(
+        r#"{ config = generators.lisp.render ({ rows, ... }: [ (rows [ [ "+" "x" "x" ] ]) [ ":cpu" ":cpu" ] ]); }"#
     )
     .is_empty());
+    assert_eq!(
+        in_tree(r#"{ window = [ ":cpu" ":cpu" ]; }"#).len(),
+        1,
+        "outside a syntax tree a repeat is a slip"
+    );
+    assert_eq!(
+        in_tree(r#"[ "local x = 1" "" "end" "" "end" ]"#).len(),
+        2,
+        "a line list kept in a module is text, not a tree"
+    );
 }
 
 #[test]

@@ -52,7 +52,7 @@ fn a_value_computed_in_four_modules_is_reported_at_each_whatever_its_name() {
 
 #[test]
 fn aliases_literals_and_imports_are_not_computations() {
-    let source = "{config, lib, ...}: let\n  name = config.user.name;\n  n = 3;\n  s = \"plain\";\n  shared = import ../shared.nix {inherit lib;};\n  prelude = import ./p.data.nix lib config;\n  data = import ./x.nix;\nin [name n s shared prelude data]";
+    let source = "{config, lib, ...}: let\n  name = config.user.name;\n  n = 3;\n  s = \"plain\";\n  shared = import ../shared.nix {inherit lib;};\n  prelude = import ./prelude.nix lib config;\n  data = import ./x.nix;\nin [name n s shared prelude data]";
     let files = [
         ("./a.nix", source),
         ("./b.nix", source),

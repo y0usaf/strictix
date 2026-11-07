@@ -50,12 +50,13 @@ const CONSTRUCTORS: [&str; 37] = [
     "while",
 ];
 
-const GLOBALS: [&str; 30] = [
+const GLOBALS: [&str; 31] = [
     "AgentBlock",
     "AgentFinishedEvent",
     "AgentStateEvent",
     "CommandFinishedEvent",
     "FocusEvent",
+    "Launch",
     "PaneInfo",
     "PickItem",
     "ProcessResult",

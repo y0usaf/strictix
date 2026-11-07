@@ -59,36 +59,73 @@
       checks = forAll (pkgs: {
         build = self.packages.${pkgs.system}.default;
 
-        import-roundtrip =
-          pkgs.runCommand "strictix-import-roundtrip"
+        import-inline =
+          pkgs.runCommand "strictix-import-inline"
             {
               nativeBuildInputs = [
                 self.packages.${pkgs.system}.default
                 iets.packages.${pkgs.system}.default
                 pkgs.nix
-                pkgs.diffutils
               ];
             }
             ''
               export HOME=$TMPDIR NIX_CONFIG="experimental-features = nix-command"
-              mkdir -p nixpkgs work
+              mkdir -p nixpkgs module pristine
               cp -r ${nixpkgs}/lib ${nixpkgs}/.version nixpkgs/
-              cp ${nix-generators}/lib.nix work/generators.nix
+              cp ${nix-generators}/lib.nix work-generators.nix
               lib=$PWD/nixpkgs/lib
-              generators=$PWD/work/generators.nix
-              for source in ${./checks/import}/*; do
-                file=$(basename "$source")
-                language=''${file%%.*}
-                strictix import "$language" "$source" > "work/$file.nix"
-                expression="let generators = import $generators { lib = import $lib; }; in generators.$language.render (import $PWD/work/$file.nix generators.$language)"
-                nix eval --store dummy:// --impure --raw --expr "$expression" > "work/$file.nix-out"
-                iets eval --no-cache --impure --raw -E "$expression" > "work/$file.iets-out"
-                diff -u "$source" "work/$file.nix-out"
-                diff -u "$source" "work/$file.iets-out"
-                echo "$file: nix and iets render the import byte for byte"
+              generators="import $PWD/work-generators.nix { lib = import $lib; }"
+              samples=${./checks/import}
+
+              for source in "$samples"/*; do
+                name=$(basename "$source")
+                case "$name" in
+                  *.input) name="markdown.md" ;;
+                esac
+                cp "$source" "pristine/$name"
+                cp "$source" "module/$name"
               done
+              original=$PWD/pristine
+              {
+                printf '{generators}: {\n'
+                for source in "$samples"/*; do
+                  name=$(basename "$source")
+                  case "$name" in
+                    *.input) name="markdown.md" ;;
+                  esac
+                  printf '  "%s" = builtins.readFile ./%s;\n' "$name" "$name"
+                done
+                printf '}\n'
+              } > module/mod.nix
+
+              strictix import --generators "($generators)" module | tee report
+              if grep -q '^kept' report; then
+                echo "a sample was left as a file; every language has a generator"
+                exit 1
+              fi
+
+              echo "module holds $(ls module | wc -l) entries"
+              test "$(ls module | wc -l)" -eq 1
+              if [ -n "$(find module -name '*.data.nix' -print -quit)" ]; then
+                echo "a data sidecar was written beside the module"
+                exit 1
+              fi
+
+              check="
+                let
+                  generators = $generators;
+                  original = \"$original\";
+                  module = import ./module/mod.nix { inherit generators; };
+                  mismatched = builtins.filter (name: builtins.getAttr name module != builtins.readFile (original + \"/\" + name)) (builtins.attrNames module);
+                in
+                builtins.length mismatched == 0
+              "
+
+              nix eval --store dummy:// --impure --json --expr "$check" | tee nix-out
+              iets eval --no-cache --impure --json -E "$check" | tee iets-out
+              grep -qx true nix-out
+              grep -qx true iets-out
               touch $out
-            '';
-      });
+            '';      });
     };
 }

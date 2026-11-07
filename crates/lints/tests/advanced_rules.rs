@@ -38,17 +38,26 @@ fn duplicate_function_argument_fires_only_for_adjacent_equal_args() {
 }
 
 #[test]
-fn duplicate_function_argument_exempts_a_data_file_of_a_syntax_tree() {
-    let at = |source: &str, path: &str| {
+fn duplicate_function_argument_exempts_a_generator_syntax_tree() {
+    let at = |source: &str| {
         let tree = parse(source);
-        let model = SemanticModel::new(source, &tree).with_path(Some(std::path::Path::new(path)));
+        let model = SemanticModel::new(source, &tree);
         let mut diags = Vec::new();
         DuplicateFunctionArgument.check_file(&model, &LintConfig::default(), &mut diags);
         diags.len()
     };
-    let tree = r#"{ field, ... }: [ (field "command" "command") ]"#;
-    assert_eq!(at(tree, "modules/window.data.nix"), 0);
-    assert_eq!(at(tree, "modules/window.nix"), 1);
+    assert_eq!(
+        at(
+            r#"{ config = generators.luau.render ({ field, ... }: [ (field "command" "command") ]); }"#
+        ),
+        0,
+        "a constructor takes the same name twice"
+    );
+    assert_eq!(
+        at(r#"{ window = field "command" "command"; }"#),
+        1,
+        "outside a syntax tree the duplicate is a slip"
+    );
 }
 
 #[test]

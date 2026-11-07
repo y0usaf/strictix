@@ -72,9 +72,7 @@ use call_simplification::{
     ManualOptional, OptionalListArgument,
 };
 use cognitive_complexity::CognitiveComplexity;
-use config_file_rules::{
-    CodecCandidate, HandMaintainedDataFile, HandWrittenConfig, MaskedGenerator,
-};
+use config_file_rules::{HandMaintainedDataFile, HandWrittenConfig, MaskedGenerator};
 use constant_option::ConstantOption;
 use duplicate_attr::DuplicateAttribute;
 use duplicate_definitions::DuplicateDefinitions;
@@ -249,7 +247,6 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         MaskedGenerator,
         HandWrittenConfig,
         HandMaintainedDataFile,
-        CodecCandidate,
         HandWrittenLuaData,
         ScatteredDocumentation,
         UnformattedFile,

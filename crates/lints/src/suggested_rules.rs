@@ -13,8 +13,8 @@ use strictix_core::{
     semantic::{BindingKind, SemanticModel},
 };
 use strictix_syntax::{
-    AssertExpr, AstNode, BinExpr, Expr, LambdaParam, ListExpr, RecAttrsetExpr, Root, StringPart,
-    SyntaxKind as K, SyntaxNode, TextRange,
+    AssertExpr, AstNode, BinExpr, Expr, ListExpr, RecAttrsetExpr, StringPart, SyntaxKind as K,
+    SyntaxNode, TextRange,
 };
 
 /// Flags a recursive attrset that has no intra-set references.
@@ -311,55 +311,79 @@ impl Rule for DuplicateLiteralListItem {
         "Duplicate literal list item"
     }
     fn description(&self) -> &'static str {
-        "Flags a repeated string, boolean, or null literal in one list — usually a copy-paste slip in an imports or package list. Numeric literals are exempt (coordinate and dimension vectors repeat them legitimately), as is a list of only strings that is the whole of a `*.data.nix` file (text kept one line per string, where blank lines and closing lines repeat by nature) and every list of a `*.data.nix` file that is a function returning a list, or a function of `...` constructors returning an attribute set (a syntax tree built from a generator's constructors, where a symbol or word repeats as often as the code uses it); duplicates may still be intentional, so the rule is warning-only and offers no fix."
+        "Flags a repeated string, boolean, or null literal in one list — usually a copy-paste slip in an imports or package list. Numeric literals are exempt (coordinate and dimension vectors repeat them legitimately), as is every list of a generator syntax tree (the argument of a `generators.<language>.render` call, where a symbol or word repeats as often as the generated code uses it); duplicates may still be intentional, so the rule is warning-only and offers no fix."
     }
     fn severity(&self) -> Severity {
         Severity::Warning
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
-        let data = model
-            .path()
-            .is_some_and(|path| path.to_string_lossy().ends_with(".data.nix"));
-        if data && syntax_tree(model.root()) {
-            return;
-        }
-        let lines = data.then(|| line_list(model.root())).flatten();
+        let trees = tree_ranges(model);
         for node in model.root().descendants() {
-            if node.kind() == K::ListExpr && Some(node.range()) != lines {
+            if node.kind() == K::ListExpr && !in_ranges(&trees, node.range()) {
                 self.check_list(node, model.source(), diags);
             }
         }
     }
 }
 
-pub(crate) fn syntax_tree(root: &SyntaxNode) -> bool {
-    let Some(Expr::Lambda(lambda)) = Root::cast(root).and_then(|root| root.expr()) else {
-        return false;
-    };
-    let constructors =
-        matches!(lambda.param(), LambdaParam::Formals(formals, _) if formals.has_ellipsis());
-    match lambda.body().map(unwrap_parens) {
-        Some(Expr::List(_)) => true,
-        Some(Expr::Attrset(_)) => constructors,
-        Some(Expr::Lambda(shader)) => {
-            let body = match shader.body().map(unwrap_parens) {
-                Some(Expr::Let(scope)) => scope.body().map(unwrap_parens),
-                other => other,
-            };
-            constructors && matches!(body, Some(Expr::Attrset(_) | Expr::List(_)))
+/// Byte ranges of the generator syntax trees in this file: the argument of
+/// every `generators.<language>.render` call. A tree is built from a
+/// generator's constructors, so a symbol or word it repeats is the generated
+/// code's, repeated as often as that code uses it.
+pub(crate) fn tree_ranges(model: &SemanticModel<'_>) -> Vec<TextRange> {
+    let source = model.source();
+    let mut ranges = Vec::new();
+    for node in model.root().descendants() {
+        let Some(Expr::Apply(apply)) = Expr::cast(node) else {
+            continue;
+        };
+        let Some(func) = apply.func() else { continue };
+        let Some(name) = dotted(unwrap_parens(func), source) else {
+            continue;
+        };
+        let mut parts = name.split('.');
+        if parts.next() != Some("generators") {
+            continue;
         }
-        _ => false,
+        let (Some(_language), Some("render"), None) = (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        if let Some(arg) = apply.arg() {
+            ranges.push(arg.content_range());
+        }
     }
+    ranges
 }
 
-fn line_list(root: &SyntaxNode) -> Option<TextRange> {
-    let Expr::List(list) = Root::cast(root)?.expr()? else {
-        return None;
-    };
-    list.items()
-        .all(|item| matches!(item, Expr::String(_) | Expr::IndString(_)))
-        .then(|| list.syntax().range())
+/// Whether `range` sits inside one of `ranges`.
+pub(crate) fn in_ranges(ranges: &[TextRange], range: TextRange) -> bool {
+    ranges
+        .iter()
+        .any(|outer| outer.start() <= range.start() && range.end() <= outer.end())
+}
+
+/// A select chain's dotted name: `lib.generators.toINI` for
+/// `lib.generators.toINI`, `None` when a segment is not a plain ident.
+fn dotted(expr: Expr<'_>, source: &str) -> Option<String> {
+    match expr {
+        Expr::Ident(token) => Some(token.text(source).to_owned()),
+        Expr::Select(select) => {
+            let mut name = dotted(select.base()?, source)?;
+            for element in select.attrpath()?.elements() {
+                match element {
+                    strictix_syntax::AttrName::Ident(token) => {
+                        name.push('.');
+                        name.push_str(token.text(source));
+                    }
+                    _ => return None,
+                }
+            }
+            Some(name)
+        }
+        _ => None,
+    }
 }
 
 impl DuplicateLiteralListItem {

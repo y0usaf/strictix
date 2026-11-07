@@ -11,12 +11,12 @@
 //! The human format adds the file path, 1-based byte line/column, the
 //! offending source line with a caret under the diagnostic's range, and
 //! an optional help line. The JSON format mirrors the same fields as a
-//! JsonValue document (plus `codec`, null outside `codec-candidate`), one entry per file plus a summary.
+//! JsonValue document, one entry per file plus a summary.
 
 use std::fmt::Display;
 use std::io::IsTerminal;
 
-use strictix_core::diagnostic::{Codec, CodecKind, CodecLoader, Diagnostic, Severity};
+use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
 use strictix_core::json::JsonValue;
 use strictix_syntax::TextRange;
@@ -174,10 +174,6 @@ pub fn json(files: &[JsonFile]) -> JsonValue {
                     "fix".to_owned(),
                     diag.fix.as_ref().map_or(JsonValue::Null, fix_json),
                 ),
-                (
-                    "codec".to_owned(),
-                    diag.codec.as_ref().map_or(JsonValue::Null, codec_json),
-                ),
             ]));
         }
         file_values.push(JsonValue::Object(vec![
@@ -218,38 +214,6 @@ fn fix_json(fix: &Fix) -> JsonValue {
     JsonValue::Object(vec![
         ("label".to_owned(), JsonValue::String(fix.label.clone())),
         ("edits".to_owned(), JsonValue::Array(edits)),
-    ])
-}
-
-/// The JSON shape of a `codec-candidate` conversion target.
-fn codec_json(codec: &Codec) -> JsonValue {
-    let text =
-        |value: Option<&str>| value.map_or(JsonValue::Null, |v| JsonValue::String(v.to_owned()));
-    JsonValue::Object(vec![
-        ("id".to_owned(), JsonValue::String(codec.id.clone())),
-        (
-            "kind".to_owned(),
-            JsonValue::String(
-                match codec.kind {
-                    CodecKind::Text => "text",
-                    CodecKind::File => "file",
-                }
-                .to_owned(),
-            ),
-        ),
-        ("target".to_owned(), text(codec.target.as_deref())),
-        (
-            "loader".to_owned(),
-            text(codec.loader.map(|loader| match loader {
-                CodecLoader::Import => "import",
-                CodecLoader::Source => "source",
-                CodecLoader::Lines => "lines",
-            })),
-        ),
-        ("replace".to_owned(), range_json(codec.replace)),
-        ("lib".to_owned(), JsonValue::Bool(codec.lib)),
-        ("pkgs".to_owned(), JsonValue::Bool(codec.pkgs)),
-        ("entry".to_owned(), text(codec.entry.as_deref())),
     ])
 }
 

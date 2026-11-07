@@ -85,9 +85,6 @@ fn lint_files(
         );
         for mut diag in run.diagnostics {
             diag.range = file.mapped.range(diag.range);
-            if let Some(codec) = &mut diag.codec {
-                codec.replace = file.mapped.range(codec.replace);
-            }
             diag.fix = diag.fix.and_then(|fix| map_fix(fix, &file.mapped));
             out.push(diag);
         }

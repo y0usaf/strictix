@@ -1,3 +1,4 @@
+mod css;
 mod glsl;
 mod javascript;
 mod lisp;
@@ -57,6 +58,12 @@ pub fn expression(language: &str, source: &str, holes: &[String]) -> Result<Stri
             LANGUAGES.join(", ")
         )),
     }
+}
+
+/// A CSS file as the value `generators.cssSource` prints: a list of
+/// rules and at-rules, refused unless the printer reproduces it exactly.
+pub fn css(source: &str) -> Result<String, String> {
+    css::import(source)
 }
 
 pub fn bound(language: &str) -> bool {

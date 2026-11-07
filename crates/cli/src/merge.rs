@@ -763,8 +763,8 @@ fn suffix_name(parts: &[String], depth: usize) -> Option<String> {
 /// Each file's binding name: the fewest trailing path components that make an
 /// identifier no other file's name and no identifier of the merged sources
 /// shares, so a binding neither collides nor shadows or is shadowed by a name
-/// the code uses (`bar_data` for `modules/desktop/tomoe/lisp/bar.data.nix`,
-/// `lisp_bar` when another `bar` or the identifier `bar` exists).
+/// the code uses (`lisp_bar` for `modules/desktop/tomoe/lisp/bar.lisp`,
+/// `tomoe_bar` when another `bar` or the identifier `bar` exists).
 fn short_names(files: &[&String], taken: &HashSet<&String>) -> Vec<String> {
     let parts: Vec<Vec<String>> = files.iter().map(|file| name_parts(file)).collect();
     let mut depth = vec![1; files.len()];

@@ -10,9 +10,6 @@
 //! schema = "options.json"
 //! generated = ["modules/data/lock.json"]
 //!
-//! [codecs.json]
-//! extensions = ["json"]
-//!
 //! [schemas]
 //! "modules/phone" = "phone-options.json"
 //! "modules/flake" = ""
@@ -22,8 +19,7 @@
 //! section, `disabled`, `enabled` and `generated` (arrays of strings), `schema` (string),
 //! and the `[schemas]` section of `"path prefix" = "options.json"` pairs
 //! (`""` turns the schema rules off under that prefix), and
-//! `[codecs.<id>]` sections with an `extensions` string array and an optional
-//! `generator` string, and `[lint.<rule-code>]` sections of per-rule settings
+//! `[lint.<rule-code>]` sections of per-rule settings
 //! (a string value is unquoted, an array of strings is a list setting, any other
 //! value is kept as written). Unknown keys in
 //! `[lint]` and unknown sections are ignored; missing keys are fine.
@@ -95,11 +91,10 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
                 .to_owned();
             continue;
         }
-        let codec = section.strip_prefix("codecs.").map(str::to_owned);
         let rule = section
             .strip_prefix("lint.")
             .map(|code| code.trim_matches('"').to_owned());
-        if section != "lint" && section != "schemas" && codec.is_none() && rule.is_none() {
+        if section != "lint" && section != "schemas" && rule.is_none() {
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
@@ -123,22 +118,6 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
                 config
                     .settings
                     .push((code.clone(), key.to_owned(), setting));
-            }
-            continue;
-        }
-        if let Some(id) = codec {
-            if key == "generator" {
-                let generator =
-                    parse_toml_string(value).map_err(|e| format!("line {}: {e}", line_no + 1))?;
-                config.codec_generators.retain(|(known, _)| *known != id);
-                config.codec_generators.push((id, generator));
-            } else if key == "extensions" {
-                let extensions =
-                    parse_string_array(value).map_err(|e| format!("line {}: {e}", line_no + 1))?;
-                match config.codecs.iter_mut().find(|(known, _)| *known == id) {
-                    Some((_, known)) => *known = extensions,
-                    None => config.codecs.push((id, extensions)),
-                }
             }
             continue;
         }

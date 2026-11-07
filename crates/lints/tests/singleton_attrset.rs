@@ -90,7 +90,8 @@ fn a_finding_inside_another_waits_for_its_fix() {
 #[test]
 fn exempt_paths_are_skipped() {
     let source = "{\n  a = {\n    b = 1;\n  };\n}\n";
-    let config = LintConfig::default().with_setting("singleton-attrset", "exempt", ".data.nix");
-    assert!(check(source, "modules/x.data.nix", &config).is_empty());
+    let config =
+        LintConfig::default().with_setting("singleton-attrset", "exempt", ".generated.nix");
+    assert!(check(source, "modules/x.generated.nix", &config).is_empty());
     assert_eq!(check(source, "modules/x.nix", &config).len(), 1);
 }

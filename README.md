@@ -2,7 +2,7 @@
 
 strictix lints Nix code and fixes what it safely can.
 
-It is one Rust binary with its own Nix parser. It reports code that will fail or is likely wrong (option names and paths that don't exist, type errors in literals, dead bindings, shadowing) and suggests simpler forms of code that works. It has 115 rules; 14 are opt-in.
+It is one Rust binary with its own Nix parser. It reports code that will fail or is likely wrong (option names and paths that don't exist, type errors in literals, dead bindings, shadowing) and suggests simpler forms of code that works. It has 114 rules; 14 are opt-in.
 
 ## Build and run
 
@@ -33,17 +33,19 @@ slop.nix:6:7: error[dangling-path]: path './missing' does not exist (resolved to
 | `explain CODE` | Print one rule's full description and settings. |
 | `merge --entry FILE --out FILE` | Inline every `.nix` file reachable from the entry into one file. |
 | `split --merged FILE` | Write a merged file back out to the original files. |
-| `import LANGUAGE FILE` | Print a source file as the Nix syntax tree that finix's generators render. |
+| `import [PATH...]` | Inline the files a module reads as the generator data that prints them. `--dry-run` shows the diff. |
 
 Common flags: `--format human|json`, `--enable CODE`, `--disable CODE` (wins over enable), `--schema options.json`, `--config FILE`, `--ignore-file FILE`.
 
 **merge / split.** Each merged file becomes a `let` binding, and a `merge_manifest` value records where every binding came from, so `split` can restore the tree. Edits made in the merged file land in the original files. `--expand NAME` evaluates calls of a file-discovery helper into explicit module lists. `check` and `fix` lint a merged file as the files it came from.
 
-**import.** Languages: glsl, javascript, lisp, lua, luau, markdown, patch, python, shell, ts, vbs. It refuses anything the generator could not print back byte for byte, and names the line. `checks/import` holds one sample per language; `nix flake check` renders each with nix and iets and requires an exact match.
+**import.** A module that points at a source file keeps that data in the module: `text = builtins.readFile ./x.lisp`, `environment.etc."x.css".source = ./x.css` and an entry of a `src` or `patches` list become the finix generator call whose syntax tree, or CSS value, holds the file — `generators.lisp.render (...)`, `generators.cssSource [ ... ]` — written at that option, and the source file is deleted. A file read more than once becomes one `let` binding its sites share; a module that never named `generators` gains the argument; a file read by several modules is left for its owner to keep in one place. Nothing is written beside the module, and there is no sidecar form.
+
+Languages: css, glsl, javascript, lisp, lua, luau, markdown, patch, python, shell, ts, vbs. Before anything is written, every call is evaluated with nix and must render the original file byte for byte; a file the generator cannot print back exactly stays a file and is named with the line that reads it. `--generators EXPR` names the generator set (default: the root flake's `nix-generators` library). `checks/import` holds one sample per language; `nix flake check` runs the conversion over a module reading all twelve, then requires nix and iets to render every value to the original bytes.
 
 ## Dependencies
 
-Build: Rust and the tree-sitter grammars in `Cargo.lock`. Run time: nothing for `check` and `fix`. `merge` and `split` call `nix` to evaluate `--expand` helpers and to run the flake's `formatter` when it has one. The `unformatted-file` rule runs whatever formatter you configure.
+Build: Rust and the tree-sitter grammars in `Cargo.lock`. Run time: nothing for `check` and `fix`. `merge`, `split` and `import` call `nix` to evaluate `--expand` helpers, to render each conversion before writing it, and to run the flake's `formatter` when it has one. The `unformatted-file` rule runs whatever formatter you configure.
 
 ## Config
 
@@ -57,7 +59,6 @@ Build: Rust and the tree-sitter grammars in `Cargo.lock`. Run time: nothing for 
 | `[lint] generated = [...]` | Path prefixes of generated data files, skipped by rules about hand-maintained data. |
 | `[schemas] "prefix" = "file.json"` | Per-path schema; longest prefix wins, `""` turns option checks off there. |
 | `[lint.RULE] ...` | That rule's settings; `strictix explain RULE` lists them. |
-| `[codecs.ID] extensions = [...]` | Enables `codec-candidate` for data files with those extensions. |
 
 `.strictixignore` lists paths to skip. A full-line `# strictix: disable-next-line=CODE` comment silences one rule on the next line.
 

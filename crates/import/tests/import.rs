@@ -681,3 +681,28 @@ fn ts_names_nothing_declares_and_layout_the_printer_cannot_reproduce_are_errors(
     assert!(expression("ts", "const a = 1;\nconst x = a &&\n\ta;\n", &[]).is_err());
     assert!(expression("ts", "const a = 1;\na(a,\n\ta);\n", &[]).is_err());
 }
+
+#[test]
+fn css_rules_and_at_rules_become_the_css_generator_value() {
+    let source = ":root {\n  --pad: 2px;\n  color: light-dark(#ffffff, #000000);\n}\n\n@media (prefers-reduced-motion: reduce) {\n  .card {\n    transition: none;\n  }\n\n  .card:hover {\n    transform: scale(1.02);\n  }\n}\n\n@layer base;\n";
+    let literal = strictix_import::css(source).unwrap();
+    assert_eq!(
+        literal,
+        "[\n  {\n    select = \":root\";\n    set = [\n      [\"--pad\" \"2px\"]\n      [\"color\" \"light-dark(#ffffff, #000000)\"]\n    ];\n  }\n  {\n    at = \"@media (prefers-reduced-motion: reduce)\";\n    rules = [\n      {\n        select = \".card\";\n        set = [\n          [\"transition\" \"none\"]\n        ];\n      }\n      {\n        select = \".card:hover\";\n        set = [\n          [\"transform\" \"scale(1.02)\"]\n        ];\n      }\n    ];\n  }\n  {\n    at = \"@layer base\";\n  }\n]"
+    );
+}
+
+#[test]
+fn css_refuses_what_the_printer_would_not_reproduce() {
+    assert!(strictix_import::css("/* note */\n:root {\n  color: red;\n}\n").is_err());
+    assert!(strictix_import::css(":root {\n    color: red;\n}\n").is_err());
+    assert!(
+        strictix_import::css(":root {\n  color: red;\n}\n.card {\n  color: blue;\n}\n").is_err()
+    );
+    let escaped = r#":root {
+  content: "a ${b}";
+}
+"#;
+    let literal = strictix_import::css(escaped).unwrap();
+    assert!(literal.contains("\\${b}"), "{literal}");
+}
