@@ -19,8 +19,8 @@ use std::process::Command;
 use strictix_core::json::JsonValue;
 use strictix_core::semantic::SemanticModel;
 use strictix_syntax::{
-    parse, AstNode, AttrName, Binding, Expr, LambdaParam, ListExpr, Root, StringPart, SyntaxKind,
-    SyntaxNode, TextRange,
+    parse, AstNode, AttrName, Binding, Expr, LambdaParam, Root, StringPart, SyntaxKind, SyntaxNode,
+    TextRange,
 };
 
 use crate::merge;
@@ -97,8 +97,8 @@ pub fn run(options: &Options) -> Result<Report, String> {
             merge::nix_string(&options.root.display().to_string())
         )
     });
-    let mut calls: BTreeMap<PathBuf, String> = BTreeMap::new();
-    let mut languages: BTreeMap<PathBuf, String> = BTreeMap::new();
+    let mut imported: BTreeMap<PathBuf, Imported> = BTreeMap::new();
+    let mut owners: BTreeMap<PathBuf, &PathBuf> = BTreeMap::new();
     for (target, found) in &sites {
         let mut users: BTreeSet<&PathBuf> = BTreeSet::new();
         for site in found {
@@ -122,15 +122,44 @@ pub fn run(options: &Options) -> Result<Report, String> {
             continue;
         }
         match convert(target) {
-            Ok((code, language)) => {
-                calls.insert(target.clone(), code);
-                languages.insert(target.clone(), language);
+            Ok(converted) => {
+                owners.insert(target.clone(), &first.module);
+                imported.insert(target.clone(), converted);
             }
             Err(reason) => report.kept.push((
                 target.clone(),
                 format!("{}:{}: {reason}", first.module.display(), first.line),
             )),
         }
+    }
+    let languages: BTreeSet<&str> = imported
+        .values()
+        .filter_map(Imported::tree_language)
+        .collect();
+    let attrs = generator_attrs(&generators, &languages)?;
+    let mut calls: BTreeMap<PathBuf, String> = BTreeMap::new();
+    for (target, converted) in &imported {
+        let Some(owner) = owners.get(target) else {
+            continue;
+        };
+        let Some((_, source, tree)) = modules.iter().find(|(module, _, _)| module == *owner) else {
+            continue;
+        };
+        let model = SemanticModel::new(source, tree);
+        let site = &sites[target][0];
+        let known = converted
+            .tree_language()
+            .and_then(|language| attrs.get(language));
+        let extra: Vec<String> = converted
+            .names()
+            .iter()
+            .filter(|name| {
+                known.is_none_or(|known| !known.contains(*name))
+                    && model.is_bound(name, site.range.start())
+            })
+            .cloned()
+            .collect();
+        calls.insert(target.clone(), converted.call(&extra));
     }
     for (target, reason) in check(&generators, &calls)? {
         calls.remove(&target);
@@ -239,7 +268,9 @@ pub fn run(options: &Options) -> Result<Report, String> {
         .keys()
         .map(|target| {
             (
-                languages.get(target).cloned().unwrap_or_default(),
+                imported
+                    .get(target)
+                    .map_or_else(String::new, |converted| converted.language().to_owned()),
                 target.clone(),
             )
         })
@@ -280,6 +311,25 @@ fn find(source: &str, tree: &strictix_syntax::SyntaxNode, dir: &Path) -> Vec<Fou
                 }
             }
         }
+        if let Some(Expr::String(string)) = Expr::cast(node) {
+            let parts: Vec<StringPart<'_>> = string.parts().collect();
+            if let [StringPart::Interp(interp)] = parts.as_slice() {
+                if let Some(absolute) = interp.expr().and_then(|inner| path_at(inner, source, dir))
+                {
+                    let range = interp
+                        .expr()
+                        .map(|inner| unparen(inner).content_range())
+                        .unwrap_or_else(|| interp.syntax().content_range());
+                    found.push(Found {
+                        key: absolute,
+                        range,
+                        place: Place::File,
+                        line: line_of(source, range.start()),
+                    });
+                    continue;
+                }
+            }
+        }
         let Some(binding) = Binding::cast(node) else {
             continue;
         };
@@ -290,36 +340,14 @@ fn find(source: &str, tree: &strictix_syntax::SyntaxNode, dir: &Path) -> Vec<Fou
             continue;
         };
         if matches!(last.as_deref(), Some("src" | "srcs" | "patches")) {
-            let mut value = unparen(value);
-            while let Expr::Paren(paren) = value {
-                let Some(inner) = paren.expr() else { break };
-                value = inner;
-            }
-            match value {
-                Expr::List(list) => {
-                    for item in ListExpr::cast(list.syntax())
-                        .into_iter()
-                        .flat_map(|l| l.items())
-                    {
-                        if let Some(absolute) = path_at(item, source, dir) {
-                            found.push(Found {
-                                key: absolute,
-                                range: item.content_range(),
-                                place: Place::File,
-                                line: line_of(source, item.content_range().start()),
-                            });
-                        }
-                    }
-                }
-                single => {
-                    if let Some(absolute) = path_at(single, source, dir) {
-                        found.push(Found {
-                            key: absolute,
-                            range: single.content_range(),
-                            place: Place::File,
-                            line: line_of(source, single.content_range().start()),
-                        });
-                    }
+            for item in paths_in(binding.syntax()) {
+                if let Some(absolute) = path_at(item, source, dir) {
+                    found.push(Found {
+                        key: absolute,
+                        range: item.content_range(),
+                        place: Place::File,
+                        line: line_of(source, item.content_range().start()),
+                    });
                 }
             }
             continue;
@@ -374,6 +402,16 @@ fn convertible(path: &Path) -> bool {
 /// or `patches`, or an entry named like a file (`\"x.css\"`).
 fn is_path_binding(name: &str) -> bool {
     matches!(name, "source" | "src" | "srcs" | "patches") || is_file_name(name)
+}
+
+/// Every path under a node, so a `src` or `patches` value that nests or
+/// concatenates lists keeps every file it names.
+fn paths_in(node: &SyntaxNode) -> Vec<Expr<'_>> {
+    node.descendants()
+        .flat_map(|child| child.child_tokens())
+        .filter(|token| token.kind() == SyntaxKind::Path)
+        .map(Expr::Path)
+        .collect()
 }
 
 fn is_file_name(name: &str) -> bool {
@@ -433,8 +471,83 @@ fn dotted(expr: Expr<'_>, source: &str) -> Option<String> {
     }
 }
 
-/// The generator call that prints `target`'s contents, plus its language.
-fn convert(target: &Path) -> Result<(String, String), String> {
+/// What a file becomes: a generator syntax tree with the constructors it
+/// names, or a value a value generator prints.
+enum Imported {
+    Tree {
+        language: &'static str,
+        tree: String,
+        names: Vec<String>,
+    },
+    Value {
+        language: &'static str,
+        generator: &'static str,
+        value: String,
+    },
+}
+
+impl Imported {
+    fn language(&self) -> &'static str {
+        match self {
+            Self::Tree { language, .. } | Self::Value { language, .. } => language,
+        }
+    }
+
+    /// The call that prints the file. `extra` are names the tree reads that
+    /// the generator set does not hold and the module does.
+    fn call(&self, extra: &[String]) -> String {
+        match self {
+            Self::Tree {
+                language,
+                tree,
+                names,
+            } => {
+                let set = if extra.is_empty() {
+                    format!("generators.{language}")
+                } else {
+                    format!(
+                        "(generators.{language} // {{ inherit {}; }})",
+                        extra.join(" ")
+                    )
+                };
+                let applied = if strictix_import::bound(language) {
+                    format!("({tree}) {set}")
+                } else {
+                    let formals = if names.is_empty() {
+                        "_".to_owned()
+                    } else {
+                        let names: String =
+                            names.iter().map(|name| format!("  {name},\n")).collect();
+                        format!("{{\n{names}  ...\n}}")
+                    };
+                    format!("({formals}: {tree}) {set}")
+                };
+                format!("generators.{language}.render ({applied})")
+            }
+            Self::Value {
+                generator, value, ..
+            } => format!("generators.{generator} {value}"),
+        }
+    }
+
+    /// The language whose generator set holds this tree, if it is one.
+    fn tree_language(&self) -> Option<&'static str> {
+        match self {
+            Self::Tree { language, .. } => Some(language),
+            Self::Value { .. } => None,
+        }
+    }
+
+    /// The identifiers the tree reads that the generator set must supply.
+    fn names(&self) -> &[String] {
+        match self {
+            Self::Tree { names, .. } => names,
+            Self::Value { .. } => &[],
+        }
+    }
+}
+
+fn convert(target: &Path) -> Result<Imported, String> {
     let bytes = std::fs::read(target).map_err(|e| format!("cannot read: {e}"))?;
     let text = String::from_utf8(bytes)
         .map_err(|_| "the file is not UTF-8, so no generator prints it".to_owned())?;
@@ -444,29 +557,67 @@ fn convert(target: &Path) -> Result<(String, String), String> {
         .unwrap_or_default()
         .to_ascii_lowercase();
     if extension == "css" {
-        let value = strictix_import::css(&text)?;
-        return Ok((format!("generators.cssSource {value}"), "css".to_owned()));
+        return Ok(Imported::Value {
+            language: "css",
+            generator: "cssSource",
+            value: strictix_import::css(&text)?,
+        });
     }
     let Some(language) = language(&extension) else {
         return Err(format!("no generator converts .{extension}"));
     };
     let tree = strictix_import::expression(language, &text, &[])?;
-    let applied = if strictix_import::bound(language) {
-        format!("(({tree}) generators.{language})")
-    } else {
-        let names = strictix_import::constructors(&tree);
-        let formals = if names.is_empty() {
-            "_".to_owned()
-        } else {
-            let names: String = names.iter().map(|name| format!("  {name},\n")).collect();
-            format!("{{\n{names}  ...\n}}")
-        };
-        format!("(({formals}: {tree}) generators.{language})")
-    };
-    Ok((
-        format!("generators.{language}.render {applied}"),
-        language.to_owned(),
-    ))
+    let names = strictix_import::constructors(&tree);
+    Ok(Imported::Tree {
+        language,
+        tree,
+        names,
+    })
+}
+
+/// The attributes each generator set holds, so a tree's other formals can
+/// be taken from the module instead.
+fn generator_attrs(
+    generators: &str,
+    languages: &BTreeSet<&str>,
+) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    if languages.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let fields: Vec<String> = languages
+        .iter()
+        .map(|language| format!("{language} = builtins.attrNames generators.{language};"))
+        .collect();
+    let expression = format!(
+        "let generators = {generators}; in {{ {} }}",
+        fields.join(" ")
+    );
+    let output = Command::new("nix")
+        .args(["eval", "--impure", "--json", "--expr", &expression])
+        .output()
+        .map_err(|e| format!("running nix eval: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "reading the generator sets failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let json = JsonValue::parse(&String::from_utf8_lossy(&output.stdout))
+        .map_err(|e| format!("parsing nix eval output: {}", e.message))?;
+    let mut attrs = BTreeMap::new();
+    for (language, names) in json
+        .as_object()
+        .ok_or("the generator sets are not an object")?
+    {
+        let names = names
+            .as_array()
+            .ok_or("a generator's attributes are not a list")?
+            .iter()
+            .filter_map(|name| name.as_str().map(str::to_owned))
+            .collect();
+        attrs.insert(language.clone(), names);
+    }
+    Ok(attrs)
 }
 
 fn language(extension: &str) -> Option<&'static str> {
