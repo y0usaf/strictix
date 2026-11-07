@@ -71,6 +71,7 @@ pub struct Args {
     pub expand: Vec<String>,
     pub merged: Option<String>,
     pub generators: Option<String>,
+    pub split: bool,
     pub dry_run: bool,
     pub help: bool,
     pub version: bool,
@@ -96,6 +97,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut expand = Vec::new();
     let mut merged = None;
     let mut generators = None;
+    let mut split = false;
     let mut dry_run = false;
     let mut help = false;
     let mut version = false;
@@ -141,6 +143,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 "--expand" => expand.push(next_value(args, &mut i, "--expand")?),
                 "--merged" => merged = Some(next_value(args, &mut i, "--merged")?),
                 "--generators" => generators = Some(next_value(args, &mut i, "--generators")?),
+                "--split" => split = true,
                 "--dry-run" => dry_run = true,
                 other => return Err(format!("unknown flag '{other}'")),
             }
@@ -169,6 +172,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         expand,
         merged,
         generators,
+        split,
         dry_run,
         help,
         version,
@@ -217,10 +221,11 @@ COMMANDS:
               (path: merge root, default .)
     import    Inline every file a module reads as the generator data that
               prints it: the path at the option becomes the finix generator
-              call, the source file is deleted, and no file is written
-              beside the module. Used by finix's `nix run .#lint` (glsl,
-              javascript, lisp, lua, luau, markdown, patch, python, shell,
-              ts, vbs and css)
+              call and the source file is deleted. `--split` writes each tree
+              to its own `<file>.nix` beside the source and imports it there
+              instead, which also lets several modules share one file. Used
+              by finix's `nix run .#lint` (css, glsl, javascript, lisp, lua,
+              luau, markdown, patch, python, shell, ts, vbs)
 
 OPTIONS:
     -h, --help            Print this help
@@ -239,6 +244,8 @@ OPTIONS:
                           (repeatable)
     --merged FILE         (split) root-relative merged file
     --generators EXPR     (import) Nix expression for the finix generators
-                          (default: the root flake's nix-generators lib)
+                          (default: the current flake's nix-generators lib)
+    --split               (import) write each tree to `<file>.nix` beside the
+                          source and import it, instead of inlining it
 "
 }

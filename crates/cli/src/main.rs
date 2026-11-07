@@ -80,6 +80,7 @@ fn run_import(args: &Args) -> ExitCode {
         paths: args.paths.clone(),
         generators: args.generators.clone(),
         dry_run: args.dry_run,
+        split: args.split,
     };
     let report = match import::run(&options) {
         Ok(report) => report,

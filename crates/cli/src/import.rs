@@ -50,6 +50,9 @@ pub struct Options {
     pub paths: Vec<PathBuf>,
     pub generators: Option<String>,
     pub dry_run: bool,
+    /// Write each tree to its own `<file>.nix` beside the source and import
+    /// it, instead of inlining it at the option.
+    pub split: bool,
 }
 
 #[derive(Default)]
@@ -110,7 +113,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
             users.insert(&site.module);
         }
         let first = &found[0];
-        if users.len() > 1 {
+        if users.len() > 1 && !options.split {
             let names: Vec<String> = users
                 .iter()
                 .map(|path| path.display().to_string())
@@ -143,6 +146,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
         .collect();
     let attrs = generator_attrs(&generators, &languages)?;
     let mut calls: BTreeMap<PathBuf, String> = BTreeMap::new();
+    let mut split: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
     for (target, converted) in &imported {
         let Some(owner) = owners.get(target) else {
             continue;
@@ -164,7 +168,13 @@ pub fn run(options: &Options) -> Result<Report, String> {
             })
             .cloned()
             .collect();
-        calls.insert(target.clone(), converted.call(&extra));
+        if options.split {
+            let path = split_path(target);
+            split.insert(target.clone(), path);
+            calls.insert(target.clone(), converted.call(&[]));
+        } else {
+            calls.insert(target.clone(), converted.call(&extra));
+        }
     }
     for (target, reason) in check(&generators, &calls)? {
         calls.remove(&target);
@@ -213,7 +223,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
         let mut edits: Vec<(TextRange, String)> = Vec::new();
         for (target, found) in by_target {
             let code = &calls[target];
-            let hoisted_name = if found.len() > 1 && body.is_some() {
+            let hoisted_name = if found.len() > 1 && body.is_some() && !options.split {
                 let name = binding_name(source, target);
                 hoisted.push((name.clone(), code.clone()));
                 Some(name)
@@ -222,11 +232,15 @@ pub fn run(options: &Options) -> Result<Report, String> {
             };
             spliced.insert(target.clone());
             for site in found {
+                let imported = split.get(target).map_or_else(
+                    || code.clone(),
+                    |path| format!("import {} {{inherit generators;}}", relative(module, path)),
+                );
                 let replacement = match (hoisted_name.as_deref(), site.place) {
                     (Some(name), Place::Text) => name.to_owned(),
                     (Some(name), Place::File) => format!("({})", named_file(target, name)),
-                    (None, Place::Text) => format!("({code})"),
-                    (None, Place::File) => format!("({})", named_file(target, code)),
+                    (None, Place::Text) => format!("({imported})"),
+                    (None, Place::File) => format!("({})", named_file(target, &imported)),
                 };
                 edits.push((site.range, replacement));
             }
@@ -250,6 +264,18 @@ pub fn run(options: &Options) -> Result<Report, String> {
         rewritten.push((module.clone(), text));
     }
 
+    for target in split.keys() {
+        let Some(code) = calls.get(target) else {
+            continue;
+        };
+        let text = format!("{{generators}}: {code}\n");
+        if parse(&text).error_nodes().next().is_some() {
+            return Err(format!(
+                "the tree written for {} does not parse; nothing was written",
+                target.display()
+            ));
+        }
+    }
     for (module, text) in &rewritten {
         if parse(text).error_nodes().next().is_some() {
             return Err(format!(
@@ -259,12 +285,21 @@ pub fn run(options: &Options) -> Result<Report, String> {
         }
     }
     if options.dry_run {
+        for (target, path) in &split {
+            println!("{} would become {}", target.display(), path.display());
+        }
         for (module, text) in &rewritten {
             let original = std::fs::read_to_string(module)
                 .map_err(|e| format!("cannot read {}: {e}", module.display()))?;
             print!("{}", crate::render::diff(&original, text, false));
         }
         return Ok(report);
+    }
+    for (target, path) in &split {
+        if let Some(code) = calls.get(target) {
+            std::fs::write(path, format!("{{generators}}: {code}\n"))
+                .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        }
     }
     for (module, text) in rewritten {
         std::fs::write(&module, &text)
@@ -733,6 +768,42 @@ fn let_spot(tree: &SyntaxNode) -> Option<u32> {
     match unparen(root) {
         Expr::Lambda(lambda) => lambda.body().map(|body| body.content_range().start()),
         _ => None,
+    }
+}
+
+/// Where a split tree goes: beside the file it replaces, named after it so
+/// the two are never confused.
+fn split_path(target: &Path) -> PathBuf {
+    let name = target
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "source".to_owned());
+    target.with_file_name(format!("{name}.nix"))
+}
+
+/// A path from the module to the file it names, as Nix writes it.
+fn relative(module: &Path, path: &Path) -> String {
+    let module = std::fs::canonicalize(module).unwrap_or_else(|_| module.to_path_buf());
+    let from = module.parent().unwrap_or(Path::new(""));
+    let mut up = 0;
+    let mut base = from;
+    loop {
+        if let Ok(rest) = path.strip_prefix(base) {
+            let mut out = String::new();
+            for _ in 0..up {
+                out.push_str("../");
+            }
+            out.push_str("./");
+            out.push_str(&rest.display().to_string());
+            return out;
+        }
+        match base.parent() {
+            Some(parent) => {
+                base = parent;
+                up += 1;
+            }
+            None => return format!("./{}", path.display()),
+        }
     }
 }
 
