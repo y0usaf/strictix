@@ -332,58 +332,12 @@ impl Rule for DuplicateLiteralListItem {
 /// generator's constructors, so a symbol or word it repeats is the generated
 /// code's, repeated as often as that code uses it.
 pub(crate) fn tree_ranges(model: &SemanticModel<'_>) -> Vec<TextRange> {
-    let source = model.source();
-    let mut ranges = Vec::new();
-    for node in model.root().descendants() {
-        let Some(Expr::Apply(apply)) = Expr::cast(node) else {
-            continue;
-        };
-        let Some(func) = apply.func() else { continue };
-        let Some(name) = dotted(unwrap_parens(func), source) else {
-            continue;
-        };
-        let mut parts = name.split('.');
-        if parts.next() != Some("generators") {
-            continue;
-        }
-        let (Some(_language), Some("render"), None) = (parts.next(), parts.next(), parts.next())
-        else {
-            continue;
-        };
-        if let Some(arg) = apply.arg() {
-            ranges.push(arg.content_range());
-        }
-    }
-    ranges
+    strictix_core::generated::tree_ranges(model)
 }
 
 /// Whether `range` sits inside one of `ranges`.
 pub(crate) fn in_ranges(ranges: &[TextRange], range: TextRange) -> bool {
-    ranges
-        .iter()
-        .any(|outer| outer.start() <= range.start() && range.end() <= outer.end())
-}
-
-/// A select chain's dotted name: `lib.generators.toINI` for
-/// `lib.generators.toINI`, `None` when a segment is not a plain ident.
-fn dotted(expr: Expr<'_>, source: &str) -> Option<String> {
-    match expr {
-        Expr::Ident(token) => Some(token.text(source).to_owned()),
-        Expr::Select(select) => {
-            let mut name = dotted(select.base()?, source)?;
-            for element in select.attrpath()?.elements() {
-                match element {
-                    strictix_syntax::AttrName::Ident(token) => {
-                        name.push('.');
-                        name.push_str(token.text(source));
-                    }
-                    _ => return None,
-                }
-            }
-            Some(name)
-        }
-        _ => None,
-    }
+    strictix_core::generated::inside(ranges, range)
 }
 
 impl DuplicateLiteralListItem {

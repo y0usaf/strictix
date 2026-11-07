@@ -193,6 +193,8 @@ fn run_rules_project_inner(
             None => rule.check_file_project(model, config, project, diags),
         }
     }
+    let trees = crate::generated::tree_ranges(model);
+    diags.retain(|diag| !crate::generated::inside(&trees, diag.range));
     apply_suppressions(source, diags);
 }
 
