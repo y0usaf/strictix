@@ -91,12 +91,17 @@ pub fn run(options: &Options) -> Result<Report, String> {
         modules.push((module.clone(), source, tree));
     }
 
-    let generators = options.generators.clone().unwrap_or_else(|| {
-        format!(
-            "(builtins.getFlake (toString {})).inputs.nix-generators.lib",
-            merge::nix_string(&options.root.display().to_string())
-        )
-    });
+    let generators = match &options.generators {
+        Some(generators) => generators.clone(),
+        None => {
+            let root = std::env::current_dir()
+                .map_err(|e| format!("cannot read the current directory: {e}"))?;
+            format!(
+                "(builtins.getFlake {}).inputs.nix-generators.lib",
+                merge::nix_string(&root.display().to_string())
+            )
+        }
+    };
     let mut imported: BTreeMap<PathBuf, Imported> = BTreeMap::new();
     let mut owners: BTreeMap<PathBuf, &PathBuf> = BTreeMap::new();
     for (target, found) in &sites {
