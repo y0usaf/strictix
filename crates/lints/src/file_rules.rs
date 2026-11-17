@@ -8,7 +8,7 @@
 //! implementing [Rule] with only [Rule::check_file] overridden — the
 //! registry ([super::all_rules]) declares them all the same way.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
@@ -23,30 +23,17 @@ use strictix_syntax::{
 /// range scan must pick the smallest containing node — the direct
 /// parent of the name token — not the first one found.
 fn containing_binding<'a>(root: &'a SyntaxNode, name_range: TextRange) -> Option<Binding<'a>> {
-    let start = name_range.start();
-    root.descendants()
-        .filter(|n| n.kind() == SyntaxKind::Binding && n.range().contains(start))
-        .min_by_key(|n| n.range().end() - n.range().start())
+    root.find_innermost_at(SyntaxKind::Binding, name_range.start())
         .and_then(Binding::cast)
 }
 
-/// Whether `name_range` sits inside a Formals node. A lambda's bare
-/// ident parameter is not inside one; its formal parameters are.
 fn inside_formals(root: &SyntaxNode, name_range: TextRange) -> bool {
-    let start = name_range.start();
-    root.descendants()
-        .any(|n| n.kind() == SyntaxKind::Formals && n.range().contains(start))
+    root.find_innermost_at(SyntaxKind::Formals, name_range.start())
+        .is_some()
 }
 
-/// The innermost [Formals] node whose range contains `name_range`.
-/// Formals can nest when a formal's default is itself a lambda, so the
-/// smallest containing node is the one that actually owns the
-/// parameter.
 fn containing_formals<'a>(root: &'a SyntaxNode, name_range: TextRange) -> Option<Formals<'a>> {
-    let start = name_range.start();
-    root.descendants()
-        .filter(|n| n.kind() == SyntaxKind::Formals && n.range().contains(start))
-        .min_by_key(|n| n.range().end() - n.range().start())
+    root.find_innermost_at(SyntaxKind::Formals, name_range.start())
         .and_then(Formals::cast)
 }
 
@@ -334,11 +321,7 @@ fn check_inherit_scope<'a>(
             continue;
         };
         for name_token in inherit.names() {
-            let Some(binding) = model
-                .bindings()
-                .iter()
-                .find(|binding| binding.name.range() == name_token.range())
-            else {
+            let Some(binding) = model.binding_at(name_token.range()) else {
                 continue;
             };
             let used_elsewhere = binding
@@ -589,23 +572,27 @@ impl Rule for RedundantWith {
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         for site in model.with_sites() {
-            let body_refs: Vec<_> = model
-                .references()
-                .iter()
-                .filter(|r| {
-                    let range = r.name.range();
-                    site.body_range.contains(range.start()) && site.body_range.end() >= range.end()
-                })
-                .collect();
-            if body_refs.is_empty() {
-                continue;
+            let mut has_any = false;
+            let mut all_lexical = true;
+            for r in model.references_in_range(site.body_range) {
+                let range = r.name.range();
+                if site.body_range.contains(range.start()) && site.body_range.end() >= range.end() {
+                    has_any = true;
+                    if r.resolved.is_none() || r.via_with.is_some() {
+                        all_lexical = false;
+                        break;
+                    }
+                }
             }
-            let all_lexical = body_refs
-                .iter()
-                .all(|r| r.resolved.is_some() && r.via_with.is_none());
-            if all_lexical {
-                let with_expr = model.root().descendants().find_map(|node| {
-                    WithExpr::cast(node).filter(|w| w.range() == site.scope_range)
+            if has_any && all_lexical {
+                let mut with_expr = None;
+                model.root().walk_containing(site.scope_range.start(), |node| {
+                    if let Some(w) = WithExpr::cast(node).filter(|w| w.range() == site.scope_range) {
+                        with_expr = Some(w);
+                        true
+                    } else {
+                        false
+                    }
                 });
                 let semi_end = with_expr.and_then(|w| {
                     w.syntax()
@@ -658,16 +645,16 @@ impl Rule for SelfReferentialLet {
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
         let source = model.source();
-        for (idx, binding) in model.bindings().iter().enumerate() {
-            if binding.kind != BindingKind::LetBinding {
+        for binding in model.bindings() {
+            if binding.kind != BindingKind::LetBinding || binding.references.is_empty() {
                 continue;
             }
             let name_range = binding.name.range();
-            let is_inherit = model.root().descendants().any(|n| {
-                n.kind() == strictix_syntax::SyntaxKind::InheritStmt
-                    && n.range().contains(name_range.start())
-            });
-            if is_inherit {
+            if model
+                .root()
+                .find_innermost_at(SyntaxKind::InheritStmt, name_range.start())
+                .is_some()
+            {
                 continue;
             }
             let Some(binding_node) = containing_binding(model.root(), name_range) else {
@@ -678,11 +665,8 @@ impl Rule for SelfReferentialLet {
             };
             let value_range = value.range();
             let name = binding.name.text(source);
-            let forced = model.references().iter().any(|r| {
-                let range = r.name.range();
-                r.name.text(source) == name
-                    && r.resolved == Some(idx)
-                    && value_range.contains(range.start())
+            let forced = binding.references.iter().any(|&range| {
+                value_range.contains(range.start())
                     && value_range.end() >= range.end()
                     && eager_contains(value, range)
             });
@@ -808,26 +792,36 @@ impl Rule for CircularLet {
         let source = model.source();
         let bindings = model.bindings();
         let mut groups: Vec<(ScopeId, Vec<usize>)> = Vec::new();
+        let mut group_idx: HashMap<ScopeId, usize> = HashMap::new();
         for (idx, binding) in bindings.iter().enumerate() {
             if !matches!(binding.kind, BindingKind::LetBinding | BindingKind::RecAttr) {
                 continue;
             }
             let name_range = binding.name.range();
-            let is_inherit = model.root().descendants().any(|n| {
-                n.kind() == SyntaxKind::InheritStmt && n.range().contains(name_range.start())
-            });
-            if is_inherit {
+            if model
+                .root()
+                .find_innermost_at(SyntaxKind::InheritStmt, name_range.start())
+                .is_some()
+            {
                 continue;
             }
-            match groups.iter_mut().find(|(scope, _)| *scope == binding.scope) {
-                Some((_, members)) => members.push(idx),
-                None => groups.push((binding.scope, vec![idx])),
+            match group_idx.get(&binding.scope).copied() {
+                Some(gi) => groups[gi].1.push(idx),
+                None => {
+                    group_idx.insert(binding.scope, groups.len());
+                    groups.push((binding.scope, vec![idx]));
+                }
             }
         }
         for (_, members) in &groups {
             if members.len() < 2 {
                 continue;
             }
+            let member_pos: HashMap<usize, usize> = members
+                .iter()
+                .enumerate()
+                .map(|(local, &idx)| (idx, local))
+                .collect();
             let mut adj: Vec<Vec<usize>> = vec![Vec::new(); members.len()];
             for (local, &idx) in members.iter().enumerate() {
                 let Some(binding_node) =
@@ -839,9 +833,9 @@ impl Rule for CircularLet {
                     continue;
                 };
                 let value_range = value.range();
-                for r in model.references() {
+                for r in model.references_in_range(value_range) {
                     let Some(target) = r.resolved else { continue };
-                    let Some(to) = members.iter().position(|&m| m == target) else {
+                    let Some(&to) = member_pos.get(&target) else {
                         continue;
                     };
                     if to == local || adj[local].contains(&to) {

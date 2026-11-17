@@ -176,9 +176,7 @@ fn is_global_callee(model: &SemanticModel<'_>, callee: Expr<'_>, name: &str) -> 
                 return false;
             }
             model
-                .references()
-                .iter()
-                .find(|r| r.name.range() == tok.range())
+                .reference_at(tok.range())
                 .is_some_and(|r| r.resolved.is_none() && r.via_with.is_none())
         }
         Expr::Select(sel) => {
@@ -547,10 +545,7 @@ fn optional_callee_token(model: &SemanticModel<'_>, callee: Expr<'_>) -> Option<
             if tok.text(source) != "optional" {
                 return None;
             }
-            let reference = model
-                .references()
-                .iter()
-                .find(|r| r.name.range() == tok.range())?;
+            let reference = model.reference_at(tok.range())?;
             (reference.resolved.is_none() && reference.via_with.is_some()).then(|| tok.range())
         }
         Expr::Select(sel) => {
@@ -775,16 +770,14 @@ fn is_lib_remove_suffix(model: &SemanticModel<'_>, callee: Expr<'_>) -> bool {
             let Some(binding) = model.resolve(tok) else {
                 return false;
             };
-            model
-                .root()
-                .descendants()
-                .filter_map(InheritStmt::cast)
-                .any(|stmt| {
+            model.root().walk_containing(binding.name.range().start(), |node| {
+                InheritStmt::cast(node).is_some_and(|stmt| {
                     stmt.names().any(|n| n.range() == binding.name.range())
                         && stmt.source().is_some_and(|s| {
                             matches!(trimmed_text(s, source), "lib" | "lib.strings")
                         })
                 })
+            })
         }
         Expr::Select(sel) => {
             let Some(Expr::Ident(base)) = sel.base() else {

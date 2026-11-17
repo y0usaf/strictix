@@ -2,6 +2,7 @@
 //! that neither names it nor binds the whole set with `@`, so nothing reads it.
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use std::path::Path;
 
@@ -179,6 +180,12 @@ fn open_pattern(lambda: LambdaExpr<'_>, source: &str) -> Option<HashSet<String>>
 
 /// The open pattern of the file `import ./x.nix` reads, when it is a project
 /// file whose whole expression is such a function.
+struct OpenPatternCache(Vec<OnceLock<Option<HashSet<String>>>>);
+
+fn build_open_pattern_cache(project: &ProjectContext) -> OpenPatternCache {
+    OpenPatternCache((0..project.sources().len()).map(|_| OnceLock::new()).collect())
+}
+
 fn imported_pattern(
     func: Option<Expr<'_>>,
     model: &SemanticModel<'_>,
@@ -197,18 +204,23 @@ fn imported_pattern(
     };
     let dir = model.path()?.parent().unwrap_or(Path::new("."));
     let target = normalize(&dir.join(path.text(source)));
-    let file = project?.sources().iter().find(|file| {
-        let path = normalize(&file.path);
-        path == target || path == target.join("default.nix")
-    })?;
-    let tree = parse(&file.source);
-    if tree.error_nodes().next().is_some() {
-        return None;
-    }
-    let Expr::Lambda(lambda) = unparen(Root::cast(&tree)?.expr()?)? else {
-        return None;
-    };
-    open_pattern(lambda, &file.source)
+    let project = project?;
+    let (idx, file) = project
+        .source_by_norm_path(&target)
+        .or_else(|| project.source_by_norm_path(&target.join("default.nix")))?;
+    let cache = project.memo(build_open_pattern_cache);
+    cache.0[idx]
+        .get_or_init(|| {
+            let tree = parse(&file.source);
+            if tree.error_nodes().next().is_some() {
+                return None;
+            }
+            let Expr::Lambda(lambda) = unparen(Root::cast(&tree)?.expr()?)? else {
+                return None;
+            };
+            open_pattern(lambda, &file.source)
+        })
+        .clone()
 }
 
 fn unparen(expr: Expr<'_>) -> Option<Expr<'_>> {

@@ -281,38 +281,111 @@ impl Walker<'_, '_> {
     }
 }
 
-fn project_writes(project: &ProjectContext) -> FileWrites {
+fn file_writes(index: usize, source: &str) -> BTreeMap<Vec<String>, Vec<Write>> {
     let mut out = BTreeMap::new();
-    for (index, file) in project.sources().iter().enumerate() {
-        let source = file.source.as_str();
-        let root = parse(source);
-        let root = &root;
-        let mut walker = Walker {
-            source,
-            file: index,
-            out: &mut out,
+    if !source.contains('"')
+        || !(source.contains("text")
+            || source.contains("source")
+            || source.contains("generator")
+            || source.contains("value")
+            || source.contains('\\'))
+    {
+        return out;
+    }
+    let root = parse(source);
+    let root = &root;
+    let mut walker = Walker {
+        source,
+        file: index,
+        out: &mut out,
+    };
+    if let Some(expr) = Root::cast(root).and_then(|r| r.expr()) {
+        walker.module_root(expr);
+    }
+    for node in root.descendants() {
+        let Some(binding) = Binding::cast(node) else {
+            continue;
         };
-        if let Some(expr) = Root::cast(root).and_then(|r| r.expr()) {
-            walker.module_root(expr);
+        let named = binding
+            .attrpath()
+            .and_then(|p| p.elements().last())
+            .is_some_and(|last| {
+                matches!(last, AttrName::Ident(t) if matches!(t.text(source), "imports" | "modules"))
+            });
+        if !named {
+            continue;
         }
-        for node in root.descendants() {
-            let Some(binding) = Binding::cast(node) else {
-                continue;
-            };
-            let named = binding
-                .attrpath()
-                .and_then(|p| p.elements().last())
-                .is_some_and(|last| {
-                    matches!(last, AttrName::Ident(t) if matches!(t.text(source), "imports" | "modules"))
-                });
-            if !named {
-                continue;
+        if let Some(Expr::List(list)) = binding.value().map(unwrap_parens) {
+            for item in list.items() {
+                walker.module_root(item);
             }
-            if let Some(Expr::List(list)) = binding.value().map(unwrap_parens) {
-                for item in list.items() {
-                    walker.module_root(item);
+        }
+    }
+    out
+}
+
+fn project_writes(project: &ProjectContext) -> FileWrites {
+    let sources = project.sources();
+    let workers = std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(1)
+        .min(8);
+    let per_file: Vec<BTreeMap<Vec<String>, Vec<Write>>> =
+        if sources.len() >= 16 && workers > 1 {
+            const LARGE_BYTES: usize = 512 * 1024;
+            let mut large = Vec::new();
+            let mut small = Vec::new();
+            for (idx, file) in sources.iter().enumerate() {
+                if file.source.len() >= LARGE_BYTES {
+                    large.push(idx);
+                } else {
+                    small.push(idx);
                 }
             }
+            large.sort_unstable_by(|&a, &b| sources[b].source.len().cmp(&sources[a].source.len()));
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let slots: Vec<std::sync::Mutex<BTreeMap<Vec<String>, Vec<Write>>>> =
+                (0..sources.len())
+                    .map(|_| std::sync::Mutex::new(BTreeMap::new()))
+                    .collect();
+            let run_small = || loop {
+                let pos = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if pos >= small.len() {
+                    break;
+                }
+                let idx = small[pos];
+                let map = file_writes(idx, sources[idx].source.as_str());
+                if !map.is_empty() {
+                    *slots[idx].lock().unwrap() = map;
+                }
+            };
+            std::thread::scope(|scope| {
+                for _ in 0..(workers - 1).min(small.len()) {
+                    scope.spawn(&run_small);
+                }
+                for &idx in &large {
+                    let map = file_writes(idx, sources[idx].source.as_str());
+                    if !map.is_empty() {
+                        *slots[idx].lock().unwrap() = map;
+                    }
+                }
+                run_small();
+            });
+            slots
+                .into_iter()
+                .map(|m| m.into_inner().unwrap())
+                .collect()
+        } else {
+            sources
+                .iter()
+                .enumerate()
+                .map(|(idx, f)| file_writes(idx, f.source.as_str()))
+                .collect()
+        };
+    let mut out: BTreeMap<Vec<String>, Vec<Write>> = BTreeMap::new();
+    for map in per_file {
+        for (key, mut writes) in map {
+            out.entry(key).or_default().append(&mut writes);
         }
     }
     out.retain(|_, writes| {
@@ -379,15 +452,18 @@ impl Rule for MaskedGenerator {
         let Some(project) = project else {
             return;
         };
+        let writes = project.memo(project_writes);
+        if writes.0.is_empty() {
+            return;
+        }
         let files = project.sources();
-        let Some(current) = files
-            .iter()
-            .position(|f| model.path() == Some(f.path.as_path()))
+        let Some(current) = model
+            .path()
+            .and_then(|p| project.source_index(p))
             .or_else(|| files.iter().position(|f| f.source == model.source()))
         else {
             return;
         };
-        let writes = project.memo(project_writes);
         for entries in writes.0.values() {
             for write in entries
                 .iter()

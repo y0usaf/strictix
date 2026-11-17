@@ -24,19 +24,33 @@ const UNARY_BP: u8 = 10;
 /// yields a tree containing [`SyntaxKind::ErrorNode`] regions.
 #[must_use]
 pub fn parse(source: &str) -> SyntaxNode {
-    let tokens = lex(source);
-    let mut parser = Parser {
-        tokens: &tokens,
-        pos: 0,
-        events: Vec::new(),
+    let events = {
+        let tokens = lex(source);
+        let mut next_sig = 0;
+        while next_sig < tokens.len() && tokens[next_sig].kind.is_trivia() {
+            next_sig += 1;
+        }
+        let mut parser = Parser {
+            tokens: &tokens,
+            pos: 0,
+            next_sig,
+            events: Vec::with_capacity(tokens.len() * 2),
+        };
+        parser.parse_root();
+        parser.events
     };
-    parser.parse_root();
-    parser.build()
+    build_events(events)
 }
 
-/// One event in the parser output stream, consumed by [`TreeBuilder`].
 enum Event {
-    Start(SyntaxKind),
+    Start {
+        kind: SyntaxKind,
+        forward_parent: u32,
+    },
+    Placeholder {
+        forward_parent: u32,
+        tail_offset: u32,
+    },
     Finish,
     Token(SyntaxKind, TextRange),
 }
@@ -85,48 +99,80 @@ fn can_start_expr(kind: SyntaxKind) -> bool {
     )
 }
 
+fn build_events(mut events: Vec<Event>) -> SyntaxNode {
+    let mut builder = TreeBuilder::with_capacity(events.len());
+    let mut parents = Vec::with_capacity(8);
+    for idx in 0..events.len() {
+        match events[idx] {
+            Event::Placeholder { forward_parent, .. } => {
+                if forward_parent != 0 {
+                    let mut cur = idx + forward_parent as usize;
+                    loop {
+                        let (kind, next_fp) = match &mut events[cur] {
+                            Event::Start {
+                                kind,
+                                forward_parent,
+                            } => {
+                                let k = *kind;
+                                *kind = K::Eof;
+                                (k, *forward_parent)
+                            }
+                            _ => unreachable!(),
+                        };
+                        if kind != K::Eof {
+                            parents.push(kind);
+                        }
+                        if next_fp == 0 {
+                            break;
+                        }
+                        cur += next_fp as usize;
+                    }
+                    for kind in parents.drain(..).rev() {
+                        builder.start(kind);
+                    }
+                }
+            }
+            Event::Start { kind, .. } => {
+                if kind != K::Eof {
+                    builder.start(kind);
+                }
+            }
+            Event::Finish => builder.finish(),
+            Event::Token(kind, range) => builder.token(kind, range),
+        }
+    }
+    builder.finish_all()
+}
+
 struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
+    next_sig: usize,
     events: Vec<Event>,
 }
 
 impl<'a> Parser<'a> {
-    /// Kind of the next significant (non-trivia) token.
     fn current(&self) -> SyntaxKind {
-        self.tokens[self.pos..]
-            .iter()
-            .find(|t| !t.kind.is_trivia())
-            .map(|t| t.kind)
-            .unwrap_or(K::Eof)
+        self.tokens
+            .get(self.next_sig)
+            .map_or(K::Eof, |t| t.kind)
     }
 
-    /// Kind of the next significant (non-trivia) token after the current one.
     fn peek_next(&self) -> SyntaxKind {
-        self.tokens[self.pos..]
-            .iter()
-            .filter(|t| !t.kind.is_trivia())
-            .nth(1)
-            .map(|t| t.kind)
-            .unwrap_or(K::Eof)
+        self.tokens
+            .get(self.next_sig + 1..)
+            .and_then(|s| s.iter().find(|t| !t.kind.is_trivia()))
+            .map_or(K::Eof, |t| t.kind)
     }
 
     fn at_eof(&self) -> bool {
         self.current() == K::Eof
     }
 
-    /// Emit the current token, advancing past it. Any leading trivia is
-    /// flushed first so the tree tiles the source exactly. Never emits
-    /// the Eof sentinel and never advances past it, so the parser
-    /// cannot panic even on wildly malformed input.
     fn bump(&mut self) {
-        while let Some(token) = self.tokens.get(self.pos) {
-            if token.kind.is_trivia() {
-                self.emit_token(*token);
-                self.pos += 1;
-            } else {
-                break;
-            }
+        while self.pos < self.next_sig {
+            self.emit_token(self.tokens[self.pos]);
+            self.pos += 1;
         }
         if self.pos >= self.tokens.len() || self.tokens[self.pos].kind == K::Eof {
             return;
@@ -134,6 +180,10 @@ impl<'a> Parser<'a> {
         let token = self.tokens[self.pos];
         self.emit_token(token);
         self.pos += 1;
+        self.next_sig = self.pos;
+        while self.next_sig < self.tokens.len() && self.tokens[self.next_sig].kind.is_trivia() {
+            self.next_sig += 1;
+        }
     }
 
     fn emit_token(&mut self, token: Token) {
@@ -154,33 +204,56 @@ impl<'a> Parser<'a> {
     }
 
     fn start(&mut self, kind: SyntaxKind) {
-        self.events.push(Event::Start(kind));
+        self.events.push(Event::Start {
+            kind,
+            forward_parent: 0,
+        });
     }
 
     fn finish(&mut self) {
         self.events.push(Event::Finish);
     }
 
-    /// Start a node whose opening lands at an earlier position in the
-    /// event stream, wrapping everything emitted since that position —
-    /// the already-parsed operand — inside a node of the given kind.
-    /// The matching finish() closes it after the operator's right side.
-    fn start_at(&mut self, at: usize, kind: SyntaxKind) {
-        self.events.insert(at, Event::Start(kind));
+    fn checkpoint(&mut self) -> usize {
+        let idx = self.events.len();
+        self.events.push(Event::Placeholder {
+            forward_parent: 0,
+            tail_offset: 0,
+        });
+        idx
     }
 
-    /// Run the accumulated events through the tree builder.
-    fn build(self) -> SyntaxNode {
-        let mut builder = TreeBuilder::default();
-        for event in self.events {
-            match event {
-                Event::Start(kind) => builder.start(kind),
-                Event::Finish => builder.finish(),
-                Event::Token(kind, range) => builder.token(kind, range),
+    fn start_at(&mut self, at: usize, kind: SyntaxKind) {
+        let new_idx = self.events.len();
+        self.events.push(Event::Start {
+            kind,
+            forward_parent: 0,
+        });
+        match &mut self.events[at] {
+            Event::Placeholder {
+                forward_parent,
+                tail_offset,
+            } => {
+                if *forward_parent == 0 {
+                    let delta = (new_idx - at) as u32;
+                    *forward_parent = delta;
+                    *tail_offset = delta;
+                } else {
+                    let prev_tail = at + *tail_offset as usize;
+                    let delta = (new_idx - prev_tail) as u32;
+                    *tail_offset = (new_idx - at) as u32;
+                    if let Event::Start {
+                        forward_parent: fp, ..
+                    } = &mut self.events[prev_tail]
+                    {
+                        *fp = delta;
+                    }
+                }
             }
+            _ => unreachable!(),
         }
-        builder.finish_all()
     }
+
 
     /// Whether the current token is a safe place to resume parsing.
     fn is_sync(&self) -> bool {
@@ -257,7 +330,7 @@ impl<'a> Parser<'a> {
     /// Precedence-climbing expression parser. min_bp is the lowest
     /// binding power the caller will accept.
     fn parse_expr_bp(&mut self, min_bp: u8) {
-        let checkpoint = self.events.len();
+        let checkpoint = self.checkpoint();
         if matches!(self.current(), K::Bang | K::Minus) && UNARY_BP >= min_bp {
             self.start(K::UnaryExpr);
             self.bump();
@@ -317,7 +390,7 @@ impl<'a> Parser<'a> {
     /// The select node is opened *around* the already-parsed primary via
     /// start_at, so the base ends up as a child, not a sibling.
     fn parse_select(&mut self) {
-        let operand_checkpoint = self.events.len();
+        let operand_checkpoint = self.checkpoint();
         self.parse_primary();
         while self.current() == K::Dot {
             self.start_at(operand_checkpoint, K::SelectExpr);

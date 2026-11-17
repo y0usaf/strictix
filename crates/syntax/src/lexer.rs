@@ -46,18 +46,75 @@ enum Mode {
     IndStr,
 }
 
+struct SmallStack<T: Copy, const N: usize> {
+    inline: [T; N],
+    inline_len: usize,
+    overflow: Vec<T>,
+}
+
+impl<T: Copy, const N: usize> SmallStack<T, N> {
+    fn with_first(first: T) -> Self {
+        let mut inline = [first; N];
+        inline[0] = first;
+        Self {
+            inline,
+            inline_len: 1,
+            overflow: Vec::new(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.inline_len + self.overflow.len()
+    }
+
+    fn push(&mut self, value: T) {
+        if self.inline_len < N {
+            self.inline[self.inline_len] = value;
+            self.inline_len += 1;
+        } else {
+            self.overflow.push(value);
+        }
+    }
+
+    fn pop(&mut self) -> Option<T> {
+        if !self.overflow.is_empty() {
+            self.overflow.pop()
+        } else if self.inline_len > 0 {
+            self.inline_len -= 1;
+            Some(self.inline[self.inline_len])
+        } else {
+            None
+        }
+    }
+
+    fn last(&self) -> Option<&T> {
+        if !self.overflow.is_empty() {
+            self.overflow.last()
+        } else if self.inline_len > 0 {
+            Some(&self.inline[self.inline_len - 1])
+        } else {
+            None
+        }
+    }
+
+    fn last_mut(&mut self) -> Option<&mut T> {
+        if !self.overflow.is_empty() {
+            self.overflow.last_mut()
+        } else if self.inline_len > 0 {
+            Some(&mut self.inline[self.inline_len - 1])
+        } else {
+            None
+        }
+    }
+}
+
 struct Lexer<'a> {
     src: &'a [u8],
     pos: usize,
-    /// Start of pending string content not yet flushed as a token.
     content_start: usize,
     tokens: Vec<Token>,
-    /// Mode stack. Bottom is the top-level Normal frame; interpolation
-    /// pushes Normal frames on top of string frames.
-    modes: Vec<Mode>,
-    /// Brace depth per Normal frame, parallel to `modes` entries that
-    /// are Normal. Index i is the depth of the i-th Normal frame.
-    braces: Vec<usize>,
+    modes: SmallStack<Mode, 16>,
+    braces: SmallStack<usize, 16>,
 }
 
 fn is_ident_start(c: u8) -> bool {
@@ -101,9 +158,9 @@ impl<'a> Lexer<'a> {
             src: source.as_bytes(),
             pos: 0,
             content_start: 0,
-            tokens: Vec::new(),
-            modes: vec![Mode::Normal],
-            braces: vec![0],
+            tokens: Vec::with_capacity(source.len() / 4 + 8),
+            modes: SmallStack::with_first(Mode::Normal),
+            braces: SmallStack::with_first(0),
         }
     }
 

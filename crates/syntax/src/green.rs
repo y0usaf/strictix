@@ -108,7 +108,7 @@ impl NodeOrToken {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyntaxNode {
     kind: SyntaxKind,
-    children: Vec<NodeOrToken>,
+    children: Box<[NodeOrToken]>,
     range: TextRange,
 }
 
@@ -167,15 +167,59 @@ impl SyntaxNode {
         self.child_nodes().find(|n| n.kind() == kind)
     }
 
-    /// All descendant nodes, depth-first pre-order, self first.
     pub fn descendants(&self) -> impl Iterator<Item = &SyntaxNode> {
-        let mut stack = vec![self];
+        let mut stack = Vec::with_capacity(32);
+        stack.push(self);
         std::iter::from_fn(move || {
             let node = stack.pop()?;
-            let children: Vec<_> = node.child_nodes().collect();
-            stack.extend(children.into_iter().rev());
+            for child in node.children.iter().rev() {
+                if let NodeOrToken::Node(n) = child {
+                    stack.push(n);
+                }
+            }
             Some(node)
         })
+    }
+
+    #[must_use]
+    pub fn child_at_offset(&self, offset: u32) -> Option<&SyntaxNode> {
+        let idx = self.children.partition_point(|c| c.range().end() <= offset);
+        match self.children.get(idx) {
+            Some(NodeOrToken::Node(n)) if n.range.contains(offset) => Some(n),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn find_innermost_at(&self, kind: SyntaxKind, offset: u32) -> Option<&SyntaxNode> {
+        if !self.range.contains(offset) {
+            return None;
+        }
+        let mut found = (self.kind == kind).then_some(self);
+        let mut cur = self;
+        while let Some(next) = cur.child_at_offset(offset) {
+            if next.kind == kind {
+                found = Some(next);
+            }
+            cur = next;
+        }
+        found
+    }
+
+    pub fn walk_containing<'a>(&'a self, offset: u32, mut f: impl FnMut(&'a SyntaxNode) -> bool) -> bool {
+        if !self.range.contains(offset) {
+            return false;
+        }
+        let mut cur = self;
+        loop {
+            if f(cur) {
+                return true;
+            }
+            match cur.child_at_offset(offset) {
+                Some(next) => cur = next,
+                None => return false,
+            }
+        }
     }
     /// All recovered malformed regions, in source order.
     pub fn error_nodes(&self) -> impl Iterator<Item = &SyntaxNode> {
@@ -214,51 +258,53 @@ impl SyntaxNode {
 /// computed from their children when the node is closed.
 #[derive(Default)]
 pub struct TreeBuilder {
-    stack: Vec<OpenNode>,
+    stack: Vec<(SyntaxKind, usize)>,
+    children_buf: Vec<NodeOrToken>,
     root: Option<SyntaxNode>,
-    /// End offset of the last token emitted; used to give empty nodes a
-    /// sensible (empty) range at the current position.
     last_end: u32,
 }
 
-struct OpenNode {
-    kind: SyntaxKind,
-    children: Vec<NodeOrToken>,
-}
-
 impl TreeBuilder {
-    /// Start a new node with the given kind.
-    pub fn start(&mut self, kind: SyntaxKind) {
-        self.stack.push(OpenNode {
-            kind,
-            children: Vec::new(),
-        });
-    }
-
-    /// Emit a token as a child of the innermost open node.
-    pub fn token(&mut self, kind: SyntaxKind, range: TextRange) {
-        self.last_end = range.end();
-        let token = SyntaxToken { kind, range };
-        if let Some(node) = self.stack.last_mut() {
-            node.children.push(NodeOrToken::Token(token));
+    pub fn with_capacity(events_hint: usize) -> Self {
+        Self {
+            stack: Vec::with_capacity(32),
+            children_buf: Vec::with_capacity(events_hint.min(256)),
+            root: None,
+            last_end: 0,
         }
     }
 
-    /// Close the innermost open node, computing its range from children.
+    pub fn start(&mut self, kind: SyntaxKind) {
+        self.stack.push((kind, self.children_buf.len()));
+    }
+
+    pub fn token(&mut self, kind: SyntaxKind, range: TextRange) {
+        self.last_end = range.end();
+        let token = SyntaxToken { kind, range };
+        if !self.stack.is_empty() {
+            self.children_buf.push(NodeOrToken::Token(token));
+        }
+    }
+
     pub fn finish(&mut self) {
-        let node = self.stack.pop().expect("finish without open node");
-        let range = match (node.children.first(), node.children.last()) {
-            (Some(first), Some(last)) => TextRange::new(first.range().start(), last.range().end()),
-            _ => TextRange::new(self.last_end, self.last_end),
+        let (kind, start_idx) = self.stack.pop().expect("finish without open node");
+        let slice = &self.children_buf[start_idx..];
+        let (children, range) = if slice.is_empty() {
+            (Box::default(), TextRange::new(self.last_end, self.last_end))
+        } else {
+            let range = TextRange::new(slice[0].range().start(), slice[slice.len() - 1].range().end());
+            let boxed: Box<[NodeOrToken]> = self.children_buf.drain(start_idx..).collect();
+            (boxed, range)
         };
         let node = SyntaxNode {
-            kind: node.kind,
-            children: node.children,
+            kind,
+            children,
             range,
         };
-        match self.stack.last_mut() {
-            Some(parent) => parent.children.push(NodeOrToken::Node(node)),
-            None => self.root = Some(node),
+        if !self.stack.is_empty() {
+            self.children_buf.push(NodeOrToken::Node(node));
+        } else {
+            self.root = Some(node);
         }
     }
 

@@ -54,6 +54,7 @@
 //! exist before any value can be resolved against it, so resolution
 //! cannot happen during the walk.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use strictix_syntax::{
@@ -155,28 +156,27 @@ enum ScopeKind {
 
 /// One scope: the byte range it governs, its parent, and the slice of
 /// the model's binding table it owns.
-struct Scope {
+struct ScopeIndex<'a> {
+    heads: HashMap<&'a str, u32>,
+    next: Vec<u32>,
+}
+
+struct Scope<'a> {
     kind: ScopeKind,
     parent: Option<ScopeId>,
     range: TextRange,
-    /// Indices into [`Built::bindings`], in declaration order.
     bindings: Vec<usize>,
-    /// One offset per binding in this scope: the point from which the
-    /// binding becomes visible. `let` bindings and formals use this to
-    /// implement sequential visibility; rec scopes ignore it
-    /// (everything is visible everywhere).
     visible_from: Vec<u32>,
+    index: Option<ScopeIndex<'a>>,
 }
 
-/// The result of the one-time build: everything the model knows about
-/// one file. Built lazily on the first accessor call and shared
-/// thereafter; fields are internal, reached through
-/// [`SemanticModel`]'s accessors.
 pub struct Built<'a> {
     source: &'a str,
-    scopes: Vec<Scope>,
+    scopes: Vec<Scope<'a>>,
     bindings: Vec<Binding<'a>>,
     references: Vec<Reference<'a>>,
+    ref_by_start: Vec<(u32, u32)>,
+    binding_by_start: Vec<(u32, u32)>,
     with_sites: Vec<WithSite>,
     import_sites: Vec<ImportSite>,
 }
@@ -268,13 +268,87 @@ impl<'a> SemanticModel<'a> {
     /// Tokens are `Copy` values, so identity is compared by byte range
     /// — two tokens can never share a range within one tree.
     #[must_use]
+    pub fn reference_at(&self, range: TextRange) -> Option<&Reference<'a>> {
+        let built = self.ensure_built();
+        let pos = built
+            .ref_by_start
+            .partition_point(|&(start, _)| start < range.start());
+        for &(start, idx) in &built.ref_by_start[pos..] {
+            if start != range.start() {
+                break;
+            }
+            let r = &built.references[idx as usize];
+            if r.name.range() == range {
+                return Some(r);
+            }
+        }
+        None
+    }
+
+    pub fn references_in_range_indexed(
+        &self,
+        range: TextRange,
+    ) -> impl Iterator<Item = (usize, &Reference<'a>)> {
+        let built = self.ensure_built();
+        let lo = built
+            .ref_by_start
+            .partition_point(|&(start, _)| start < range.start());
+        let hi = built.ref_by_start[lo..]
+            .partition_point(|&(start, _)| start < range.end())
+            + lo;
+        built.ref_by_start[lo..hi]
+            .iter()
+            .map(|&(_, idx)| (idx as usize, &built.references[idx as usize]))
+    }
+
+    pub fn references_in_range(&self, range: TextRange) -> impl Iterator<Item = &Reference<'a>> {
+        let built = self.ensure_built();
+        let lo = built
+            .ref_by_start
+            .partition_point(|&(start, _)| start < range.start());
+        let hi = built.ref_by_start[lo..]
+            .partition_point(|&(start, _)| start < range.end())
+            + lo;
+        built.ref_by_start[lo..hi]
+            .iter()
+            .map(|&(_, idx)| &built.references[idx as usize])
+    }
+
+    pub fn bindings_in_range(&self, range: TextRange) -> impl Iterator<Item = &Binding<'a>> {
+        let built = self.ensure_built();
+        let lo = built
+            .binding_by_start
+            .partition_point(|&(start, _)| start < range.start());
+        let hi = built.binding_by_start[lo..]
+            .partition_point(|&(start, _)| start < range.end())
+            + lo;
+        built.binding_by_start[lo..hi]
+            .iter()
+            .map(|&(_, idx)| &built.bindings[idx as usize])
+    }
+
+    #[must_use]
+    pub fn binding_at(&self, range: TextRange) -> Option<&Binding<'a>> {
+        let built = self.ensure_built();
+        let pos = built
+            .binding_by_start
+            .partition_point(|&(start, _)| start < range.start());
+        for &(start, idx) in &built.binding_by_start[pos..] {
+            if start != range.start() {
+                break;
+            }
+            let b = &built.bindings[idx as usize];
+            if b.name.range() == range {
+                return Some(b);
+            }
+        }
+        None
+    }
+
+    #[must_use]
     pub fn resolve(&self, token: &SyntaxToken) -> Option<&Binding<'a>> {
         let built = self.ensure_built();
-        let idx = built
-            .references
-            .iter()
-            .find(|r| r.name.range() == token.range())
-            .and_then(|r| r.resolved)?;
+        let idx = self.reference_at(token.range()).and_then(|r| r.resolved)?;
         Some(&built.bindings[idx])
     }
 
@@ -300,21 +374,10 @@ impl<'a> SemanticModel<'a> {
         let built = self.ensure_built();
         let offset = binding.name.range().start();
         let name = binding.name.text(built.source);
-        let mut scope_id = built.scopes[binding.scope.0 as usize].parent?;
-        loop {
-            let scope = &built.scopes[scope_id.0 as usize];
-            if scope.kind != ScopeKind::Attrset {
-                for (pos, &bi) in scope.bindings.iter().enumerate() {
-                    let candidate = &built.bindings[bi];
-                    if candidate.name.text(built.source) == name
-                        && built.is_visible(scope_id, pos, offset)
-                    {
-                        return Some(candidate);
-                    }
-                }
-            }
-            scope_id = scope.parent?;
-        }
+        let start_scope = built.scopes[binding.scope.0 as usize].parent?;
+        built
+            .lookup_from_scope(start_scope, name, offset)
+            .map(|bi| &built.bindings[bi])
     }
 
     /// Whether any binding — lexical, or any `with` whose body covers
@@ -333,7 +396,6 @@ impl<'a> SemanticModel<'a> {
 }
 
 impl<'a> Built<'a> {
-    /// The two-pass build described in the module docs.
     fn build(source: &'a str, root: &'a SyntaxNode) -> Self {
         let mut builder = Builder {
             source,
@@ -343,45 +405,75 @@ impl<'a> Built<'a> {
             import_sites: Vec::new(),
             idents: Vec::new(),
             stack: Vec::new(),
+            with_stack: Vec::new(),
         };
         builder.new_scope(ScopeKind::Root, root.range());
         if let Some(expr) = Root::cast(root).and_then(|r| r.expr()) {
             builder.walk_expr(expr);
         }
+        for scope in &mut builder.scopes {
+            if scope.kind != ScopeKind::Attrset && scope.bindings.len() > 8 {
+                let len = scope.bindings.len();
+                let mut heads = HashMap::with_capacity(len);
+                let mut next = vec![u32::MAX; len];
+                for pos in (0..len).rev() {
+                    let bi = scope.bindings[pos];
+                    let name = builder.bindings[bi].name.text(source);
+                    if let Some(prev) = heads.insert(name, pos as u32) {
+                        next[pos] = prev;
+                    }
+                }
+                scope.index = Some(ScopeIndex { heads, next });
+            }
+        }
+        let mut binding_by_start: Vec<(u32, u32)> = builder
+            .bindings
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (b.name.range().start(), i as u32))
+            .collect();
+        binding_by_start.sort_unstable_by_key(|&(start, idx)| (start, idx));
         let mut built = Self {
             source,
             scopes: builder.scopes,
             bindings: builder.bindings,
-            references: Vec::new(),
+            references: Vec::with_capacity(builder.idents.len()),
+            ref_by_start: Vec::with_capacity(builder.idents.len()),
+            binding_by_start,
             with_sites: builder.with_sites,
             import_sites: builder.import_sites,
         };
-        for token in builder.idents {
-            built.record_reference(token);
+        for (token, scope_id, via_with_cand) in builder.idents {
+            built.record_reference(token, scope_id, via_with_cand);
         }
+        built.ref_by_start.sort_unstable_by_key(|&(start, idx)| (start, idx));
         built
     }
 
-    /// Record one reference and resolve it against the finished scope
-    /// table, filling both the reference's fields and the resolved
-    /// binding's `references`.
-    fn record_reference(&mut self, token: &'a SyntaxToken) {
+    fn record_reference(
+        &mut self,
+        token: &'a SyntaxToken,
+        scope_id: ScopeId,
+        via_with_cand: Option<usize>,
+    ) {
         let offset = token.range().start();
         let name = token.text(self.source);
-        let resolved = self.resolve_lexical_index(name, offset);
+        let resolved = self.lookup_from_scope(scope_id, name, offset);
         let via_with = if resolved.is_none() {
-            self.with_fallback(offset)
+            via_with_cand
         } else {
             None
         };
         if let Some(bi) = resolved {
             self.bindings[bi].references.push(token.range());
         }
+        let ref_idx = self.references.len() as u32;
         self.references.push(Reference {
             name: token,
             resolved,
             via_with,
         });
+        self.ref_by_start.push((offset, ref_idx));
     }
 
     /// The innermost scope whose range contains `offset`. Scopes nest
@@ -397,32 +489,34 @@ impl<'a> Built<'a> {
             .map(|(i, _)| ScopeId(i as u32))
     }
 
-    /// The innermost `with` whose body contains `offset`, if any. Sites
-    /// are recorded in source order and nested bodies are subranges, so
-    /// a reverse scan finds the innermost one first.
-    fn with_fallback(&self, offset: u32) -> Option<usize> {
-        self.with_sites
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, w)| w.body_range.contains(offset))
-            .map(|(i, _)| i)
+    fn resolve_lexical_index(&self, name: &str, offset: u32) -> Option<usize> {
+        let scope_id = self.innermost_scope(offset)?;
+        self.lookup_from_scope(scope_id, name, offset)
     }
 
-    /// Lexical resolution: walk scopes outward from the innermost one
-    /// containing `offset`; the first binding whose name matches and
-    /// whose scope rules make it visible at `offset` wins.
-    fn resolve_lexical_index(&self, name: &str, offset: u32) -> Option<usize> {
-        let mut scope_id = self.innermost_scope(offset)?;
+    fn lookup_from_scope(&self, mut scope_id: ScopeId, name: &str, offset: u32) -> Option<usize> {
         loop {
             let scope = &self.scopes[scope_id.0 as usize];
             if scope.kind != ScopeKind::Attrset {
-                for (pos, &bi) in scope.bindings.iter().enumerate() {
-                    let binding = &self.bindings[bi];
-                    if binding.name.text(self.source) == name
-                        && self.is_visible(scope_id, pos, offset)
-                    {
-                        return Some(bi);
+                if let Some(index) = &scope.index {
+                    if let Some(&first_pos) = index.heads.get(name) {
+                        let mut pos = first_pos;
+                        while pos != u32::MAX {
+                            let p = pos as usize;
+                            if self.is_visible(scope_id, p, offset) {
+                                return Some(scope.bindings[p]);
+                            }
+                            pos = index.next[p];
+                        }
+                    }
+                } else {
+                    for (pos, &bi) in scope.bindings.iter().enumerate() {
+                        let binding = &self.bindings[bi];
+                        if binding.name.text(self.source) == name
+                            && self.is_visible(scope_id, pos, offset)
+                        {
+                            return Some(bi);
+                        }
                     }
                 }
             }
@@ -450,18 +544,22 @@ impl<'a> Built<'a> {
 /// tracks which scope each newly created construct belongs to.
 struct Builder<'a> {
     source: &'a str,
-    scopes: Vec<Scope>,
+    scopes: Vec<Scope<'a>>,
     bindings: Vec<Binding<'a>>,
     with_sites: Vec<WithSite>,
     import_sites: Vec<ImportSite>,
-    /// Expression-position ident tokens, in source order, resolved in
-    /// pass 2 once every scope and binding exists.
-    idents: Vec<&'a SyntaxToken>,
+    idents: Vec<(&'a SyntaxToken, ScopeId, Option<usize>)>,
     stack: Vec<ScopeId>,
+    with_stack: Vec<usize>,
 }
 
 impl<'a> Builder<'a> {
-    /// Open a scope as a child of the current one and make it current.
+    fn push_ident(&mut self, token: &'a SyntaxToken) {
+        let scope_id = *self.stack.last().expect("root scope always active");
+        let via_with = self.with_stack.last().copied();
+        self.idents.push((token, scope_id, via_with));
+    }
+
     fn new_scope(&mut self, kind: ScopeKind, range: TextRange) -> ScopeId {
         let parent = self.stack.last().copied();
         let id = ScopeId(self.scopes.len() as u32);
@@ -471,6 +569,7 @@ impl<'a> Builder<'a> {
             range,
             bindings: Vec::new(),
             visible_from: Vec::new(),
+            index: None,
         });
         self.stack.push(id);
         id
@@ -546,7 +645,7 @@ impl<'a> Builder<'a> {
     /// yields an empty or partial model, never a panic.
     fn walk_expr(&mut self, expr: Expr<'a>) {
         match expr {
-            Expr::Ident(token) => self.idents.push(token),
+            Expr::Ident(token) => self.push_ident(token),
             Expr::Let(let_expr) => {
                 let scope = self.new_scope(ScopeKind::Let, let_expr.range());
                 if let Some(bindings) = let_expr.bindings() {
@@ -574,7 +673,7 @@ impl<'a> Builder<'a> {
                                 }
                                 for name in inherit.names() {
                                     if inherit.source().is_none() {
-                                        self.idents.push(name);
+                                        self.push_ident(name);
                                     }
                                     let visible_from = let_expr.range().start();
                                     self.register(
@@ -627,13 +726,16 @@ impl<'a> Builder<'a> {
                     self.walk_expr(scope_expr);
                 }
                 if let Some(body) = with_expr.body() {
+                    let site_idx = self.with_sites.len();
                     self.with_sites.push(WithSite {
                         scope_range: with_expr.range(),
                         body_range: body.range(),
                     });
+                    self.with_stack.push(site_idx);
                     self.new_scope(ScopeKind::With, body.range());
                     self.walk_expr(body);
                     self.pop_scope();
+                    self.with_stack.pop();
                 }
             }
             Expr::Attrset(attrset) => {
@@ -654,7 +756,7 @@ impl<'a> Builder<'a> {
                             }
                             for name in inherit.names() {
                                 if inherit.source().is_none() {
-                                    self.idents.push(name);
+                                    self.push_ident(name);
                                 }
                                 let visible_from = name.range().end();
                                 self.register(name, BindingKind::InheritName, scope, visible_from);
@@ -691,7 +793,7 @@ impl<'a> Builder<'a> {
                                 }
                                 for name in inherit.names() {
                                     if inherit.source().is_none() {
-                                        self.idents.push(name);
+                                        self.push_ident(name);
                                     }
                                     self.register(
                                         name,

@@ -18,7 +18,7 @@ use std::io::IsTerminal;
 
 use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
-use strictix_core::json::JsonValue;
+use strictix_core::json::{write_json_str, JsonValue};
 use strictix_syntax::TextRange;
 
 /// Standard ANSI styles inherit the terminal's configured color palette.
@@ -146,6 +146,7 @@ fn source_excerpt(source: &str, range: TextRange) -> Option<(&str, String)> {
 /// Build the JSON document for a whole run: one entry per file holding
 /// that file's diagnostics, plus a summary object. `fix` is `null`
 /// when a diagnostic carries no fix; `help` likewise.
+#[allow(dead_code)]
 pub fn json(files: &[JsonFile]) -> JsonValue {
     let mut file_values = Vec::with_capacity(files.len());
     let mut diag_total = 0usize;
@@ -197,6 +198,7 @@ pub fn json(files: &[JsonFile]) -> JsonValue {
 }
 
 /// The JSON shape of one fix: label plus its edits.
+#[allow(dead_code)]
 fn fix_json(fix: &Fix) -> JsonValue {
     let edits: Vec<JsonValue> = fix
         .edits
@@ -218,6 +220,7 @@ fn fix_json(fix: &Fix) -> JsonValue {
 }
 
 /// The JSON object for a text range: `{"start": n, "end": m}`.
+#[allow(dead_code)]
 fn range_json(range: TextRange) -> JsonValue {
     JsonValue::Object(vec![
         ("start".to_owned(), JsonValue::Number(range.start() as f64)),
@@ -226,9 +229,97 @@ fn range_json(range: TextRange) -> JsonValue {
 }
 
 /// One file's worth of results, as the JSON renderer consumes it.
+#[allow(dead_code)]
 pub struct JsonFile {
     pub path: String,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+pub fn write_json_doc(
+    files: &[(&std::path::Path, &[Diagnostic])],
+    total_diags: usize,
+    out: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    out.write_all(b"{\n")?;
+    if files.is_empty() {
+        out.write_all(b"  \"files\": [],\n")?;
+    } else {
+        out.write_all(b"  \"files\": [\n")?;
+        for (fi, &(path, diags)) in files.iter().enumerate() {
+            if fi > 0 {
+                out.write_all(b",\n")?;
+            }
+            out.write_all(b"    {\n      \"path\": ")?;
+            match path.to_str() {
+                Some(s) => write_json_str(s, out)?,
+                None => write_json_str(&path.to_string_lossy(), out)?,
+            }
+            if diags.is_empty() {
+                out.write_all(b",\n      \"diagnostics\": []\n    }")?;
+            } else {
+                out.write_all(b",\n      \"diagnostics\": [\n")?;
+                for (di, diag) in diags.iter().enumerate() {
+                    if di > 0 {
+                        out.write_all(b",\n")?;
+                    }
+                    out.write_all(b"        {\n          \"code\": ")?;
+                    write_json_str(diag.code, out)?;
+                    out.write_all(b",\n          \"severity\": ")?;
+                    write_json_str(diag.severity_str(), out)?;
+                    out.write_all(b",\n          \"message\": ")?;
+                    write_json_str(&diag.message, out)?;
+                    writeln!(
+                        out,
+                        ",\n          \"range\": {{\n            \"start\": {},\n            \"end\": {}\n          }},",
+                        diag.range.start(),
+                        diag.range.end()
+                    )?;
+                    out.write_all(b"          \"help\": ")?;
+                    match &diag.help {
+                        Some(h) => write_json_str(h, out)?,
+                        None => out.write_all(b"null")?,
+                    }
+                    out.write_all(b",\n          \"fix\": ")?;
+                    match &diag.fix {
+                        None => out.write_all(b"null")?,
+                        Some(fix) => {
+                            out.write_all(b"{\n            \"label\": ")?;
+                            write_json_str(&fix.label, out)?;
+                            if fix.edits.is_empty() {
+                                out.write_all(b",\n            \"edits\": []\n          }")?;
+                            } else {
+                                out.write_all(b",\n            \"edits\": [\n")?;
+                                for (ei, edit) in fix.edits.iter().enumerate() {
+                                    if ei > 0 {
+                                        out.write_all(b",\n")?;
+                                    }
+                                    writeln!(
+                                        out,
+                                        "              {{\n                \"range\": {{\n                  \"start\": {},\n                  \"end\": {}\n                }},",
+                                        edit.range.start(),
+                                        edit.range.end()
+                                    )?;
+                                    out.write_all(b"                \"replacement\": ")?;
+                                    write_json_str(&edit.replacement, out)?;
+                                    out.write_all(b"\n              }")?;
+                                }
+                                out.write_all(b"\n            ]\n          }")?;
+                            }
+                        }
+                    }
+                    out.write_all(b"\n        }")?;
+                }
+                out.write_all(b"\n      ]\n    }")?;
+            }
+        }
+        out.write_all(b"\n  ],\n")?;
+    }
+    writeln!(
+        out,
+        "  \"summary\": {{\n    \"files\": {},\n    \"diagnostics\": {}\n  }}\n}}",
+        files.len(),
+        total_diags
+    )
 }
 
 /// The human summary line: `N file(s) linted, M diagnostic(s) found`,

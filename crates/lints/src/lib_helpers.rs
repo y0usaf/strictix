@@ -64,25 +64,35 @@ fn library_value(model: &SemanticModel<'_>, expr: Expr<'_>, fuel: usize) -> Opti
                 if let Some(value) = crate::static_binding::value(token, model) {
                     return library_value(model, value, fuel);
                 }
-                let inherit = model
+                let mut inherit = None;
+                model
                     .root()
-                    .descendants()
-                    .filter_map(InheritStmt::cast)
-                    .find(|inherit| inherit.names().any(|n| n.range() == binding.name.range()))?;
+                    .walk_containing(binding.name.range().start(), |node| {
+                        if let Some(stmt) =
+                            InheritStmt::cast(node).filter(|i| i.names().any(|n| n.range() == binding.name.range()))
+                        {
+                            inherit = Some(stmt);
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                let inherit = inherit?;
                 return member(library_value(model, inherit.source()?, fuel)?, name);
             }
-            let reference = model
-                .references()
-                .iter()
-                .find(|reference| reference.name.range() == token.range())?;
+            let reference = model.reference_at(token.range())?;
             if let Some(site) = reference.via_with {
                 let range = model.with_sites()[site].scope_range;
-                let scope = model
-                    .root()
-                    .descendants()
-                    .filter_map(WithExpr::cast)
-                    .find(|expr| expr.range() == range)?
-                    .scope()?;
+                let mut with_expr = None;
+                model.root().walk_containing(range.start(), |node| {
+                    if let Some(expr) = WithExpr::cast(node).filter(|expr| expr.range() == range) {
+                        with_expr = Some(expr);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                let scope = with_expr?.scope()?;
                 return member(library_value(model, scope, fuel)?, name);
             }
             (name == "lib" && crate::static_binding::is_unshadowed(token, model))

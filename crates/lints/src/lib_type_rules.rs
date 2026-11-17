@@ -129,22 +129,29 @@ fn curated_help(name: &str) -> Option<&'static str> {
 fn member_segments<'a>(model: &SemanticModel<'a>, ref_range: TextRange) -> Vec<&'a SyntaxToken> {
     let root = model.root();
     let mut segments = Vec::new();
-    let Some(innermost) = root
-        .descendants()
-        .filter_map(SelectExpr::cast)
-        .find(|s| matches!(s.base(), Some(Expr::Ident(t)) if t.range() == ref_range))
+    let mut path_selects = Vec::new();
+    root.walk_containing(ref_range.start(), |node| {
+        if let Some(select) = SelectExpr::cast(node) {
+            path_selects.push(select);
+        }
+        false
+    });
+    let Some(start_pos) = path_selects
+        .iter()
+        .rposition(|s| matches!(s.base(), Some(Expr::Ident(t)) if t.range() == ref_range))
     else {
         return segments;
     };
-    let mut chain = vec![innermost];
-    let mut current_range = innermost.range();
-    while let Some(next) = root
-        .descendants()
-        .filter_map(SelectExpr::cast)
-        .find(|s| s.base().is_some_and(|b| b.range() == current_range))
-    {
-        current_range = next.range();
-        chain.push(next);
+    let mut chain = vec![path_selects[start_pos]];
+    let mut current_range = path_selects[start_pos].range();
+    let mut pos = start_pos;
+    while pos > 0 {
+        pos -= 1;
+        let next = path_selects[pos];
+        if next.base().is_some_and(|b| b.range() == current_range) {
+            current_range = next.range();
+            chain.push(next);
+        }
     }
     for select in &chain {
         if select.default().is_some() {
@@ -200,11 +207,18 @@ fn inherit_stmt_of<'a>(
     binding: &Binding<'a>,
 ) -> Option<InheritStmt<'a>> {
     let name_range = binding.name.range();
-    model
-        .root()
-        .descendants()
-        .filter_map(InheritStmt::cast)
-        .find(|stmt| stmt.names().any(|t| t.range() == name_range))
+    let mut found = None;
+    model.root().walk_containing(name_range.start(), |node| {
+        if let Some(stmt) =
+            InheritStmt::cast(node).filter(|stmt| stmt.names().any(|t| t.range() == name_range))
+        {
+            found = Some(stmt);
+            true
+        } else {
+            false
+        }
+    });
+    found
 }
 
 /// Flags `lib.types.<name>` members that do not exist.
@@ -304,12 +318,16 @@ impl UnknownLibType {
             return false;
         };
         let site = &model.with_sites()[with_idx];
-        let Some(with_expr) = model
-            .root()
-            .descendants()
-            .filter_map(WithExpr::cast)
-            .find(|w| w.range() == site.scope_range)
-        else {
+        let mut with_expr = None;
+        model.root().walk_containing(site.scope_range.start(), |node| {
+            if let Some(w) = WithExpr::cast(node).filter(|w| w.range() == site.scope_range) {
+                with_expr = Some(w);
+                true
+            } else {
+                false
+            }
+        });
+        let Some(with_expr) = with_expr else {
             return false;
         };
         with_expr

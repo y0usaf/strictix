@@ -18,37 +18,99 @@ pub struct ProjectContext {
     files: BTreeSet<PathBuf>,
     imports: BTreeMap<PathBuf, Vec<(PathBuf, u32)>>,
     sources: Vec<ProjectFile>,
-    /// Files that exist without being linted (excluded from the run).
+    source_index: HashMap<PathBuf, usize>,
     present: BTreeSet<PathBuf>,
-    /// Per-type project indexes built on first use by [Self::memo].
     memo: Mutex<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
+}
+
+fn extract_imports(path: &Path, source: &str) -> Vec<(PathBuf, u32)> {
+    if !source.contains("import") || (!source.contains("./") && !source.contains(".\\")) {
+        return Vec::new();
+    }
+    let tree = parse(source);
+    let mut edges = Vec::new();
+    if tree.error_nodes().next().is_none() {
+        let model = SemanticModel::new(source, &tree).with_path(Some(path));
+        for site in model.import_sites() {
+            if let Some(raw) = literal_import(source, &tree, site.path_range) {
+                let target = normalize(&path.parent().unwrap_or(Path::new(".")).join(raw));
+                edges.push((target, site.call_range.start()));
+            }
+        }
+    }
+    edges
 }
 
 impl ProjectContext {
     pub fn new(files: impl IntoIterator<Item = ProjectFile>) -> Self {
-        let mut all = BTreeSet::new();
-        let mut imports = BTreeMap::new();
         let sources: Vec<ProjectFile> = files.into_iter().collect();
-        for file in &sources {
-            let path = normalize(&file.path);
-            all.insert(path.clone());
-            let tree = parse(&file.source);
-            let mut edges = Vec::new();
-            if tree.error_nodes().next().is_none() {
-                let model = SemanticModel::new(&file.source, &tree).with_path(Some(&path));
-                for site in model.import_sites() {
-                    if let Some(raw) = literal_import(&file.source, &tree, site.path_range) {
-                        let target = normalize(&path.parent().unwrap_or(Path::new(".")).join(raw));
-                        edges.push((target, site.call_range.start()));
-                    }
+        let norm_paths: Vec<PathBuf> = sources.iter().map(|f| normalize(&f.path)).collect();
+        let workers = std::thread::available_parallelism()
+            .map(std::num::NonZeroUsize::get)
+            .unwrap_or(1)
+            .min(8);
+        let edge_lists: Vec<Vec<(PathBuf, u32)>> = if sources.len() >= 16 && workers > 1 {
+            const LARGE_BYTES: usize = 512 * 1024;
+            let mut large = Vec::new();
+            let mut small = Vec::new();
+            for (idx, file) in sources.iter().enumerate() {
+                if file.source.len() >= LARGE_BYTES {
+                    large.push(idx);
+                } else {
+                    small.push(idx);
                 }
             }
+            large.sort_unstable_by(|&a, &b| sources[b].source.len().cmp(&sources[a].source.len()));
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let slots: Vec<Mutex<Vec<(PathBuf, u32)>>> =
+                (0..sources.len()).map(|_| Mutex::new(Vec::new())).collect();
+            let run_small = || loop {
+                let pos = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if pos >= small.len() {
+                    break;
+                }
+                let idx = small[pos];
+                let edges = extract_imports(&norm_paths[idx], &sources[idx].source);
+                if !edges.is_empty() {
+                    *slots[idx].lock().unwrap() = edges;
+                }
+            };
+            std::thread::scope(|scope| {
+                for _ in 0..(workers - 1).min(small.len()) {
+                    scope.spawn(&run_small);
+                }
+                for &idx in &large {
+                    let edges = extract_imports(&norm_paths[idx], &sources[idx].source);
+                    if !edges.is_empty() {
+                        *slots[idx].lock().unwrap() = edges;
+                    }
+                }
+                run_small();
+            });
+            slots
+                .into_iter()
+                .map(|slot| slot.into_inner().unwrap())
+                .collect()
+        } else {
+            sources
+                .iter()
+                .zip(&norm_paths)
+                .map(|(file, path)| extract_imports(path, &file.source))
+                .collect()
+        };
+        let mut all = BTreeSet::new();
+        let mut imports = BTreeMap::new();
+        let mut source_index = HashMap::with_capacity(sources.len());
+        for (idx, (path, edges)) in norm_paths.into_iter().zip(edge_lists).enumerate() {
+            all.insert(path.clone());
+            source_index.entry(path.clone()).or_insert(idx);
             imports.insert(path, edges);
         }
         Self {
             files: all,
             imports,
             sources,
+            source_index,
             present: BTreeSet::new(),
             memo: Mutex::default(),
         }
@@ -62,9 +124,19 @@ impl ProjectContext {
         self
     }
 
-    /// Every supplied file with its source, in input order.
     pub fn sources(&self) -> &[ProjectFile] {
         &self.sources
+    }
+
+    #[must_use]
+    pub fn source_index(&self, path: &Path) -> Option<usize> {
+        self.source_index.get(&normalize(path)).copied()
+    }
+
+    #[must_use]
+    pub fn source_by_norm_path(&self, normalized: &Path) -> Option<(usize, &ProjectFile)> {
+        let idx = *self.source_index.get(normalized)?;
+        Some((idx, &self.sources[idx]))
     }
 
     /// Build a project-wide index of type `T` once and share it across
@@ -152,10 +224,18 @@ fn literal_import(
     tree: &SyntaxNode,
     range: strictix_syntax::TextRange,
 ) -> Option<PathBuf> {
-    let expr = tree
-        .descendants()
-        .find(|n| n.range() == range)
-        .and_then(Expr::cast)?;
+    let mut cur = tree;
+    let expr = loop {
+        if cur.range() == range {
+            if let Some(expr) = Expr::cast(cur) {
+                break Some(expr);
+            }
+        }
+        let Some(next) = cur.child_at_offset(range.start()) else {
+            break None;
+        };
+        cur = next;
+    }?;
     match expr {
         Expr::Path(path) => {
             let text = path.text(source);

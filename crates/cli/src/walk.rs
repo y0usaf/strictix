@@ -161,6 +161,14 @@ pub fn collect_files(
     paths: &[PathBuf],
     ignore_file: Option<&Path>,
 ) -> Result<(Vec<PathBuf>, Vec<PathBuf>, Filter), String> {
+    collect_files_filtered(paths, ignore_file, true)
+}
+
+pub fn collect_files_filtered(
+    paths: &[PathBuf],
+    ignore_file: Option<&Path>,
+    collect_others: bool,
+) -> Result<(Vec<PathBuf>, Vec<PathBuf>, Filter), String> {
     let ignore = match ignore_file {
         Some(path) => {
             let text = fs::read_to_string(path)
@@ -176,27 +184,28 @@ pub fn collect_files(
             return Err(format!("path does not exist: {}", path.display()));
         }
         if path.is_dir() {
-            walk_dir(path, &[], &ignore, &mut out, &mut others)?;
+            walk_dir(path, &[], &ignore, &mut out, &mut others, collect_others)?;
         } else if path.extension().is_some_and(|ext| ext == "nix") {
             out.push(path.clone());
-        } else {
+        } else if collect_others {
             others.push(path.clone());
         }
     }
     out.sort();
-    others.sort();
+    if collect_others {
+        others.sort();
+    }
     let roots = paths.iter().filter(|path| path.is_dir()).cloned().collect();
     Ok((out, others, Filter { ignore, roots }))
 }
 
-/// Recursively collect `.nix` files under `dir` (the walk root is
-/// `root`, used to compute relative paths for anchored patterns).
 fn walk_dir(
     dir: &Path,
     rel: &[String],
     ignore: &IgnoreSet,
     out: &mut Vec<PathBuf>,
     others: &mut Vec<PathBuf>,
+    collect_others: bool,
 ) -> Result<(), String> {
     let entries =
         fs::read_dir(dir).map_err(|e| format!("cannot read directory {}: {e}", dir.display()))?;
@@ -207,23 +216,29 @@ fn walk_dir(
         if is_default_skipped(&name) {
             continue;
         }
-        let mut rel_owned: Vec<String> = rel.to_vec();
-        rel_owned.push(name.clone());
         let file_type = entry
             .file_type()
             .map_err(|e| format!("cannot stat {}: {e}", path.display()))?;
+        if !file_type.is_dir()
+            && !collect_others
+            && path.extension().is_none_or(|ext| ext != "nix")
+        {
+            continue;
+        }
+        let mut rel_owned: Vec<String> = rel.to_vec();
+        rel_owned.push(name);
         if file_type.is_dir() {
             if ignore.matches(&rel_owned, true) {
                 continue;
             }
-            walk_dir(&path, &rel_owned, ignore, out, others)?;
+            walk_dir(&path, &rel_owned, ignore, out, others, collect_others)?;
         } else if file_type.is_file() {
             if ignore.matches(&rel_owned, false) {
                 continue;
             }
             if path.extension().is_some_and(|ext| ext == "nix") {
                 out.push(path);
-            } else {
+            } else if collect_others {
                 others.push(path);
             }
         }

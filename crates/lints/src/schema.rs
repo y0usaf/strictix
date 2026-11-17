@@ -307,26 +307,28 @@ fn select_chain<'a>(
 ) -> Vec<SelectExpr<'a>> {
     let root = model.root();
     let mut chain = Vec::new();
-    let Some(innermost) = root
-        .descendants()
-        .filter_map(SelectExpr::cast)
-        .find(|s| matches!(s.base(), Some(Expr::Ident(t)) if t.range() == ref_range))
+    let mut path_selects = Vec::new();
+    root.walk_containing(ref_range.start(), |node| {
+        if let Some(select) = SelectExpr::cast(node) {
+            path_selects.push(select);
+        }
+        false
+    });
+    let Some(start_pos) = path_selects
+        .iter()
+        .rposition(|s| matches!(s.base(), Some(Expr::Ident(t)) if t.range() == ref_range))
     else {
         return chain;
     };
-    chain.push(innermost);
-    let mut current_range = innermost.range();
-    loop {
-        let next = root
-            .descendants()
-            .filter_map(SelectExpr::cast)
-            .find(|s| s.base().is_some_and(|b| b.range() == current_range));
-        match next {
-            Some(select) => {
-                current_range = select.range();
-                chain.push(select);
-            }
-            None => break,
+    chain.push(path_selects[start_pos]);
+    let mut current_range = path_selects[start_pos].range();
+    let mut pos = start_pos;
+    while pos > 0 {
+        pos -= 1;
+        let select = path_selects[pos];
+        if select.base().is_some_and(|b| b.range() == current_range) {
+            current_range = select.range();
+            chain.push(select);
         }
     }
     chain

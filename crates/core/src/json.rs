@@ -536,20 +536,73 @@ fn format_number(n: f64) -> String {
 }
 
 /// Write a string with JSON escaping (quote, backslash, control chars).
+pub fn write_json_str(s: &str, out: &mut impl std::io::Write) -> std::io::Result<()> {
+    out.write_all(b"\"")?;
+    let bytes = s.as_bytes();
+    let mut start = 0usize;
+    for (i, &b) in bytes.iter().enumerate() {
+        let esc: &[u8] = match b {
+            b'"' => b"\\\"",
+            b'\\' => b"\\\\",
+            0x08 => b"\\b",
+            0x0C => b"\\f",
+            b'\n' => b"\\n",
+            b'\r' => b"\\r",
+            b'\t' => b"\\t",
+            0..0x20 => {
+                if start < i {
+                    out.write_all(&bytes[start..i])?;
+                }
+                write!(out, "\\u{:04x}", b)?;
+                start = i + 1;
+                continue;
+            }
+            _ => continue,
+        };
+        if start < i {
+            out.write_all(&bytes[start..i])?;
+        }
+        out.write_all(esc)?;
+        start = i + 1;
+    }
+    if start < bytes.len() {
+        out.write_all(&bytes[start..])?;
+    }
+    out.write_all(b"\"")
+}
+
 fn write_json_string(s: &str, out: &mut String) {
     out.push('"');
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\u{0008}' => out.push_str("\\b"),
-            '\u{000C}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
+    let bytes = s.as_bytes();
+    let mut start = 0usize;
+    for (i, &b) in bytes.iter().enumerate() {
+        let esc = match b {
+            b'"' => "\\\"",
+            b'\\' => "\\\\",
+            0x08 => "\\b",
+            0x0C => "\\f",
+            b'\n' => "\\n",
+            b'\r' => "\\r",
+            b'\t' => "\\t",
+            0..0x20 => {
+                if start < i {
+                    out.push_str(&s[start..i]);
+                }
+                use std::fmt::Write as _;
+                let _ = write!(out, "\\u{:04x}", b);
+                start = i + 1;
+                continue;
+            }
+            _ => continue,
+        };
+        if start < i {
+            out.push_str(&s[start..i]);
         }
+        out.push_str(esc);
+        start = i + 1;
+    }
+    if start < s.len() {
+        out.push_str(&s[start..]);
     }
     out.push('"');
 }

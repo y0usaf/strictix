@@ -13,8 +13,13 @@ pub fn command(config: &LintConfig) -> Option<&str> {
         .flatten()
 }
 
-pub fn apply(command: &str, input: &crate::Input, result: &mut crate::FileResult) {
-    let Ok(source) = &input.source else {
+pub fn apply(
+    command: &str,
+    path: &std::path::Path,
+    source: Option<&str>,
+    result: &mut crate::FileResult,
+) {
+    let Some(source) = source else {
         return;
     };
     if result.diagnostics.iter().any(|d| d.code == "syntax-error") {
@@ -26,7 +31,7 @@ pub fn apply(command: &str, input: &crate::Input, result: &mut crate::FileResult
             result.diagnostics.sort_by_key(|d| d.range.start());
         }
         Ok(None) => {}
-        Err(message) => result.read_error = Some(format!("{}: {message}", input.path.display())),
+        Err(message) => result.read_error = Some(format!("{}: {message}", path.display())),
     }
 }
 

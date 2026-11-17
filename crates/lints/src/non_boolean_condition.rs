@@ -44,10 +44,8 @@ impl Rule for NonBooleanCondition {
             }
             let is_global_null = matches!(condition, Expr::Ident(token)
             if token.text(model.source()) == "null"
-                && model.references().iter().any(|reference| {
-                    reference.name.range() == token.range()
-                        && reference.resolved.is_none()
-                        && reference.via_with.is_none()
+                && model.reference_at(token.range()).is_some_and(|reference| {
+                    reference.resolved.is_none() && reference.via_with.is_none()
                 }));
             if !is_global_null && !is_non_boolean_literal(condition) {
                 continue;

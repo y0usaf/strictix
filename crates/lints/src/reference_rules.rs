@@ -187,24 +187,32 @@ pub(crate) fn is_global(name: &str) -> bool {
 /// rewrite it to `''${...}` — the Nix escape that emits a literal
 /// `${name}` instead of interpolating it.
 fn indented_string_fix_range(model: &SemanticModel<'_>, ref_range: TextRange) -> Option<TextRange> {
-    for node in model.root().descendants() {
+    if !model.source().contains("''") {
+        return None;
+    }
+    let mut found = None;
+    model.root().walk_containing(ref_range.start(), |node| {
         if node.kind() != SyntaxKind::IndStringExpr {
-            continue;
+            return false;
         }
         let Some(ind) = IndStringExpr::cast(node) else {
-            continue;
+            return false;
         };
         for part in ind.parts() {
             if let StringPart::Interp(interp) = part {
-                if let Some(Expr::Ident(token)) = interp.expr() {
-                    if token.range() == ref_range {
-                        return Some(interp.syntax().range());
+                if interp.syntax().range().contains(ref_range.start()) {
+                    if let Some(Expr::Ident(token)) = interp.expr() {
+                        if token.range() == ref_range {
+                            found = Some(interp.syntax().range());
+                            return true;
+                        }
                     }
                 }
             }
         }
-    }
-    None
+        false
+    });
+    found
 }
 
 /// Flags a reference that resolves to nothing in scope.

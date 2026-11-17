@@ -284,152 +284,311 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
     } else {
         args.paths.clone()
     };
-    let (files, others, filter) = match walk::collect_files(&paths, ignore_file.as_deref()) {
-        Ok(found) => found,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::FAILURE;
-        }
-    };
+    let need_scattered = config.is_enabled("scattered-documentation")
+        && config
+            .enabled
+            .iter()
+            .any(|c| c == "scattered-documentation");
+    let need_prose =
+        config.is_enabled("wrapped-prose") && config.enabled.iter().any(|c| c == "wrapped-prose");
+    let need_others = need_scattered || need_prose;
+
+    let (files, others, filter) =
+        match walk::collect_files_filtered(&paths, ignore_file.as_deref(), need_others) {
+            Ok(found) => found,
+            Err(message) => {
+                eprintln!("error: {message}");
+                return ExitCode::FAILURE;
+            }
+        };
 
     let color = render::color_enabled();
     let rules = strictix_lints::all_rules();
-    let inputs: Vec<Input> = files
-        .iter()
-        .map(|path| {
-            let source =
-                std::fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()));
-            let virtuals = match source.as_deref().map(|s| merged::expand(path, s, &filter)) {
-                Ok(Ok(virtuals)) => virtuals,
-                Ok(Err(message)) => {
-                    eprintln!(
-                        "warning: {}: linted as one file, not per merged binding: {message}",
-                        path.display()
-                    );
-                    None
+    let workers = std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(1)
+        .min(8);
+
+    let (mut inputs, warnings): (Vec<Input>, Vec<Option<String>>) =
+        if files.len() >= 16 && workers > 1 {
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let slots: Vec<std::sync::Mutex<Option<(Input, Option<String>)>>> =
+                (0..files.len()).map(|_| std::sync::Mutex::new(None)).collect();
+            std::thread::scope(|scope| {
+                for _ in 0..workers.min(files.len()) {
+                    scope.spawn(|| loop {
+                        let idx = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if idx >= files.len() {
+                            break;
+                        }
+                        let path = &files[idx];
+                        let source = std::fs::read_to_string(path)
+                            .map_err(|err| format!("{}: {err}", path.display()));
+                        let mut warn = None;
+                        let virtuals = match source
+                            .as_deref()
+                            .map(|s| merged::expand(path, s, &filter))
+                        {
+                            Ok(Ok(virtuals)) => virtuals,
+                            Ok(Err(message)) => {
+                                warn = Some(format!(
+                                    "warning: {}: linted as one file, not per merged binding: {message}",
+                                    path.display()
+                                ));
+                                None
+                            }
+                            Err(_) => None,
+                        };
+                        let source = match source {
+                            Ok(s) => InputSource::Owned(s),
+                            Err(e) => InputSource::Err(e),
+                        };
+                        *slots[idx].lock().unwrap() = Some((
+                            Input {
+                                path: path.clone(),
+                                source,
+                                virtuals,
+                            },
+                            warn,
+                        ));
+                    });
                 }
-                Err(_) => None,
-            };
-            Input {
-                path: path.clone(),
-                source,
-                virtuals,
-            }
-        })
-        .collect();
-    let project_files: Vec<strictix_core::project::ProjectFile> = inputs
-        .iter()
-        .flat_map(|input| match (&input.source, &input.virtuals) {
-            (Ok(_), Some(virtuals)) => virtuals
+            });
+            slots
+                .into_iter()
+                .map(|s| s.into_inner().unwrap().unwrap())
+                .unzip()
+        } else {
+            files
                 .iter()
-                .filter(|file| !file.skipped)
-                .map(|file| strictix_core::project::ProjectFile {
-                    path: file.path.clone(),
-                    source: file.mapped.text.clone(),
+                .map(|path| {
+                    let source = std::fs::read_to_string(path)
+                        .map_err(|err| format!("{}: {err}", path.display()));
+                    let mut warn = None;
+                    let virtuals = match source.as_deref().map(|s| merged::expand(path, s, &filter)) {
+                        Ok(Ok(virtuals)) => virtuals,
+                        Ok(Err(message)) => {
+                            warn = Some(format!(
+                                "warning: {}: linted as one file, not per merged binding: {message}",
+                                path.display()
+                            ));
+                            None
+                        }
+                        Err(_) => None,
+                    };
+                    let source = match source {
+                        Ok(s) => InputSource::Owned(s),
+                        Err(e) => InputSource::Err(e),
+                    };
+                    (
+                        Input {
+                            path: path.clone(),
+                            source,
+                            virtuals,
+                        },
+                        warn,
+                    )
                 })
-                .collect(),
-            (Ok(source), None) => vec![strictix_core::project::ProjectFile {
-                path: input.path.clone(),
-                source: source.clone(),
-            }],
-            (Err(_), _) => Vec::new(),
-        })
-        .collect();
-    let skipped = inputs
-        .iter()
-        .flat_map(|input| input.virtuals.iter().flatten())
-        .filter(|file| file.skipped)
-        .map(|file| file.path.clone());
+                .unzip()
+        };
+    for warn in warnings.into_iter().flatten() {
+        eprintln!("{warn}");
+    }
+
+    let mut project_files: Vec<strictix_core::project::ProjectFile> =
+        Vec::with_capacity(inputs.len());
+    let mut skipped: Vec<PathBuf> = Vec::new();
+    for input in &mut inputs {
+        if let Some(virtuals) = &input.virtuals {
+            if matches!(input.source, InputSource::Owned(_)) {
+                for file in virtuals {
+                    if file.skipped {
+                        skipped.push(file.path.clone());
+                    } else {
+                        project_files.push(strictix_core::project::ProjectFile {
+                            path: file.path.clone(),
+                            source: file.mapped.text.clone(),
+                        });
+                    }
+                }
+            }
+        } else {
+            for file in input.virtuals.iter().flatten() {
+                if file.skipped {
+                    skipped.push(file.path.clone());
+                }
+            }
+            if matches!(input.source, InputSource::Owned(_)) {
+                let taken = std::mem::replace(&mut input.source, InputSource::Err(String::new()));
+                if let InputSource::Owned(source) = taken {
+                    let idx = project_files.len();
+                    project_files.push(strictix_core::project::ProjectFile {
+                        path: input.path.clone(),
+                        source,
+                    });
+                    input.source = InputSource::Project(idx);
+                }
+            }
+        }
+    }
     let project = strictix_core::project::ProjectContext::new(project_files).with_present(skipped);
     let formatter = format::command(&config);
-    let results: Vec<FileResult> = std::thread::scope(|scope| {
-        let mut handles = Vec::new();
-        for input in &inputs {
-            let (rules, config, project, filter) = (&rules, &config, &project, &filter);
-            handles.push(scope.spawn(move || {
-                let mut result = process_file(
-                    input,
-                    rules,
-                    config,
-                    fix_mode,
-                    !args.dry_run,
-                    project,
-                    filter,
-                );
-                if let Some(command) = formatter {
-                    format::apply(command, input, &mut result);
-                }
-                result
-            }));
+
+    let run_one = |input: &Input| {
+        let mut result = process_file(
+            input,
+            &rules,
+            &config,
+            fix_mode,
+            !args.dry_run,
+            &project,
+            &filter,
+        );
+        if let Some(command) = formatter {
+            format::apply(
+                command,
+                &input.path,
+                input_source(input, &project).ok(),
+                &mut result,
+            );
         }
-        handles
+        result
+    };
+
+    let results: Vec<FileResult> = if inputs.len() > 1 && workers > 1 {
+        const LARGE_BYTES: usize = 512 * 1024;
+        let mut large = Vec::new();
+        let mut small = Vec::new();
+        for (idx, input) in inputs.iter().enumerate() {
+            let len = input_source(input, &project).map_or(0, str::len);
+            if len >= LARGE_BYTES {
+                large.push((idx, len));
+            } else {
+                small.push(idx);
+            }
+        }
+        large.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let slots: Vec<std::sync::Mutex<Option<FileResult>>> =
+            (0..inputs.len()).map(|_| std::sync::Mutex::new(None)).collect();
+        let run_small = || loop {
+            let pos = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if pos >= small.len() {
+                break;
+            }
+            let idx = small[pos];
+            let result = run_one(&inputs[idx]);
+            *slots[idx].lock().unwrap() = Some(result);
+        };
+        std::thread::scope(|scope| {
+            for _ in 0..(workers - 1).min(small.len()) {
+                scope.spawn(&run_small);
+            }
+            for &(idx, _) in &large {
+                let result = run_one(&inputs[idx]);
+                *slots[idx].lock().unwrap() = Some(result);
+            }
+            run_small();
+        });
+        slots
             .into_iter()
-            .map(|handle| handle.join().expect("worker thread panicked"))
+            .map(|s| s.into_inner().unwrap().unwrap())
             .collect()
-    });
-    let path_results: Vec<FileResult> = others
-        .iter()
-        .filter_map(|path| {
-            let source = std::fs::read_to_string(path).unwrap_or_default();
-            let diagnostics = strictix_core::rules::run_path_rules(&rules, path, &source, &config);
-            (!diagnostics.is_empty()).then(|| FileResult {
-                path: path.clone(),
-                source,
-                diagnostics,
-                read_error: None,
-                fixes_applied: 0,
-                fixed: None,
-                write_error: None,
-                apply_error: None,
+    } else {
+        inputs.iter().map(run_one).collect()
+    };
+
+    let path_results: Vec<(FileResult, String)> = if need_others {
+        others
+            .iter()
+            .filter_map(|path| {
+                let source = if need_prose
+                    && path.extension().is_some_and(|ext| {
+                        ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown")
+                    }) {
+                    std::fs::read_to_string(path).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let diagnostics =
+                    strictix_core::rules::run_path_rules(&rules, path, &source, &config);
+                (!diagnostics.is_empty()).then(|| {
+                    (
+                        FileResult {
+                            path: path.clone(),
+                            diagnostics,
+                            read_error: None,
+                            fixes_applied: 0,
+                            fixed: None,
+                            write_error: None,
+                            apply_error: None,
+                        },
+                        source,
+                    )
+                })
             })
-        })
-        .collect();
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let mut any_error = false;
     let mut linted = 0usize;
     let mut total_diags = 0usize;
-    let mut linted_results: Vec<&FileResult> = Vec::new();
-    for result in &results {
+    let mut linted_results: Vec<(&FileResult, &str)> = Vec::with_capacity(results.len());
+    for (input, result) in inputs.iter().zip(&results) {
         if let Some(err) = &result.read_error {
             eprintln!("error: {err}");
             any_error = true;
         } else {
             linted += 1;
             total_diags += result.diagnostics.len();
-            linted_results.push(result);
+            let src = if args.format == Format::Human {
+                input_source(input, &project).unwrap_or("")
+            } else {
+                ""
+            };
+            linted_results.push((result, src));
         }
     }
-    for result in &path_results {
+    for (result, src) in &path_results {
         total_diags += result.diagnostics.len();
-        linted_results.push(result);
+        linted_results.push((result, src.as_str()));
     }
 
     match args.format {
         Format::Human => {
-            for result in &linted_results {
+            for &(result, src) in &linted_results {
                 let path = result.path.display().to_string();
                 for (i, diag) in result.diagnostics.iter().enumerate() {
                     if i > 0 {
                         println!();
                     }
-                    println!("{}", render::human(diag, &path, &result.source, color));
+                    println!("{}", render::human(diag, &path, src, color));
                 }
             }
         }
         Format::Json => {
-            let files: Vec<render::JsonFile> = linted_results
+            let entries: Vec<(&Path, &[Diagnostic])> = linted_results
                 .iter()
-                .map(|result| render::JsonFile {
-                    path: result.path.display().to_string(),
-                    diagnostics: result.diagnostics.clone(),
-                })
+                .map(|&(r, _)| (r.path.as_path(), r.diagnostics.as_slice()))
                 .collect();
-            print_json(&files);
+            let stdout = std::io::stdout();
+            let mut out = std::io::BufWriter::with_capacity(64 * 1024, stdout.lock());
+            if let Err(err) = render::write_json_doc(&entries, total_diags, &mut out) {
+                eprintln!("error: {err}");
+                return ExitCode::FAILURE;
+            }
+            use std::io::Write as _;
+            if let Err(err) = out.flush() {
+                eprintln!("error: {err}");
+                return ExitCode::FAILURE;
+            }
         }
     }
 
     if fix_mode && args.format == Format::Human {
-        for result in &results {
+        for (input, result) in inputs.iter().zip(&results) {
             if result.fixes_applied > 0 {
                 let verb = if args.dry_run {
                     "would apply"
@@ -443,7 +602,8 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
                     result.fixes_applied
                 );
                 if let Some(fixed) = &result.fixed {
-                    print!("{}", render::diff(&result.source, fixed, color));
+                    let src = input_source(input, &project).unwrap_or("");
+                    print!("{}", render::diff(src, fixed, color));
                 }
             }
             if let Some(err) = &result.write_error {
@@ -504,31 +664,36 @@ fn resolve_ignore_file(args: &Args) -> Option<PathBuf> {
     }
 }
 
-/// Print the JSON document for a run.
-fn print_json(files: &[render::JsonFile]) {
-    let value = render::json(files);
-    println!("{}", value.to_string_pretty());
-}
-
-/// One file's outcome, carried out of the worker thread.
 struct FileResult {
     path: PathBuf,
-    source: String,
     diagnostics: Vec<Diagnostic>,
     read_error: Option<String>,
     fixes_applied: usize,
-    /// The result of splicing all fixes, `Some` when any fix exists (the
-    /// text the file would become). Written to disk unless dry-run.
     fixed: Option<String>,
     write_error: Option<String>,
     apply_error: Option<String>,
 }
 
-/// One walked file: its text (or the read error) and, for a merged
-/// file, the files its bindings stand for.
+enum InputSource {
+    Owned(String),
+    Project(usize),
+    Err(String),
+}
+
+fn input_source<'a>(
+    input: &'a Input,
+    project: &'a strictix_core::project::ProjectContext,
+) -> Result<&'a str, &'a str> {
+    match &input.source {
+        InputSource::Owned(source) => Ok(source.as_str()),
+        InputSource::Project(idx) => Ok(project.sources()[*idx].source.as_str()),
+        InputSource::Err(err) => Err(err.as_str()),
+    }
+}
+
 struct Input {
     path: PathBuf,
-    source: Result<String, String>,
+    source: InputSource,
     virtuals: Option<Vec<merged::Virtual>>,
 }
 
@@ -550,14 +715,13 @@ fn process_file(
     filter: &walk::Filter,
 ) -> FileResult {
     let path = &input.path;
-    let source = match &input.source {
-        Ok(source) => source.clone(),
+    let source = match input_source(input, project) {
+        Ok(source) => source,
         Err(err) => {
             return FileResult {
                 path: path.clone(),
-                source: String::new(),
                 diagnostics: Vec::new(),
-                read_error: Some(err.clone()),
+                read_error: Some(err.to_owned()),
                 fixes_applied: 0,
                 fixed: None,
                 write_error: None,
@@ -574,7 +738,7 @@ fn process_file(
         Some(virtuals) => {
             let run = merged::lint(
                 path,
-                &source,
+                source,
                 virtuals,
                 rules,
                 config,
@@ -587,7 +751,7 @@ fn process_file(
         None => {
             let run = strictix_core::rules::lint_project(
                 rules,
-                &source,
+                source,
                 Some(path),
                 config,
                 fix_mode,
@@ -618,7 +782,6 @@ fn process_file(
 
     FileResult {
         path: path.clone(),
-        source,
         diagnostics,
         read_error: None,
         fixes_applied,

@@ -202,11 +202,16 @@ fn with_removal_fix(m: &SemanticModel, site: usize) -> Option<Fix> {
     }) {
         return None;
     }
-    let with_expr = m
-        .root()
-        .descendants()
-        .filter_map(WithExpr::cast)
-        .find(|w| w.range() == range)?;
+    let mut with_expr = None;
+    m.root().walk_containing(range.start(), |node| {
+        if let Some(w) = WithExpr::cast(node).filter(|w| w.range() == range) {
+            with_expr = Some(w);
+            true
+        } else {
+            false
+        }
+    });
+    let with_expr = with_expr?;
     let body = with_expr.body()?;
     let (root, prefix) = static_scope_chain(with_expr.scope()?, s)?;
     let start = with_expr.syntax().content_range().start();
@@ -243,7 +248,11 @@ fn with_removal_fix(m: &SemanticModel, site: usize) -> Option<Fix> {
         "replace `with {prefix};` with explicit `{prefix}.` selects"
     ))
     .edit(TextRange::new(start, body_start), "");
-    for r in m.references().iter().filter(|r| r.via_with == Some(site)) {
+    let mut edits: Vec<(usize, TextRange, String)> = Vec::new();
+    for (idx, r) in m.references_in_range_indexed(sites[site].body_range) {
+        if r.via_with != Some(site) {
+            continue;
+        }
         let name = r.name.text(s);
         if crate::reference_rules::is_global(name) {
             continue;
@@ -256,7 +265,13 @@ fn with_removal_fix(m: &SemanticModel, site: usize) -> Option<Fix> {
         {
             return None;
         }
-        fix = fix.edit(r.name.range(), format!("{prefix}.{name}"));
+        edits.push((idx, r.name.range(), format!("{prefix}.{name}")));
+    }
+    if edits.len() > 1 {
+        edits.sort_unstable_by_key(|&(idx, _, _)| idx);
+    }
+    for (_, range, rep) in edits {
+        fix = fix.edit(range, rep);
     }
     Some(fix)
 }
@@ -352,16 +367,23 @@ impl Rule for BuiltinArity {
     }
     fn check_file(&self, m: &SemanticModel, _: &LintConfig, d: &mut Vec<Diagnostic>) {
         let source = m.source();
+        if !source.contains("builtins") {
+            return;
+        }
         let apply_nodes: Vec<_> = nodes(m.root(), SyntaxKind::ApplyExpr).collect();
-        for n in apply_nodes.iter().copied() {
-            if apply_nodes.iter().any(|candidate| {
-                ApplyExpr::cast(candidate)
-                    .and_then(|a| a.func())
-                    .and_then(crate::lib_helpers::unparen)
-                    .is_some_and(
-                        |expr| matches!(expr, Expr::Apply(inner) if inner.range() == n.range()),
-                    )
-            }) {
+        let mut wrapped_inner: std::collections::HashSet<(u32, u32)> =
+            std::collections::HashSet::with_capacity(apply_nodes.len());
+        for &n in &apply_nodes {
+            if let Some(Expr::Apply(inner)) =
+                ApplyExpr::cast(n).and_then(|a| a.func()).and_then(crate::lib_helpers::unparen)
+            {
+                let r = inner.range();
+                wrapped_inner.insert((r.start(), r.end()));
+            }
+        }
+        for n in apply_nodes {
+            let nr = n.range();
+            if wrapped_inner.contains(&(nr.start(), nr.end())) {
                 continue;
             }
             let Some(apply) = ApplyExpr::cast(n) else {

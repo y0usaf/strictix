@@ -26,13 +26,10 @@ fn shadowed(
     model: &SemanticModel<'_>,
 ) -> bool {
     let name = token.text(model.source());
-    for node in model
-        .root()
-        .descendants()
-        .filter(|node| node.range().contains(token.range().start()))
-    {
+    let offset = token.range().start();
+    model.root().walk_containing(offset, |node| {
         if expected.is_some_and(|binding| node.range().contains(binding.range().start())) {
-            continue;
+            return false;
         }
         if let Some(expr) = LetExpr::cast(node) {
             if expr.bindings().is_none_or(|bindings| {
@@ -66,8 +63,8 @@ fn shadowed(
                 return true;
             }
         }
-    }
-    false
+        false
+    })
 }
 
 /// Verify resolution without overlooking forward or quoted local declarations.
@@ -91,25 +88,25 @@ pub(crate) fn value<'a>(token: &SyntaxToken, model: &SemanticModel<'a>) -> Optio
     {
         return None;
     }
-    model.root().descendants().find_map(|node| {
-        let binding = Binding::cast(node)?;
-        let mut path = binding.attrpath()?.elements();
-        match path.next()? {
-            AttrName::Ident(name)
-                if name.range() == resolved.name.range() && path.next().is_none() =>
-            {
-                binding.value()
-            }
-            _ => None,
+    let binding = model
+        .root()
+        .find_innermost_at(strictix_syntax::SyntaxKind::Binding, resolved.name.range().start())
+        .and_then(Binding::cast)?;
+    let mut path = binding.attrpath()?.elements();
+    match path.next()? {
+        AttrName::Ident(name)
+            if name.range() == resolved.name.range() && path.next().is_none() =>
+        {
+            binding.value()
         }
-    })
+        _ => None,
+    }
 }
 
 /// Check a global name without overlooking a forward local declaration.
 pub(crate) fn is_unshadowed(token: &SyntaxToken, model: &SemanticModel<'_>) -> bool {
-    model.resolve(token).is_none()
-        && !model.references().iter().any(|reference| {
-            reference.name.range() == token.range() && reference.via_with.is_some()
-        })
+    model
+        .reference_at(token.range())
+        .is_some_and(|reference| reference.resolved.is_none() && reference.via_with.is_none())
         && !shadowed(token, None, model)
 }

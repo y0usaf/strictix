@@ -21,6 +21,9 @@ const SUPPRESSION_PREFIX: &str = "# strictix: disable-next-line=";
 /// that do not match a diagnostic are ignored. Matching is by source line,
 /// never by byte proximity, so a suppression cannot affect its own line.
 fn apply_suppressions(source: &str, diags: &mut Vec<Diagnostic>) {
+    if diags.is_empty() || !source.contains(SUPPRESSION_PREFIX) {
+        return;
+    }
     let mut suppressed_lines = std::collections::HashMap::<usize, Vec<&str>>::new();
     for (line_no, line) in source.lines().enumerate() {
         let trimmed = line.trim();
@@ -176,25 +179,51 @@ fn run_rules_project_inner(
         apply_suppressions(source, diags);
         return;
     }
+    const NUM_KINDS: usize = SyntaxKind::Eof as usize + 1;
+    let mut kind_buckets: [Vec<(usize, &dyn Rule)>; NUM_KINDS] =
+        std::array::from_fn(|_| Vec::new());
+    let mut node_slots: Vec<Option<usize>> = Vec::with_capacity(rules.len());
+    let mut active_node_count = 0usize;
     for rule in rules {
-        if !config.is_enabled(rule.code())
-            || (!rule.default_enabled() && !config.enabled.iter().any(|code| code == rule.code()))
-        {
+        let enabled = config.is_enabled(rule.code())
+            && (rule.default_enabled() || config.enabled.iter().any(|code| code == rule.code()));
+        if !enabled {
+            node_slots.push(None);
             continue;
         }
-        match rule.node_kind() {
-            Some(kind) => {
-                for node in tree.descendants() {
-                    if node.kind() == kind {
-                        rule.check_node(node, source, diags);
-                    }
-                }
-            }
-            None => rule.check_file_project(model, config, project, diags),
+        if let Some(kind) = rule.node_kind() {
+            let slot = active_node_count;
+            active_node_count += 1;
+            kind_buckets[kind as usize].push((slot, rule.as_ref()));
+            node_slots.push(Some(slot));
+        } else {
+            node_slots.push(Some(usize::MAX));
         }
     }
-    let trees = crate::generated::tree_ranges(model);
-    diags.retain(|diag| !crate::generated::inside(&trees, diag.range));
+    let mut node_diags = if active_node_count > 0 {
+        let mut buckets: Vec<Vec<Diagnostic>> = vec![Vec::new(); active_node_count];
+        for node in tree.descendants() {
+            for &(slot, rule) in &kind_buckets[node.kind() as usize] {
+                rule.check_node(node, source, &mut buckets[slot]);
+            }
+        }
+        buckets
+    } else {
+        Vec::new()
+    };
+    for (rule, slot) in rules.iter().zip(node_slots) {
+        match slot {
+            None => {}
+            Some(usize::MAX) => rule.check_file_project(model, config, project, diags),
+            Some(slot) => diags.append(&mut node_diags[slot]),
+        }
+    }
+    if !diags.is_empty() {
+        let trees = crate::generated::tree_ranges(model);
+        if !trees.is_empty() {
+            diags.retain(|diag| !crate::generated::inside(&trees, diag.range));
+        }
+    }
     apply_suppressions(source, diags);
 }
 
@@ -263,6 +292,20 @@ pub fn lint_project(
     fix: bool,
     project: Option<&crate::project::ProjectContext>,
 ) -> LintRun {
+    if !fix {
+        let tree = parse(source);
+        let mut diags = Vec::new();
+        let model = SemanticModel::new(source, &tree).with_path(path);
+        run_rules_project(rules, &tree, &model, config, source, project, &mut diags);
+        diags.sort_by_key(|d| d.range.start());
+        return LintRun {
+            diagnostics: diags,
+            fixed: None,
+            passes: 0,
+            error: None,
+        };
+    }
+
     let mut context = Context::new(source.to_string());
     let mut diagnostics = Vec::new();
     let mut passes = 0usize;

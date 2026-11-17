@@ -26,6 +26,8 @@
 //! binding dynamic, which is excluded because a collision cannot be
 //! proven.
 
+use std::borrow::Cow;
+use std::collections::HashMap;
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -37,17 +39,121 @@ use strictix_syntax::{
     TextRange,
 };
 
-/// The one path a binding container assigns in a known way.
-struct StaticAttr {
-    /// The bound dotted path, normalized to keys (idents and plain
-    /// quoted strings both become their text).
-    path: Vec<String>,
-    /// Whether the binding is a bare attrset (or rec attrset) literal
-    /// value. Only such leaves legally merge with dotted children in
-    /// Nix, so they are exempt from prefix collisions.
+struct LinearAttr<'a> {
+    path: Vec<Cow<'a, str>>,
     is_attrset_literal: bool,
-    /// Duplicate inherit names belong to `duplicate-inherit`.
     is_inherit: bool,
+}
+
+struct TrieNode<'a> {
+    children: HashMap<Cow<'a, str>, u32>,
+    has_non_inherit: bool,
+    has_inherit: bool,
+    first_non_attrset_idx: u32,
+    first_descendant_idx: u32,
+}
+
+impl<'a> TrieNode<'a> {
+    fn new() -> Self {
+        Self {
+            children: HashMap::new(),
+            has_non_inherit: false,
+            has_inherit: false,
+            first_non_attrset_idx: u32::MAX,
+            first_descendant_idx: u32::MAX,
+        }
+    }
+}
+
+struct AttrTrie<'a> {
+    nodes: Vec<TrieNode<'a>>,
+    count: u32,
+}
+
+impl<'a> AttrTrie<'a> {
+    fn new() -> Self {
+        Self {
+            nodes: vec![TrieNode::new()],
+            count: 0,
+        }
+    }
+
+    fn insert_and_check(
+        &mut self,
+        path: &[Cow<'a, str>],
+        is_attrset_literal: bool,
+        is_inherit: bool,
+    ) -> Option<String> {
+        let my_idx = self.count;
+        self.count += 1;
+        let mut cur = 0usize;
+        let mut best_prefix_idx = u32::MAX;
+        let mut best_prefix_depth = 0usize;
+        let len = path.len();
+        for (depth, seg) in path.iter().enumerate() {
+            let next = if let Some(&child) = self.nodes[cur].children.get(seg.as_ref()) {
+                child as usize
+            } else {
+                let child = self.nodes.len() as u32;
+                self.nodes.push(TrieNode::new());
+                self.nodes[cur].children.insert(seg.clone(), child);
+                child as usize
+            };
+            if depth + 1 < len {
+                let p_idx = self.nodes[next].first_non_attrset_idx;
+                if p_idx < best_prefix_idx {
+                    best_prefix_idx = p_idx;
+                    best_prefix_depth = depth + 1;
+                }
+                if self.nodes[next].first_descendant_idx == u32::MAX {
+                    self.nodes[next].first_descendant_idx = my_idx;
+                }
+            }
+            cur = next;
+        }
+        let node = &mut self.nodes[cur];
+        let message = if node.has_non_inherit || (!is_inherit && node.has_inherit) {
+            Some(join_cow_path(path))
+        } else {
+            let desc_idx = if !is_attrset_literal {
+                node.first_descendant_idx
+            } else {
+                u32::MAX
+            };
+            if best_prefix_idx < desc_idx {
+                Some(join_cow_path(&path[..best_prefix_depth]))
+            } else if desc_idx < u32::MAX {
+                Some(join_cow_path(path))
+            } else {
+                None
+            }
+        };
+        if is_inherit {
+            node.has_inherit = true;
+        } else {
+            node.has_non_inherit = true;
+        }
+        if !is_attrset_literal && node.first_non_attrset_idx == u32::MAX {
+            node.first_non_attrset_idx = my_idx;
+        }
+        message
+    }
+}
+
+enum ContainerSeen<'a> {
+    Linear(Vec<LinearAttr<'a>>),
+    Trie(AttrTrie<'a>),
+}
+
+fn join_cow_path(path: &[Cow<'_, str>]) -> String {
+    let mut out = String::new();
+    for (i, seg) in path.iter().enumerate() {
+        if i > 0 {
+            out.push('.');
+        }
+        out.push_str(seg);
+    }
+    out
 }
 
 /// Flags an attribute path defined twice inside one binding container.
@@ -96,46 +202,40 @@ fn check_container<'a>(
     source: &'a str,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let mut seen: Vec<StaticAttr> = Vec::new();
+    let mut seen = ContainerSeen::Linear(Vec::new());
+    let mut path_buf: Vec<Cow<'a, str>> = Vec::with_capacity(4);
     for item in items {
         match item {
             AttrItem::Binding(binding) => {
                 let Some(attrpath) = binding.attrpath() else {
                     continue;
                 };
-                let Some((path, range)) = static_attrpath(attrpath, source) else {
+                path_buf.clear();
+                let Some(range) = static_attrpath_into(attrpath, source, &mut path_buf) else {
                     continue;
                 };
                 let is_attrset_literal = matches!(
                     binding.value(),
                     Some(Expr::Attrset(_)) | Some(Expr::RecAttrset(_))
                 );
-                record(path, range, is_attrset_literal, false, &mut seen, diags);
+                record(&path_buf, range, is_attrset_literal, false, &mut seen, diags);
             }
             AttrItem::Inherit(inherit) => {
                 for name in inherit.names() {
-                    record(
-                        vec![name.text(source).to_string()],
-                        name.range(),
-                        false,
-                        true,
-                        &mut seen,
-                        diags,
-                    );
+                    path_buf.clear();
+                    path_buf.push(Cow::Borrowed(name.text(source)));
+                    record(&path_buf, name.range(), false, true, &mut seen, diags);
                 }
             }
         }
     }
 }
 
-/// Decode a binding's attrpath into a static dotted path, or None when
-/// any element is dynamic (`${...}` or a string containing an
-/// interpolation), in which case the collision cannot be proven.
-fn static_attrpath<'a>(
+fn static_attrpath_into<'a>(
     attrpath: Attrpath<'a>,
     source: &'a str,
-) -> Option<(Vec<String>, TextRange)> {
-    let mut path = Vec::new();
+    path: &mut Vec<Cow<'a, str>>,
+) -> Option<TextRange> {
     let mut first: Option<TextRange> = None;
     for element in attrpath.elements() {
         match element {
@@ -143,7 +243,7 @@ fn static_attrpath<'a>(
                 if first.is_none() {
                     first = Some(token.range());
                 }
-                path.push(token.text(source).to_string());
+                path.push(Cow::Borrowed(token.text(source)));
             }
             AttrName::Str(string) => {
                 if string.parts().any(|p| matches!(p, StringPart::Interp(_))) {
@@ -152,47 +252,65 @@ fn static_attrpath<'a>(
                 if first.is_none() {
                     first = Some(string.syntax().content_range());
                 }
-                path.push(decode_string(string, source));
+                path.push(Cow::Owned(decode_string(string, source)));
             }
             AttrName::Interp(_) => return None,
         }
     }
-    Some((path, first?))
+    first
 }
 
-/// Record one static path, reporting a duplicate when it collides with a
-/// previously seen binding in this container.
-fn record(
-    path: Vec<String>,
+fn record<'a>(
+    path: &[Cow<'a, str>],
     range: TextRange,
     is_attrset_literal: bool,
     is_inherit: bool,
-    seen: &mut Vec<StaticAttr>,
+    seen: &mut ContainerSeen<'a>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let mut message: Option<String> = None;
-    for prior in seen.iter() {
-        if prior.path == path && !(prior.is_inherit && is_inherit) {
-            message = Some(path.join("."));
-            break;
+    if let ContainerSeen::Linear(list) = seen {
+        if list.len() >= 16 {
+            let mut trie = AttrTrie::new();
+            for entry in list.drain(..) {
+                trie.insert_and_check(&entry.path, entry.is_attrset_literal, entry.is_inherit);
+            }
+            *seen = ContainerSeen::Trie(trie);
         }
     }
-    if message.is_none() {
-        for prior in seen.iter() {
-            if prior.path.len() < path.len() && path.starts_with(&prior.path) {
-                if !prior.is_attrset_literal {
-                    message = Some(prior.path.join("."));
+    let message = match seen {
+        ContainerSeen::Linear(list) => {
+            let mut message: Option<String> = None;
+            for prior in list.iter() {
+                if prior.path.as_slice() == path && !(prior.is_inherit && is_inherit) {
+                    message = Some(join_cow_path(path));
                     break;
                 }
-            } else if path.len() < prior.path.len()
-                && prior.path.starts_with(&path)
-                && !is_attrset_literal
-            {
-                message = Some(path.join("."));
-                break;
             }
+            if message.is_none() {
+                for prior in list.iter() {
+                    if prior.path.len() < path.len() && path.starts_with(&prior.path) {
+                        if !prior.is_attrset_literal {
+                            message = Some(join_cow_path(&prior.path));
+                            break;
+                        }
+                    } else if path.len() < prior.path.len()
+                        && prior.path.starts_with(path)
+                        && !is_attrset_literal
+                    {
+                        message = Some(join_cow_path(path));
+                        break;
+                    }
+                }
+            }
+            list.push(LinearAttr {
+                path: path.to_vec(),
+                is_attrset_literal,
+                is_inherit,
+            });
+            message
         }
-    }
+        ContainerSeen::Trie(trie) => trie.insert_and_check(path, is_attrset_literal, is_inherit),
+    };
     if let Some(name) = message {
         diags.push(Diagnostic::new(
             "duplicate-attribute",
@@ -201,11 +319,6 @@ fn record(
             range,
         ));
     }
-    seen.push(StaticAttr {
-        path,
-        is_attrset_literal,
-        is_inherit,
-    });
 }
 
 /// Unescape a plain `"..."` string into its attribute-name value. Only

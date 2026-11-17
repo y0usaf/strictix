@@ -41,14 +41,14 @@ impl Rule for UnnecessaryRec {
             .filter(|n| n.kind() == K::RecAttrsetExpr)
         {
             let range = node.content_range();
-            let uses_rec_scope = model.references().iter().any(|reference| {
-                if !range.contains(reference.name.range().start()) {
-                    return false;
-                }
-                model.resolve(reference.name).is_some_and(|binding| {
-                    binding.kind == BindingKind::RecAttr
-                        && range.contains(binding.name.range().start())
-                })
+            let uses_rec_scope = model.references_in_range(range).any(|reference| {
+                reference
+                    .resolved
+                    .map(|i| &model.bindings()[i])
+                    .is_some_and(|binding| {
+                        binding.kind == BindingKind::RecAttr
+                            && range.contains(binding.name.range().start())
+                    })
             });
             if uses_rec_scope {
                 continue;
@@ -102,42 +102,57 @@ impl Rule for UnusedRecBinding {
         {
             let range = node.content_range();
             let bindings: Vec<_> = model
-                .bindings()
-                .iter()
+                .bindings_in_range(range)
                 .filter(|binding| {
                     binding.kind == BindingKind::RecAttr
                         && range.contains(binding.name.range().start())
                 })
                 .collect();
-            let participates = |binding: &&strictix_core::semantic::Binding<'_>| {
-                let is_referenced = binding
-                    .references
-                    .iter()
-                    .any(|reference| range.contains(reference.start()));
-                let references_peer = model
-                    .root()
-                    .descendants()
-                    .find(|candidate| {
-                        candidate.kind() == K::Binding
-                            && candidate.range().contains(binding.name.range().start())
-                    })
-                    .and_then(strictix_syntax::Binding::cast)
-                    .and_then(|syntax_binding| syntax_binding.value())
-                    .is_some_and(|value| {
-                        model.references().iter().any(|reference| {
-                            value.range().contains(reference.name.range().start())
-                                && model.resolve(reference.name).is_some_and(|target| {
-                                    target.kind == BindingKind::RecAttr
-                                        && range.contains(target.name.range().start())
+            let participates: Vec<bool> = bindings
+                .iter()
+                .map(|binding| {
+                    let is_referenced = binding
+                        .references
+                        .iter()
+                        .any(|reference| range.contains(reference.start()));
+                    if is_referenced {
+                        return true;
+                    }
+                    let mut syntax_binding = None;
+                    model
+                        .root()
+                        .walk_containing(binding.name.range().start(), |candidate| {
+                            if candidate.kind() == K::Binding {
+                                syntax_binding = strictix_syntax::Binding::cast(candidate);
+                                true
+                            } else {
+                                false
+                            }
+                        });
+                    syntax_binding
+                        .and_then(|b| b.value())
+                        .is_some_and(|value| {
+                            model
+                                .references_in_range(value.range())
+                                .any(|reference| {
+                                    reference
+                                        .resolved
+                                        .map(|i| &model.bindings()[i])
+                                        .is_some_and(|target| {
+                                            target.kind == BindingKind::RecAttr
+                                                && range.contains(target.name.range().start())
+                                        })
                                 })
                         })
-                    });
-                is_referenced || references_peer
-            };
-            if !bindings.iter().any(participates) {
+                })
+                .collect();
+            if !participates.iter().any(|&p| p) {
                 continue;
             }
-            for binding in bindings.iter().filter(|binding| !participates(binding)) {
+            for (binding, &p) in bindings.iter().zip(&participates) {
+                if p {
+                    continue;
+                }
                 let name = binding.name.text(source);
                 diags.push(Diagnostic::new(
                     self.code(),
