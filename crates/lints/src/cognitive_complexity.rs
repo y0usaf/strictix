@@ -25,7 +25,12 @@ fn helper_call<'a>(
     {
         return None;
     }
-    library_member(model, condition.func()?)?;
+    if !matches!(
+        library_member(model, condition.func()?)?,
+        "mkIf" | "optional" | "optionals" | "optionalAttrs" | "optionalString"
+    ) {
+        return None;
+    }
     Some((call, condition))
 }
 
