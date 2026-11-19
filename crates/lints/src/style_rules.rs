@@ -227,8 +227,12 @@ impl Rule for CollapsibleLetIn {
         let Some(Expr::Let(inner)) = let_expr.body() else {
             return;
         };
-        let outer_names = let_bound_names(let_expr, source);
-        let inner_names = let_bound_names(inner, source);
+        let Some(outer_names) = let_bound_names(let_expr, source) else {
+            return;
+        };
+        let Some(inner_names) = let_bound_names(inner, source) else {
+            return;
+        };
         if inner_names.iter().any(|n| outer_names.contains(n)) {
             return;
         }
@@ -263,28 +267,45 @@ impl Rule for CollapsibleLetIn {
     }
 }
 
-fn let_bound_names<'s>(let_expr: LetExpr<'_>, source: &'s str) -> Vec<&'s str> {
+fn inherit_has_non_ident_attr(inherit: InheritStmt<'_>) -> bool {
+    let node = inherit.syntax();
+    let start = node
+        .children()
+        .iter()
+        .position(|c| c.kind() == K::RParen)
+        .or_else(|| node.children().iter().position(|c| c.kind() == K::KwInherit))
+        .map_or(1, |i| i + 1);
+    node.children()[start..]
+        .iter()
+        .any(|c| matches!(c, NodeOrToken::Node(_)))
+}
+
+fn let_bound_names<'s>(let_expr: LetExpr<'_>, source: &'s str) -> Option<Vec<&'s str>> {
     let mut names = Vec::new();
     let Some(bindings) = let_expr.bindings() else {
-        return names;
+        return Some(names);
     };
     for item in bindings.items() {
         match item {
             AttrItem::Binding(binding) => {
-                if let Some(AttrName::Ident(tok)) =
+                let Some(AttrName::Ident(tok)) =
                     binding.attrpath().and_then(|ap| ap.elements().next())
-                {
-                    names.push(tok.text(source));
-                }
+                else {
+                    return None;
+                };
+                names.push(tok.text(source));
             }
             AttrItem::Inherit(inherit) => {
+                if inherit_has_non_ident_attr(inherit) {
+                    return None;
+                }
                 for tok in inherit.names() {
                     names.push(tok.text(source));
                 }
             }
         }
     }
-    names
+    Some(names)
 }
 
 pub struct EtaReduction;
@@ -481,7 +502,7 @@ impl Rule for EmptyInherit {
         if inherit.source().is_some() {
             return;
         }
-        if inherit.names().count() != 0 {
+        if inherit.names().count() != 0 || inherit_has_non_ident_attr(inherit) {
             return;
         }
         let replacement = crate::safe_delete_replacement(source, node.range());

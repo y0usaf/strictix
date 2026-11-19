@@ -407,6 +407,18 @@ fn collapsible_let_in_skips_shadowing_or_capture() {
         run("let y = x; in let x = 2; in y").is_empty(),
         "collapsing would silently capture x in y"
     );
+    assert!(
+        run(r#"let "a" = 1; in let "a" = 2; in a"#).is_empty(),
+        "collapsing quoted let heads would create a duplicate-attribute error"
+    );
+    assert!(
+        run(r#"let "a" = 1; in let a = 2; in a"#).is_empty(),
+        "collapsing quoted and unquoted heads for the same name would collide"
+    );
+    assert!(
+        run(r#"let a = 1; in let inherit "a"; in a"#).is_empty(),
+        "collapsing quoted inherit heads would collide"
+    );
 }
 
 #[test]
