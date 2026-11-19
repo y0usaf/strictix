@@ -151,16 +151,20 @@ fn imports_respect_quoted_config_and_library_shadowing() {
 }
 
 #[test]
-fn redundant_priority_fixes_identical_nesting_and_flags_conflicts() {
+fn redundant_priority_flags_nesting_and_conflicts_without_autofix() {
     use strictix_lints::module_rules::RedundantPriority;
     let rules: Vec<Box<dyn strictix_core::rules::Rule>> = vec![Box::new(RedundantPriority)];
 
     let src1 = "{ lib, ... }: { a = lib.mkDefault (lib.mkDefault 1); }";
     let res1 = strictix_core::rules::lint(&rules, src1, None, &LintConfig::default(), true);
     assert!(res1.error.is_none());
+    assert_eq!(res1.diagnostics.len(), 1);
+    assert!(res1.diagnostics[0]
+        .message
+        .contains("redundant nested `lib.mkDefault` wrapper"));
     assert_eq!(
-        res1.fixed.as_deref(),
-        Some("{ lib, ... }: { a = lib.mkDefault 1; }")
+        res1.fixed, None,
+        "diagnostic-only: nested override attrsets are observable"
     );
 
     let src2 = "{ lib, ... }: { a = lib.mkForce (lib.mkDefault 1); }";

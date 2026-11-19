@@ -1,7 +1,6 @@
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
-    fix::Fix,
     rules::Rule,
     semantic::SemanticModel,
 };
@@ -382,7 +381,6 @@ impl Rule for RedundantPriority {
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
-        let source = model.source();
         for node in model.root().descendants() {
             if node.kind() != strictix_syntax::SyntaxKind::ApplyExpr {
                 continue;
@@ -393,9 +391,6 @@ impl Rule for RedundantPriority {
             if let Some((outer_kind, inner_arg)) = priority_call(model, expr) {
                 if let Some((inner_kind, _)) = priority_call(model, inner_arg) {
                     if outer_kind == inner_kind {
-                        let inner_text = unparen(inner_arg)
-                            .map(|e| e.text(source).trim())
-                            .unwrap_or_else(|| inner_arg.text(source).trim());
                         diags.push(
                             Diagnostic::new(
                                 self.code(),
@@ -403,10 +398,7 @@ impl Rule for RedundantPriority {
                                 format!("redundant nested `{}` wrapper", outer_kind.label()),
                                 node.content_range(),
                             )
-                            .with_fix(
-                                Fix::new("remove redundant priority wrapper")
-                                    .edit(node.content_range(), inner_text),
-                            ),
+                            .with_help(format!("use a single `{}` wrapper", outer_kind.label())),
                         );
                     } else {
                         diags.push(
