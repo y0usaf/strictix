@@ -1,13 +1,3 @@
-//! Path-literal lints: hallucinated (nonexistent) paths, the `a/b`
-//! division trap, and impure `<...>` search paths.
-//!
-//! All three are file rules over the raw token stream: Path and
-//! SearchPath are single tokens, but the lexer splits interpolated
-//! paths (`./x/${v}`) and numeric division traps (`4/2`) into adjacent
-//! fragments, so classifying one Path token requires its physical
-//! neighbors — parent-node context alone cannot tell a whole path
-//! literal from a fragment.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -20,7 +10,6 @@ use strictix_syntax::{
     ApplyExpr, AstNode, NodeOrToken, SyntaxKind as K, SyntaxNode, SyntaxToken, TextRange,
 };
 
-/// Flags path literals that do not exist on disk.
 pub struct DanglingPath;
 
 impl Rule for DanglingPath {
@@ -130,7 +119,6 @@ impl DanglingPath {
     }
 }
 
-/// Flags `4/2`-style path literals that look like intended division.
 pub struct AccidentalPathDivision;
 
 impl Rule for AccidentalPathDivision {
@@ -200,15 +188,6 @@ impl Rule for AccidentalPathDivision {
     }
 }
 
-/// Flags `<nixpkgs>`-style search-path references.
-///
-/// A `<...>` literal is resolved by scanning NIX_PATH when the
-/// expression is *evaluated*, so the result depends on the caller's
-/// environment: two machines evaluating the same file can get different
-/// nixpkgs. Pure evaluation (flakes) forbids NIX_PATH lookups outright,
-/// so the reference is also a hard error there. There is no safe
-/// mechanical rewrite — the right replacement (flake input, pinned
-/// fetcher, function argument) is a design decision — hence no fix.
 pub struct SearchPathReference;
 
 impl Rule for SearchPathReference {
@@ -252,23 +231,12 @@ impl Rule for SearchPathReference {
     }
 }
 
-/// Every token in source order, trivia included. The lexer splits
-/// composite paths into physically adjacent fragments, so path rules
-/// need each Path token's flat-stream neighbors — which tree-shaped
-/// walks cannot provide across node boundaries.
 fn all_tokens(node: &SyntaxNode) -> Vec<&SyntaxToken> {
     let mut tokens = Vec::new();
     walk_tokens(node, &mut |t| tokens.push(t));
     tokens
 }
 
-/// Whether the Path token at `idx` is a whole path literal on its own.
-///
-/// Fragments betray themselves by touching a neighbor with no gap:
-/// `./x/${v}` lexes as Path `./x` + Slash + InterpStart..., `4/2` as
-/// Int `4` + Path `/2`, and `/a/${v}/b` puts InterpEnd right before the
-/// trailing Path `/b`. Trivia between tokens breaks adjacency, which is
-/// exactly right — `./x /2` really is two separate expressions.
 fn is_whole_path(tokens: &[&SyntaxToken], idx: usize) -> bool {
     let tok = tokens[idx];
     if idx > 0 {
@@ -289,10 +257,6 @@ fn is_whole_path(tokens: &[&SyntaxToken], idx: usize) -> bool {
     true
 }
 
-/// The trimmed argument text of every `pathExists` application in the
-/// file. Matched by callee suffix so the bare builtin and every
-/// namespaced spelling (`builtins.pathExists`, `lib.pathExists`,
-/// `lib.filesystem.pathExists`) all count.
 fn path_exists_arguments<'a>(root: &'a SyntaxNode, source: &'a str) -> Vec<&'a str> {
     let mut args = Vec::new();
     walk_nodes(root, &mut |node| {
@@ -314,10 +278,6 @@ fn path_exists_arguments<'a>(root: &'a SyntaxNode, source: &'a str) -> Vec<&'a s
     args
 }
 
-/// Whether `tok` is the argument of an `import` call. Import sites are
-/// recorded by the semantic model; containment (rather than equality)
-/// tolerates the leading trivia that node ranges flush into the
-/// argument expression.
 fn is_import_target(model: &SemanticModel, tok: &SyntaxToken) -> bool {
     model.import_sites().iter().any(|site| {
         site.path_range.start() <= tok.range().start() && tok.range().end() <= site.path_range.end()
@@ -336,6 +296,72 @@ fn walk_tokens<'a>(node: &'a SyntaxNode, f: &mut impl FnMut(&'a SyntaxToken)) {
         match child {
             NodeOrToken::Token(t) => f(t),
             NodeOrToken::Node(n) => walk_tokens(n, f),
+        }
+    }
+}
+
+pub struct UnfilteredSrc;
+
+impl Rule for UnfilteredSrc {
+    fn code(&self) -> &'static str {
+        "unfiltered-src"
+    }
+
+    fn name(&self) -> &'static str {
+        "Unfiltered source directory"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags `src = ./.` (or `src = ../.`), which copies the entire directory — including build artifacts and VCS metadata — into the Nix store on every evaluation. Opt-in."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn default_enabled(&self) -> bool {
+        false
+    }
+
+    fn node_kind(&self) -> Option<K> {
+        Some(K::Binding)
+    }
+
+    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
+        let Some(binding) = strictix_syntax::Binding::cast(node) else {
+            return;
+        };
+        let Some(attrpath) = binding.attrpath() else {
+            return;
+        };
+        let mut elems = attrpath.elements();
+        let Some(strictix_syntax::AttrName::Ident(name)) = elems.next() else {
+            return;
+        };
+        if elems.next().is_some() || name.text(source) != "src" {
+            return;
+        }
+        let Some(val) = binding.value().and_then(crate::lib_helpers::unparen) else {
+            return;
+        };
+        let strictix_syntax::Expr::Path(tok) = val else {
+            return;
+        };
+        let text = tok.text(source);
+        if text == "./." || text == "../." {
+            diags.push(
+                Diagnostic::new(
+                    self.code(),
+                    self.severity(),
+                    format!(
+                        "`src = {text};` copies the entire directory into the Nix store without filtering"
+                    ),
+                    binding.syntax().content_range(),
+                )
+                .with_help(
+                    "filter the source tree with `lib.fileset.toSource` or `lib.cleanSource ./.`",
+                ),
+            );
         }
     }
 }

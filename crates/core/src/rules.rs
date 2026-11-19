@@ -1,10 +1,3 @@
-//! Rule trait, the dispatch loop, and the one registry mechanism.
-//!
-//! A rule is either a *node rule* (fires once per node of one
-//! [`SyntaxKind`]) or a *file rule* (fires once per file with the lazy
-//! [`SemanticModel`]). The registry is declared with the `rules!` macro
-//! — one declaration mechanism, no hand-wired special cases.
-
 use crate::config::LintConfig;
 use crate::context::Context;
 use crate::diagnostic::{Diagnostic, Severity};
@@ -14,12 +7,6 @@ use strictix_syntax::{parse, SyntaxKind, SyntaxNode};
 
 const SUPPRESSION_PREFIX: &str = "# strictix: disable-next-line=";
 
-/// Remove diagnostics covered by an immediately preceding suppression comment.
-///
-/// The deliberately narrow syntax is a full-line comment of the form
-/// `# strictix: disable-next-line=rule-code`; malformed directives and codes
-/// that do not match a diagnostic are ignored. Matching is by source line,
-/// never by byte proximity, so a suppression cannot affect its own line.
 fn apply_suppressions(source: &str, diags: &mut Vec<Diagnostic>) {
     if diags.is_empty() || !source.contains(SUPPRESSION_PREFIX) {
         return;
@@ -50,39 +37,24 @@ fn apply_suppressions(source: &str, diags: &mut Vec<Diagnostic>) {
     });
 }
 
-/// A single lint rule.
-///
-/// Node rules override [Self::node_kind] and [Self::check_node]; file
-/// rules override [Self::check_file]. The default bodies do nothing, so
-/// a rule implements only what it needs.
 pub trait Rule: Send + Sync {
-    /// Kebab-case unique id, e.g. `"unused-let-binding"`.
-    fn code(&self) -> &'static str;
+        fn code(&self) -> &'static str;
 
-    /// Short human title.
-    fn name(&self) -> &'static str;
+        fn name(&self) -> &'static str;
 
-    /// What the rule catches and why (1-3 sentences).
-    fn description(&self) -> &'static str;
+        fn description(&self) -> &'static str;
 
-    /// Severity of the diagnostics this rule emits.
-    fn severity(&self) -> Severity;
+        fn severity(&self) -> Severity;
 
-    /// Whether this rule runs without an explicit configuration opt-in.
-    fn default_enabled(&self) -> bool {
+        fn default_enabled(&self) -> bool {
         true
     }
 
-    /// `Some(kind)` makes this a node rule: [Self::check_node] fires
-    /// once per node of that kind. `None` makes it a file rule:
-    /// [Self::check_file] fires once per file.
-    fn node_kind(&self) -> Option<SyntaxKind> {
+        fn node_kind(&self) -> Option<SyntaxKind> {
         None
     }
 
-    /// Inspect one node of [Self::node_kind]. Node rules must not touch
-    /// the semantic model (it is lazy and only file rules build it).
-    fn check_node(&self, _node: &SyntaxNode, _source: &str, _diags: &mut Vec<Diagnostic>) {}
+        fn check_node(&self, _node: &SyntaxNode, _source: &str, _diags: &mut Vec<Diagnostic>) {}
 
     fn check_file(
         &self,
@@ -92,9 +64,7 @@ pub trait Rule: Send + Sync {
     ) {
     }
 
-    /// Inspect a file with optional project-wide static context. The default
-    /// preserves the single-file rule API.
-    fn check_file_project(
+        fn check_file_project(
         &self,
         model: &SemanticModel,
         config: &LintConfig,
@@ -104,9 +74,7 @@ pub trait Rule: Send + Sync {
         self.check_file(model, config, diags);
     }
 
-    /// Inspect a file the walk reached that is not Nix: its path and its
-    /// text (empty when it is not UTF-8).
-    fn check_path(
+        fn check_path(
         &self,
         _path: &std::path::Path,
         _source: &str,
@@ -116,7 +84,6 @@ pub trait Rule: Send + Sync {
     }
 }
 
-/// Run every enabled rule's [Rule::check_path] over one non-Nix file.
 pub fn run_path_rules(
     rules: &[Box<dyn Rule>],
     path: &std::path::Path,
@@ -135,12 +102,6 @@ pub fn run_path_rules(
     diags
 }
 
-/// Run every enabled rule over one file.
-///
-/// Node rules fire once per node of their kind, in source order (the
-/// `descendants()` pre-order walk). File rules fire exactly once each,
-/// receiving the semantic model — which node rules never touch, so the
-/// model is only built when at least one file rule is enabled.
 pub fn run_rules(
     rules: &[Box<dyn Rule>],
     tree: &SyntaxNode,
@@ -241,39 +202,15 @@ fn syntax_diagnostics(tree: &SyntaxNode, diags: &mut Vec<Diagnostic>) -> bool {
     fatal
 }
 
-/// Cap on fix passes. A rule whose fix re-triggers itself (a rule bug)
-/// would otherwise loop forever; ten passes is far beyond any real
-/// composition chain.
 pub const MAX_FIX_PASSES: usize = 10;
 
-/// Result of linting one file through the engine.
 pub struct LintRun {
-    /// Findings from the first pass — what the user sees.
-    pub diagnostics: Vec<Diagnostic>,
-    /// Final text, `Some` only when it differs from the input.
-    pub fixed: Option<String>,
-    /// Number of fix passes committed (zero in check mode).
-    pub passes: usize,
-    /// Set when a fix pass's edits overlap or go out of bounds. The
-    /// context is rolled back to the input, so `fixed` is `None`.
-    pub error: Option<FixError>,
+        pub diagnostics: Vec<Diagnostic>,
+        pub fixed: Option<String>,
+        pub passes: usize,
+        pub error: Option<FixError>,
 }
 
-/// The lint engine: the single entry point for one file.
-///
-/// Every path — `check` and `fix` — routes through here. The source
-/// text is the host-owned context ([`Context`]); rules read it through
-/// derived views (tree + model) and commit effects (fixes = text
-/// edits). `fix = false` is a single read-only pass. `fix = true` is
-/// the reactive loop: each pass collects fixes, commits them as one
-/// mutation, and re-runs rules on the changed text to a fixpoint, so a
-/// fix that reveals another finding is caught. Stops when a pass
-/// produces no fixes, or after [`MAX_FIX_PASSES`].
-///
-/// # Errors
-///
-/// Returns [`FixError`] when a pass's edits overlap or go out of bounds
-/// — the same validation as the one-shot [`crate::fix::apply_fixes`].
 pub fn lint(
     rules: &[Box<dyn Rule>],
     source: &str,
@@ -326,11 +263,7 @@ pub fn lint_project(
         );
 
         let edits: Vec<TextEdit> = if fix {
-            diags
-                .iter()
-                .filter_map(|d| d.fix.as_ref())
-                .flat_map(|f| f.edits.iter().cloned())
-                .collect()
+            select_pass_edits(&diags)
         } else {
             Vec::new()
         };
@@ -368,24 +301,35 @@ pub fn lint_project(
     }
 }
 
-/// Declare the whole rule registry in one place.
-///
-/// Takes a comma-separated list of unit-struct rule type names (plain
-/// identifiers of structs implementing [Rule], declared in scope) and
-/// expands to a `Vec<Box<dyn Rule>>`, one boxed instance per type:
-///
-/// ```text
-/// rules! { UnusedLetBinding, ConstantIf }
-/// ```
-///
-/// expands to
-///
-/// ```text
-/// vec![Box::new(UnusedLetBinding {}), Box::new(ConstantIf {})]
-/// ```
-///
-/// A trailing comma is accepted. Because the macro is `#[macro_export]`ed
-/// it lives at the crate root: `strictix_core::rules!`.
+fn select_pass_edits(diags: &[Diagnostic]) -> Vec<TextEdit> {
+    let groups: Vec<&[TextEdit]> = diags
+        .iter()
+        .filter_map(|d| d.fix.as_ref())
+        .map(|f| f.edits.as_slice())
+        .filter(|edits| !edits.is_empty())
+        .collect();
+
+    let strictly_contains = |outer: &TextEdit, inner: &TextEdit| -> bool {
+        outer.range.start() <= inner.range.start()
+            && inner.range.end() <= outer.range.end()
+            && outer.range != inner.range
+    };
+
+    let mut selected = Vec::new();
+    for (i, group) in groups.iter().enumerate() {
+        let nested_in_other = groups.iter().enumerate().any(|(j, other)| {
+            i != j
+                && group
+                    .iter()
+                    .all(|e_in| other.iter().any(|e_out| strictly_contains(e_out, e_in)))
+        });
+        if !nested_in_other {
+            selected.extend(group.iter().cloned());
+        }
+    }
+    selected
+}
+
 #[macro_export]
 macro_rules! rules {
     ($($rule:ident),* $(,)?) => {

@@ -11,9 +11,6 @@ use strictix_core::{
 use strictix_lints::path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
 use strictix_syntax::parse;
 
-/// Run one file rule with an explicit (optional) on-disk path. The
-/// shared run_rules helper never attaches a path, so path-sensitive
-/// rules are exercised through check_file on a hand-built model.
 fn check(rule: &dyn Rule, source: &str, path: Option<&Path>) -> Vec<Diagnostic> {
     let tree = parse(source);
     let model = SemanticModel::new(source, &tree).with_path(path);
@@ -22,8 +19,6 @@ fn check(rule: &dyn Rule, source: &str, path: Option<&Path>) -> Vec<Diagnostic> 
     diags
 }
 
-/// The committed fixture file the dangling-path tests pretend to lint;
-/// relative paths in test sources resolve against its directory.
 fn lintme() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/paths/lintme.nix")
 }
@@ -66,8 +61,6 @@ fn dangling_path_is_silent_for_existing_path() {
     assert!(check(&DanglingPath {}, "./exists.nix", Some(&anchor)).is_empty());
 }
 
-/// A merged file's split modules sit in directories that exist only in
-/// memory; `..` out of one must resolve lexically, as Nix resolves it.
 #[test]
 fn dangling_path_resolves_parent_dirs_through_virtual_directories() {
     let anchor = lintme().parent().unwrap().join("no/such/dir/module.nix");
@@ -236,4 +229,20 @@ fn dangling_path_counts_project_files_and_their_directories_as_existing() {
         messages[0].starts_with("path './absent.nix' does not exist"),
         "{messages:?}"
     );
+}
+
+#[test]
+fn unfiltered_src_is_opt_in_and_flags_whole_directory_src() {
+    use strictix_lints::path_rules::UnfilteredSrc;
+    let rules: Vec<Box<dyn strictix_core::rules::Rule>> = vec![Box::new(UnfilteredSrc)];
+    let source = "{ src = ./.; other = ./.; }";
+
+    let res_off = strictix_core::rules::lint(&rules, source, None, &LintConfig::default(), false);
+    assert!(res_off.diagnostics.is_empty());
+
+    let mut cfg = LintConfig::default();
+    cfg.enabled.push("unfiltered-src".to_string());
+    let res_on = strictix_core::rules::lint(&rules, source, None, &cfg, false);
+    assert_eq!(res_on.diagnostics.len(), 1);
+    assert_eq!(res_on.diagnostics[0].code, "unfiltered-src");
 }

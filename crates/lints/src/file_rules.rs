@@ -1,13 +1,3 @@
-//! File rules: semantic lints that run once per file against the lazy
-//! [SemanticModel].
-//!
-//! Node rules in [super::node_rules] inspect single nodes; these rules
-//! answer questions that need the whole file's meaning: is this let
-//! binding ever used, does this lambda parameter shadow an outer one,
-//! is this with scope doing any work. Every rule here is a unit struct
-//! implementing [Rule] with only [Rule::check_file] overridden — the
-//! registry ([super::all_rules]) declares them all the same way.
-
 use std::collections::{HashMap, HashSet};
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
@@ -15,13 +5,9 @@ use strictix_core::fix::Fix;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::{BindingKind, ScopeId, SemanticModel};
 use strictix_syntax::{
-    AstNode, AttrItem, AttrName, BinExpr, Binding, Expr, Formals, LambdaExpr, LambdaParam, LetExpr,
-    RecAttrsetExpr, SelectExpr, SyntaxKind, SyntaxNode, TextRange, WithExpr,
+    AstNode, AttrItem, AttrName, BinExpr, Binding, Expr, Formals, InheritStmt, LambdaExpr,
+    LambdaParam, LetExpr, RecAttrsetExpr, SelectExpr, SyntaxKind, SyntaxNode, TextRange, WithExpr,
 };
-/// The innermost [Binding] node whose range contains `name_range`, if
-/// any. Bindings nest when a value contains a `let` or attrset, so a
-/// range scan must pick the smallest containing node — the direct
-/// parent of the name token — not the first one found.
 fn containing_binding<'a>(root: &'a SyntaxNode, name_range: TextRange) -> Option<Binding<'a>> {
     root.find_innermost_at(SyntaxKind::Binding, name_range.start())
         .and_then(Binding::cast)
@@ -37,14 +23,8 @@ fn containing_formals<'a>(root: &'a SyntaxNode, name_range: TextRange) -> Option
         .and_then(Formals::cast)
 }
 
-/// Maximum allowed cyclomatic complexity for one lambda.
-///
-/// Complexity starts at one and increases for each independent decision
-/// path. Nested lambdas are measured separately, so an inner function does
-/// not inflate the score of its enclosing function.
 pub const MAX_CYCLOMATIC_COMPLEXITY: usize = 5;
 
-/// Counts decision points in one lambda, excluding nested lambdas.
 fn lambda_complexity(lambda: LambdaExpr<'_>) -> usize {
     fn walk(node: &SyntaxNode, root_start: u32, score: &mut usize) {
         if node.kind() == SyntaxKind::LambdaExpr && node.range().start() != root_start {
@@ -80,7 +60,6 @@ fn lambda_complexity(lambda: LambdaExpr<'_>) -> usize {
     decisions + 1
 }
 
-/// Flags lambdas whose independent decision paths exceed the maintainability threshold.
 pub struct CyclomaticComplexity;
 
 impl Rule for CyclomaticComplexity {
@@ -120,10 +99,6 @@ impl Rule for CyclomaticComplexity {
     }
 }
 
-/// Flags `let` bindings that are never referenced.
-///
-/// `let x = 1; in 2` — `x` is dead weight. The suggested fix deletes
-/// the whole binding statement.
 pub struct UnusedLetBinding;
 
 impl Rule for UnusedLetBinding {
@@ -144,12 +119,30 @@ impl Rule for UnusedLetBinding {
     }
 
     fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        let source = model.source();
+        let mut used_in_scope: HashSet<(ScopeId, &str)> = HashSet::new();
+        for binding in model.bindings() {
+            if binding.kind == BindingKind::LetBinding && !binding.references.is_empty() {
+                used_in_scope.insert((binding.scope, binding.name.text(source)));
+            }
+        }
+
         for binding in model.bindings() {
             if binding.kind != BindingKind::LetBinding || !binding.references.is_empty() {
                 continue;
             }
-            let name = binding.name.text(model.source());
+            let name = binding.name.text(source);
+            if used_in_scope.contains(&(binding.scope, name)) {
+                continue;
+            }
             let range = binding.name.range();
+            if model
+                .root()
+                .find_innermost_at(SyntaxKind::InheritStmt, range.start())
+                .is_some()
+            {
+                continue;
+            }
             let mut diag = Diagnostic::new(
                 self.code(),
                 self.severity(),
@@ -157,19 +150,22 @@ impl Rule for UnusedLetBinding {
                 range,
             );
             if let Some(binding_node) = containing_binding(model.root(), range) {
-                diag =
-                    diag.with_fix(Fix::new("remove unused binding").edit(binding_node.range(), ""));
+                if binding_node
+                    .attrpath()
+                    .is_some_and(|ap| ap.range().contains(range.start()))
+                {
+                    let delete_range = binding_node.range();
+                    let replacement = crate::safe_delete_replacement(source, delete_range);
+                    diag = diag.with_fix(
+                        Fix::new("remove unused binding").edit(delete_range, replacement),
+                    );
+                }
             }
             diags.push(diag);
         }
     }
 }
 
-/// Byte ranges of the two bare params in an overlay lambda
-/// (`a: b: { ... }`). The Nixpkgs overlay convention is a bare-param
-/// lambda whose body is another bare-param lambda whose body is an
-/// attrset; the params are a fixed positional interface, not
-/// accidentally-unused names, so UnusedLambdaParam must skip them.
 fn overlay_param_ranges(root: &SyntaxNode) -> HashSet<u32> {
     let mut skip = HashSet::new();
     for node in root.descendants() {
@@ -200,11 +196,6 @@ fn overlay_param_ranges(root: &SyntaxNode) -> HashSet<u32> {
     skip
 }
 
-/// Flags bare lambda parameters that are never used.
-///
-/// `x: 1` — the parameter `x` is never referenced in the body. Formal
-/// parameters (`{ a, b }: ...`) are handled by [UnusedFormal] because
-/// they follow a different rule (the ellipsis changes what counts).
 pub struct UnusedLambdaParam;
 
 impl Rule for UnusedLambdaParam {
@@ -259,18 +250,8 @@ impl Rule for UnusedLambdaParam {
     }
 }
 
-/// Flags unused formal parameters of lambdas without an ellipsis.
-///
-/// `{ a, b }: b` — `a` is declared but never used. With an ellipsis
-/// (`{ a, b, ... }: b`) the extra formals are an intentional interface,
-/// so only `_`-prefixed names are exempt otherwise.
 pub struct UnusedFormal;
 
-/// Flags inherited names that are never referenced by the scope that can
-/// still see them. A plain attrset's inherit defines one of the attrset's
-/// own output fields — the attribute definition is the use, and the field
-/// is consumed outside this scope — so a dead inherit can only live in a
-/// `rec` attrset or a let-binding block, where the name stays in scope.
 pub struct UnusedInherit;
 
 impl Rule for UnusedInherit {
@@ -293,13 +274,13 @@ impl Rule for UnusedInherit {
                 SyntaxKind::LetExpr => {
                     if let Some(let_expr) = LetExpr::cast(node) {
                         if let Some(bindings) = let_expr.bindings() {
-                            check_inherit_scope(bindings.items(), model, diags);
+                            check_inherit_scope(bindings.items(), model, true, diags);
                         }
                     }
                 }
                 SyntaxKind::RecAttrsetExpr => {
                     if let Some(attrset) = RecAttrsetExpr::cast(node).and_then(|r| r.attrset()) {
-                        check_inherit_scope(attrset.items(), model, diags);
+                        check_inherit_scope(attrset.items(), model, false, diags);
                     }
                 }
                 _ => {}
@@ -308,19 +289,20 @@ impl Rule for UnusedInherit {
     }
 }
 
-/// Checks the inherits of one scope: a let-binding block or a `rec`
-/// attrset body. The inherited name is dead when nothing else in the scope
-/// references it; the name token itself is not a reference.
 fn check_inherit_scope<'a>(
     items: impl Iterator<Item = AttrItem<'a>>,
     model: &SemanticModel,
+    is_let: bool,
     diags: &mut Vec<Diagnostic>,
 ) {
+    let source = model.source();
     for item in items {
         let AttrItem::Inherit(inherit) = item else {
             continue;
         };
-        for name_token in inherit.names() {
+        let names: Vec<_> = inherit.names().collect();
+        let mut unused_indices = Vec::new();
+        for (idx, &name_token) in names.iter().enumerate() {
             let Some(binding) = model.binding_at(name_token.range()) else {
                 continue;
             };
@@ -331,21 +313,52 @@ fn check_inherit_scope<'a>(
             if used_elsewhere {
                 continue;
             }
-            let name = name_token.text(model.source());
+            let name = name_token.text(source);
             if name.starts_with('_') {
                 continue;
             }
-            diags.push(Diagnostic::new(
+            unused_indices.push(idx);
+        }
+        if unused_indices.is_empty() {
+            continue;
+        }
+        let all_unused = unused_indices.len() == names.len();
+        for (pos, &idx) in unused_indices.iter().enumerate() {
+            let name_token = names[idx];
+            let name = name_token.text(source);
+            let mut diag = Diagnostic::new(
                 "unused-inherit",
                 Severity::Warning,
                 format!("inherited name '{name}' is never used"),
                 name_token.range(),
-            ));
+            );
+            if is_let {
+                if all_unused {
+                    if pos == 0 {
+                        let del_range = inherit.syntax().range();
+                        let replacement = crate::safe_delete_replacement(source, del_range);
+                        diag = diag.with_fix(
+                            Fix::new("remove unused inherit").edit(del_range, replacement),
+                        );
+                    }
+                } else {
+                    let mut start = name_token.range().start() as usize;
+                    let bytes = source.as_bytes();
+                    while start > 0 && matches!(bytes[start - 1], b' ' | b'\t') {
+                        start -= 1;
+                    }
+                    let del_range = TextRange::new(start as u32, name_token.range().end());
+                    let replacement = crate::safe_delete_replacement(source, del_range);
+                    diag = diag.with_fix(
+                        Fix::new("remove unused inherited name").edit(del_range, replacement),
+                    );
+                }
+            }
+            diags.push(diag);
         }
     }
 }
 
-/// Flags a formal parameter that hides a visible outer binding.
 pub struct ShadowedFormal;
 
 impl Rule for ShadowedFormal {
@@ -436,11 +449,6 @@ impl Rule for UnusedFormal {
     }
 }
 
-/// Flags bindings whose name re-binds one already visible.
-///
-/// `let a = 1; in let a = 2; in a` — the inner `a` hides the outer one,
-/// which is almost always a mistake (the outer binding is still
-/// reachable, just under a different shadow).
 pub struct ShadowedBinding;
 
 impl Rule for ShadowedBinding {
@@ -468,6 +476,14 @@ impl Rule for ShadowedBinding {
             {
                 continue;
             }
+            if model
+                .root()
+                .find_innermost_at(SyntaxKind::InheritStmt, binding.name.range().start())
+                .and_then(InheritStmt::cast)
+                .is_some_and(|inherit| inherit.source().is_none())
+            {
+                continue;
+            }
             let name = binding.name.text(model.source());
             if name.starts_with('_') {
                 continue;
@@ -484,8 +500,6 @@ impl Rule for ShadowedBinding {
     }
 }
 
-/// Flags a default on an attribute selection whose literal attrset already
-/// contains the selected key. The default branch cannot be reached.
 pub struct UnnecessaryOr;
 
 impl Rule for UnnecessaryOr {
@@ -533,24 +547,27 @@ impl Rule for UnnecessaryOr {
                 AttrItem::Inherit(_) => false,
             });
             if found {
-                diags.push(Diagnostic::new(
-                    self.code(),
-                    self.severity(),
-                    format!(
-                        "attribute '{}' is present; the `or` default is unreachable",
-                        key.text(source)
-                    ),
-                    node.content_range(),
-                ));
+                let drop_range = TextRange::new(
+                    path.syntax().content_range().end(),
+                    node.content_range().end(),
+                );
+                diags.push(
+                    Diagnostic::new(
+                        self.code(),
+                        self.severity(),
+                        format!(
+                            "attribute '{}' is present; the `or` default is unreachable",
+                            key.text(source)
+                        ),
+                        node.content_range(),
+                    )
+                    .with_fix(Fix::new("remove unreachable default").edit(drop_range, "")),
+                );
             }
         }
     }
 }
 
-/// Flags `with` scopes whose body never needs them.
-///
-/// `let pkgs = ...; in with pkgs; pkgs.hello` — every name in the body
-/// resolves lexically, so the `with` adds nothing.
 pub struct RedundantWith;
 
 impl Rule for RedundantWith {
@@ -586,14 +603,18 @@ impl Rule for RedundantWith {
             }
             if has_any && all_lexical {
                 let mut with_expr = None;
-                model.root().walk_containing(site.scope_range.start(), |node| {
-                    if let Some(w) = WithExpr::cast(node).filter(|w| w.range() == site.scope_range) {
-                        with_expr = Some(w);
-                        true
-                    } else {
-                        false
-                    }
-                });
+                model
+                    .root()
+                    .walk_containing(site.scope_range.start(), |node| {
+                        if let Some(w) =
+                            WithExpr::cast(node).filter(|w| w.range() == site.scope_range)
+                        {
+                            with_expr = Some(w);
+                            true
+                        } else {
+                            false
+                        }
+                    });
                 let semi_end = with_expr.and_then(|w| {
                     w.syntax()
                         .child_tokens()
@@ -607,10 +628,10 @@ impl Rule for RedundantWith {
                     site.scope_range,
                 );
                 if let Some(semi_end) = semi_end {
-                    diag = diag.with_fix(
-                        Fix::new("remove with scope")
-                            .edit(TextRange::new(site.scope_range.start(), semi_end), ""),
-                    );
+                    let del_range = TextRange::new(site.scope_range.start(), semi_end);
+                    let replacement = crate::safe_delete_replacement(model.source(), del_range);
+                    diag =
+                        diag.with_fix(Fix::new("remove with scope").edit(del_range, replacement));
                 }
                 diags.push(diag);
             }
@@ -618,12 +639,6 @@ impl Rule for RedundantWith {
     }
 }
 
-/// Flags `let x = x;` infinite recursion.
-///
-/// A let binding is not visible in its own value, so `let x = x;` has
-/// `x` on the right resolve to nothing — the classic AI-slop
-/// infinite-recursion bug. A with-fallback or an outer binding that
-/// could supply the name is not this bug.
 pub struct SelfReferentialLet;
 
 impl Rule for SelfReferentialLet {
@@ -682,12 +697,6 @@ impl Rule for SelfReferentialLet {
     }
 }
 
-/// Whether forcing `expr` would evaluate the ident at `range`.
-///
-/// Lambda bodies, list items, and attrset values are lazy: the ident is
-/// only evaluated if the enclosing thunk is forced later, which is normal
-/// recursion, not this bug. Everything else (operands, bases, conditions,
-/// interpolations, application functions) is forced with the value.
 fn eager_contains(expr: strictix_syntax::Expr<'_>, range: TextRange) -> bool {
     use strictix_syntax::{AttrItem, AttrName, Expr, StringPart};
     match expr {
@@ -758,17 +767,6 @@ fn eager_contains(expr: strictix_syntax::Expr<'_>, range: TextRange) -> bool {
     }
 }
 
-/// Flags eager reference cycles among sibling let/rec bindings.
-///
-/// `let a = b; b = a; in a` — forcing either binding forces the other
-/// before its own value exists, so evaluation never terminates. The
-/// same holds for `rec { a = b; b = a; }`. A cycle is reported once,
-/// on its first binding in source order. Length-1 cycles (self-edges)
-/// are excluded: `let x = x;` is [SelfReferentialLet]'s finding. Note
-/// that self-referential-let inspects only let bindings, so an eager
-/// rec self-reference (`rec { a = a + 1; }`) is covered by NEITHER
-/// rule — we still exclude self-edges here to keep the two rules'
-/// ownership disjoint.
 pub struct CircularLet;
 
 impl Rule for CircularLet {
@@ -891,7 +889,6 @@ impl Rule for CircularLet {
     }
 }
 
-/// DFS visit state for [CircularLet]'s cycle scan.
 #[derive(Clone, Copy, PartialEq)]
 enum Color {
     White,
@@ -899,12 +896,6 @@ enum Color {
     Black,
 }
 
-/// Depth-first cycle scan for [CircularLet]: a back-edge to a node
-/// still on the path stack closes a cycle, recorded as the stack slice
-/// from that node onward (edge order). Self-edges never enter the
-/// adjacency lists, so every recorded cycle has length >= 2; the guard
-/// here is belt and braces. Sibling groups are tiny, so recursion
-/// depth is bounded by the group size.
 fn cycle_dfs(
     node: usize,
     adj: &[Vec<usize>],
@@ -933,15 +924,6 @@ fn cycle_dfs(
     color[node] = Color::Black;
 }
 
-/// Flags bindings that rebind `true`, `false`, or `null`.
-///
-/// Nix has no boolean keywords: `true`, `false`, and `null` are
-/// ordinary names bound in builtins, so `let true = false; in ...`
-/// parses and evaluates — and makes every later use of the name a
-/// lie. Every model binding counts (let, rec attr, lambda param,
-/// @-name, inherit). Plain attrset keys are NOT model bindings — a
-/// bare attrset binds nothing for resolution — so a legitimate data
-/// key like `{ true = 1; }` stays silent automatically.
 pub struct ReboundConstant;
 
 impl Rule for ReboundConstant {
@@ -1005,7 +987,6 @@ fn relative_import(model: &SemanticModel, range: TextRange) -> Option<std::path:
     }
 }
 
-/// Reports relative imports that are absent from the supplied project (or disk).
 pub struct MissingImport;
 impl Rule for MissingImport {
     fn code(&self) -> &'static str {
@@ -1050,7 +1031,6 @@ impl Rule for MissingImport {
     }
 }
 
-/// Reports an import edge that reaches its source again in the project graph.
 pub struct ImportCycle;
 impl Rule for ImportCycle {
     fn code(&self) -> &'static str {

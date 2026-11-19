@@ -1,10 +1,3 @@
-//! Integration tests for the file rules (semantic) and the schema rule.
-//!
-//! Each rule gets its positive case plus 2-3 false-positive guards:
-//! well-formed code that must produce zero diagnostics. Diagnostics are
-//! rendered with the one-line contract format
-//! (`[code] severity start..end message`) and asserted exactly.
-
 use std::path::PathBuf;
 
 use strictix_core::config::LintConfig;
@@ -18,7 +11,6 @@ use strictix_lints::file_rules::{
 use strictix_lints::schema::UnknownOption;
 use strictix_syntax::parse;
 
-/// Render diagnostics in the one-line contract format.
 fn render(diags: &[Diagnostic]) -> Vec<String> {
     diags
         .iter()
@@ -35,7 +27,6 @@ fn render(diags: &[Diagnostic]) -> Vec<String> {
         .collect()
 }
 
-/// Run `rules` over `source` with a fresh semantic model per source.
 fn run(source: &str, rules: &[Box<dyn Rule>], config: LintConfig) -> Vec<String> {
     let tree = parse(source);
     let model = SemanticModel::new(source, &tree);
@@ -48,8 +39,6 @@ fn one(rule: Box<dyn Rule>) -> Vec<Box<dyn Rule>> {
     vec![rule]
 }
 
-/// All file rules plus the schema rule — used for the module fixtures'
-/// "clean for ALL file rules" guarantee.
 fn all_file_rules() -> Vec<Box<dyn Rule>> {
     vec![
         Box::new(UnusedLetBinding {}),
@@ -62,7 +51,6 @@ fn all_file_rules() -> Vec<Box<dyn Rule>> {
     ]
 }
 
-/// Read a fixture from tests/fixtures.
 fn fixture(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -541,4 +529,108 @@ fn rebound_constant_clean_attrset_key() {
         run("{ true = 1; }", &rules, LintConfig::default()),
         Vec::<String>::new()
     );
+}
+
+#[test]
+fn bare_inherit_in_rec_or_nested_let_marks_outer_binding_used() {
+    let rules = one(Box::new(UnusedLetBinding {}));
+    assert_eq!(
+        run(
+            "let type = { a = 1; }; in rec { inherit type; }",
+            &rules,
+            LintConfig::default()
+        ),
+        Vec::<String>::new(),
+        "bare inherit in rec attrset references the outer let binding"
+    );
+    assert_eq!(
+        run(
+            "let x = 1; in let inherit x; in x",
+            &rules,
+            LintConfig::default()
+        ),
+        Vec::<String>::new(),
+        "bare inherit in nested let references the outer let binding"
+    );
+    assert_eq!(
+        run(
+            "let type = { a = 1; }; in rec { inherit type; }",
+            &one(Box::new(ShadowedBinding {})),
+            LintConfig::default()
+        ),
+        Vec::<String>::new(),
+        "bare inherit in rec attrset is not shadowing"
+    );
+}
+
+#[test]
+fn dotted_let_bindings_sharing_root_name_are_not_deleted() {
+    let rules = one(Box::new(UnusedLetBinding {}));
+    assert_eq!(
+        run(
+            "let a.b = 1; a.c = 2; in a.b + a.c",
+            &rules,
+            LintConfig::default()
+        ),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn unused_let_inherit_inside_binding_does_not_delete_outer_binding() {
+    let source = "{ pkgs }: { foo = let inherit (pkgs) bar baz; in bar; }";
+    let run_res = strictix_core::rules::lint(
+        &strictix_lints::all_rules(),
+        source,
+        None,
+        &LintConfig::default(),
+        true,
+    );
+    assert!(run_res.error.is_none());
+    let fixed = run_res.fixed.expect("baz should be removed");
+    assert!(
+        fixed.contains("foo ="),
+        "outer binding must survive: {fixed}"
+    );
+    assert!(fixed.contains("bar"), "used inherit must survive: {fixed}");
+    assert!(
+        !fixed.contains("baz"),
+        "unused inherit should be removed: {fixed}"
+    );
+    let reparsed = parse(&fixed);
+    assert!(
+        !reparsed
+            .descendants()
+            .any(|n| n.kind() == strictix_syntax::SyntaxKind::ErrorNode),
+        "fixed source must parse cleanly: {fixed}"
+    );
+}
+
+#[test]
+fn removing_binding_before_in_without_space_preserves_separator() {
+    let source = "let x = 1;in 2";
+    let run_res = strictix_core::rules::lint(
+        &one(Box::new(UnusedLetBinding {})),
+        source,
+        None,
+        &LintConfig::default(),
+        true,
+    );
+    assert!(run_res.error.is_none());
+    let fixed = run_res.fixed.expect("binding should be removed");
+    assert_eq!(fixed, "let in 2");
+}
+
+#[test]
+fn unnecessary_or_auto_fixes_cleanly() {
+    let source = "{ a = 1; }.a or 2";
+    let run_res = strictix_core::rules::lint(
+        &one(Box::new(UnnecessaryOr {})),
+        source,
+        None,
+        &LintConfig::default(),
+        true,
+    );
+    assert!(run_res.error.is_none());
+    assert_eq!(run_res.fixed.as_deref(), Some("{ a = 1; }.a"));
 }

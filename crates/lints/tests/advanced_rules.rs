@@ -205,3 +205,38 @@ fn suspicious_import_argument_fires_for_non_path_literals() {
     )
     .is_empty());
 }
+
+#[test]
+fn import_from_derivation_flags_direct_let_and_interpolated_derivations() {
+    use strictix_lints::advanced_rules::ImportFromDerivation;
+    let check_ifd = |source: &str| -> Vec<String> {
+        let tree = strictix_syntax::parse(source);
+        let model = strictix_core::semantic::SemanticModel::new(source, &tree);
+        let rules: Vec<Box<dyn strictix_core::rules::Rule>> = vec![Box::new(ImportFromDerivation)];
+        let mut diags = Vec::new();
+        strictix_core::rules::run_rules(
+            &rules,
+            &tree,
+            &model,
+            &LintConfig::default(),
+            source,
+            &mut diags,
+        );
+        diags.into_iter().map(|d| d.message).collect()
+    };
+
+    assert_eq!(
+        check_ifd(r#"{ pkgs }: import (pkgs.runCommand "gen" {} "echo 1 > $out")"#).len(),
+        1
+    );
+    assert_eq!(
+        check_ifd(r#"{ pkgs }: import "${pkgs.writeText "gen" "1"}" "#).len(),
+        1
+    );
+    assert_eq!(
+        check_ifd(r#"{ pkgs }: let d = pkgs.stdenv.mkDerivation { name = "x"; }; in import d"#)
+            .len(),
+        1
+    );
+    assert!(check_ifd(r#"import ./foo.nix"#).is_empty());
+}

@@ -1,10 +1,3 @@
-//! Style lints: mechanical anti-pattern rewrites ported from the statix
-//! lint set, written fresh against strictix's own tree.
-//!
-//! Twelve are node rules (fire on one node kind). Three need parent or
-//! token context — `useless-parens`, `repeated-keys`, `unquoted-uri` —
-//! and are file rules that walk the tree themselves.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -55,9 +48,15 @@ impl Rule for EmptyLetIn {
         );
         let has_comments = node.child_tokens().any(|t| t.kind() == K::Comment);
         if !has_comments {
-            diag = diag.with_fix(
-                Fix::new("remove empty let").edit(node.content_range(), body.text(source)),
-            );
+            let body_start = source[body.range().start() as usize..]
+                .bytes()
+                .position(|b| !b.is_ascii_whitespace())
+                .map_or(body.range().start(), |off| {
+                    body.range().start() + off as u32
+                });
+            let prefix = TextRange::new(node.content_range().start(), body_start);
+            let replacement = crate::safe_delete_replacement(source, prefix);
+            diag = diag.with_fix(Fix::new("remove empty let").edit(prefix, replacement));
         }
         diags.push(diag);
     }
@@ -221,13 +220,28 @@ impl Rule for CollapsibleLetIn {
     fn node_kind(&self) -> Option<K> {
         Some(K::LetExpr)
     }
-    fn check_node(&self, node: &SyntaxNode, _source: &str, diags: &mut Vec<Diagnostic>) {
+    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
         let Some(let_expr) = LetExpr::cast(node) else {
             return;
         };
         let Some(Expr::Let(inner)) = let_expr.body() else {
             return;
         };
+        let outer_names = let_bound_names(let_expr, source);
+        let inner_names = let_bound_names(inner, source);
+        if inner_names.iter().any(|n| outer_names.contains(n)) {
+            return;
+        }
+        if let Some(outer_bindings) = let_expr.bindings() {
+            if inner_names.iter().any(|name| {
+                outer_bindings.syntax().descendants().any(|d| {
+                    d.child_tokens()
+                        .any(|t| t.kind() == K::Ident && t.text(source) == *name)
+                })
+            }) {
+                return;
+            }
+        }
         let Some(in_token) = node.child_tokens().find(|t| t.kind() == K::KwIn) else {
             return;
         };
@@ -235,7 +249,8 @@ impl Rule for CollapsibleLetIn {
             return;
         };
         let range = TextRange::new(in_token.range().start(), let_token.range().end());
-        let fix = Fix::new("collapse let-in").edit(range, "");
+        let replacement = crate::safe_delete_replacement(source, range);
+        let fix = Fix::new("collapse let-in").edit(range, replacement);
         diags.push(
             Diagnostic::new(
                 "collapsible-let-in",
@@ -246,6 +261,30 @@ impl Rule for CollapsibleLetIn {
             .with_fix(fix),
         );
     }
+}
+
+fn let_bound_names<'s>(let_expr: LetExpr<'_>, source: &'s str) -> Vec<&'s str> {
+    let mut names = Vec::new();
+    let Some(bindings) = let_expr.bindings() else {
+        return names;
+    };
+    for item in bindings.items() {
+        match item {
+            AttrItem::Binding(binding) => {
+                if let Some(AttrName::Ident(tok)) =
+                    binding.attrpath().and_then(|ap| ap.elements().next())
+                {
+                    names.push(tok.text(source));
+                }
+            }
+            AttrItem::Inherit(inherit) => {
+                for tok in inherit.names() {
+                    names.push(tok.text(source));
+                }
+            }
+        }
+    }
+    names
 }
 
 pub struct EtaReduction;
@@ -435,7 +474,7 @@ impl Rule for EmptyInherit {
     fn node_kind(&self) -> Option<K> {
         Some(K::InheritStmt)
     }
-    fn check_node(&self, node: &SyntaxNode, _source: &str, diags: &mut Vec<Diagnostic>) {
+    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
         let Some(inherit) = InheritStmt::cast(node) else {
             return;
         };
@@ -445,7 +484,8 @@ impl Rule for EmptyInherit {
         if inherit.names().count() != 0 {
             return;
         }
-        let fix = Fix::new("remove empty inherit").edit(node.range(), "");
+        let replacement = crate::safe_delete_replacement(source, node.range());
+        let fix = Fix::new("remove empty inherit").edit(node.range(), replacement);
         diags.push(
             Diagnostic::new(
                 "empty-inherit",
@@ -579,8 +619,6 @@ fn is_primary(expr: Expr<'_>) -> bool {
 
 pub struct EmptyListConcat;
 
-/// Flags concatenation of two singleton lists, which can be written as one
-/// list containing both elements.
 pub struct SingletonListConcat;
 
 impl Rule for SingletonListConcat {
@@ -726,11 +764,11 @@ impl Rule for UselessParens {
                         return;
                     };
                     if let Some(Expr::Paren(paren)) = binding.value() {
-                        if let Some(inner) = paren.expr() {
+                        if paren.expr().is_some() {
                             push_paren_diag(
                                 diags,
-                                paren_trimmed_range(paren),
-                                inner.text(source),
+                                paren,
+                                source,
                                 "useless parentheses around value in binding",
                             );
                         }
@@ -741,11 +779,11 @@ impl Rule for UselessParens {
                         return;
                     };
                     if let Some(Expr::Paren(paren)) = let_expr.body() {
-                        if let Some(inner) = paren.expr() {
+                        if paren.expr().is_some() {
                             push_paren_diag(
                                 diags,
-                                paren_trimmed_range(paren),
-                                inner.text(source),
+                                paren,
+                                source,
                                 "useless parentheses around body of let",
                             );
                         }
@@ -766,8 +804,8 @@ impl Rule for UselessParens {
                     }
                     push_paren_diag(
                         diags,
-                        paren_trimmed_range(paren),
-                        inner.text(source),
+                        paren,
+                        source,
                         "useless parentheses around primitive expression",
                     );
                 }
@@ -777,17 +815,29 @@ impl Rule for UselessParens {
     }
 }
 
-fn push_paren_diag(diags: &mut Vec<Diagnostic>, range: TextRange, inner: &str, message: &str) {
-    diags.push(
-        Diagnostic::new("useless-parens", Severity::Warning, message, range)
-            .with_fix(Fix::new("remove parentheses").edit(range, inner)),
-    );
+fn push_paren_diag(diags: &mut Vec<Diagnostic>, paren: ParenExpr<'_>, source: &str, message: &str) {
+    let range = paren_trimmed_range(paren);
+    let node = paren.syntax();
+    let lparen = node.child_tokens().find(|t| t.kind() == K::LParen);
+    let rparen = node
+        .child_tokens()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .find(|t| t.kind() == K::RParen);
+    let mut diag = Diagnostic::new("useless-parens", Severity::Warning, message, range);
+    if let (Some(lp), Some(rp)) = (lparen, rparen) {
+        let lp_rep = crate::safe_delete_replacement(source, lp.range());
+        let rp_rep = crate::safe_delete_replacement(source, rp.range());
+        diag = diag.with_fix(
+            Fix::new("remove parentheses")
+                .edit(lp.range(), lp_rep)
+                .edit(rp.range(), rp_rep),
+        );
+    }
+    diags.push(diag);
 }
 
-/// The `(`...`)` span of a paren, excluding any leading trivia. The
-/// parser flushes leading whitespace into the node, so `paren.range()`
-/// can include a space that must be preserved (removing it would merge
-/// `in` + `2` into `in2`).
 fn paren_trimmed_range(paren: ParenExpr) -> TextRange {
     let node = paren.syntax();
     let start = node

@@ -1,10 +1,3 @@
-//! Builtin lint rules — the first customer of strictix-core's public API.
-//!
-//! Every rule here is declared via the `rules!` macro — the one
-//! registry mechanism — and implements the `Rule` trait. Node rules
-//! (syntax-level) live in [node_rules], file rules (semantic) in
-//! [file_rules], and the options-schema rule in [schema].
-
 pub mod advanced_rules;
 pub mod bare_import_in_list;
 pub mod builtin_argument_type;
@@ -59,8 +52,8 @@ pub mod unused_option;
 pub mod wrapped_prose;
 
 use advanced_rules::{
-    BuiltinArity, DuplicateFunctionArgument, DynamicImport, SuspiciousImportArgument,
-    SuspiciousRecursion, UnreachableBranch, UnsafeWithShadowing,
+    BuiltinArity, DuplicateFunctionArgument, DynamicImport, ImportFromDerivation,
+    SuspiciousImportArgument, SuspiciousRecursion, UnreachableBranch, UnsafeWithShadowing,
 };
 use bare_import_in_list::BareImportInList;
 use builtin_argument_type::BuiltinArgumentType;
@@ -84,7 +77,7 @@ use file_rules::{
     SelfReferentialLet, ShadowedBinding, ShadowedFormal, UnnecessaryOr, UnusedFormal,
     UnusedInherit, UnusedLambdaParam, UnusedLetBinding,
 };
-use flake_inputs::FlakeInputWithoutNixpkgsFollows;
+use flake_inputs::{DeadFlakeInput, FlakeInputWithoutNixpkgsFollows};
 use ignored_function_argument::IgnoredFunctionArgument;
 use ill_typed_binop::IllTypedBinop;
 use ill_typed_unary_op::IllTypedUnaryOp;
@@ -95,12 +88,12 @@ use lua_data_rules::HandWrittenLuaData;
 use machine_local_default::MachineLocalDefault;
 use missing_attribute::MissingAttribute;
 use missing_function_argument::MissingFunctionArgument;
-use module_rules::{ConfigDependentImports, MixedModuleSyntax};
+use module_rules::{ConfigDependentImports, MixedModuleSyntax, RedundantPriority};
 use never_enabled_option::NeverEnabledOption;
 use node_rules::{AssertTrue, ConstantIf, ConstantIfBranches, Tautology};
 use non_boolean_condition::NonBooleanCondition;
 use non_callable_application::NonCallableApplication;
-use path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference};
+use path_rules::{AccidentalPathDivision, DanglingPath, SearchPathReference, UnfilteredSrc};
 use per_system_input_lookup::PerSystemInputLookup;
 use reference_rules::{UndefinedVariable, UnknownBuiltin};
 use repeated_dynamic_path::RepeatedDynamicPath;
@@ -131,11 +124,21 @@ use unformatted_file::UnformattedFile;
 use unused_option::UnusedOption;
 use wrapped_prose::WrappedProse;
 
-/// The full builtin registry, in declaration order.
-///
-/// Called once per run by the CLI; the boxed rules are shared across all
-/// worker threads (rules are `Sync`; the schema rule caches its
-/// parsed options.json in a `OnceLock`).
+pub(crate) fn safe_delete_replacement(
+    source: &str,
+    range: strictix_syntax::TextRange,
+) -> &'static str {
+    let before = source
+        .as_bytes()
+        .get(range.start().saturating_sub(1) as usize);
+    let after = source.as_bytes().get(range.end() as usize);
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'\'' | b'-');
+    match (before, after) {
+        (Some(&b), Some(&a)) if range.start() > 0 && is_word(b) && is_word(a) => " ",
+        _ => "",
+    }
+}
+
 #[must_use]
 pub fn all_rules() -> Vec<Box<dyn Rule>> {
     strictix_core::rules! {
@@ -251,6 +254,10 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         ScatteredDocumentation,
         UnformattedFile,
         FlakeInputWithoutNixpkgsFollows,
+        DeadFlakeInput,
+        RedundantPriority,
+        ImportFromDerivation,
+        UnfilteredSrc,
         MachineLocalDefault,
         WrappedProse,
     }

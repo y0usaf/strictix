@@ -133,3 +133,53 @@ fn a_nested_inputs_block_counts_as_following() {
     );
     assert!(diags.is_empty(), "{diags:?}");
 }
+
+#[test]
+fn dead_flake_input_flags_unused_and_respects_follows_and_catch_all() {
+    use strictix_lints::flake_inputs::DeadFlakeInput;
+    let check_dead = |source: &str, cfg: LintConfig| -> Vec<String> {
+        let tree = strictix_syntax::parse(source);
+        let model = strictix_core::semantic::SemanticModel::new(source, &tree);
+        let rules: Vec<Box<dyn strictix_core::rules::Rule>> = vec![Box::new(DeadFlakeInput)];
+        let mut diags = Vec::new();
+        strictix_core::rules::run_rules(&rules, &tree, &model, &cfg, source, &mut diags);
+        diags.into_iter().map(|d| d.message).collect()
+    };
+
+    let src1 = r#"{
+      inputs = {
+        nixpkgs.url = "github:NixOS/nixpkgs";
+        foo = {
+          url = "github:a/foo";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
+        unused.url = "github:a/unused";
+      };
+      outputs = { self, foo, ... }: { default = foo; };
+    }"#;
+    assert_eq!(
+        check_dead(src1, LintConfig::default()),
+        vec!["flake input 'unused' is never used in outputs"]
+    );
+
+    let src2 = r#"{
+      inputs = {
+        nixpkgs.url = "github:NixOS/nixpkgs";
+        other.url = "github:a/other";
+      };
+      outputs = inputs@{ self, nixpkgs, ... }: { inherit inputs; };
+    }"#;
+    assert!(check_dead(src2, LintConfig::default()).is_empty());
+
+    let src3 = r#"{
+      inputs = {
+        nixpkgs.url = "github:NixOS/nixpkgs";
+        dead.url = "github:a/dead";
+      };
+      outputs = inputs: { pkgs = inputs.nixpkgs; };
+    }"#;
+    assert_eq!(
+        check_dead(src3, LintConfig::default()),
+        vec!["flake input 'dead' is never used in outputs"]
+    );
+}

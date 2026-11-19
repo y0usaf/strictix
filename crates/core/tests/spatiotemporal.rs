@@ -1,7 +1,3 @@
-//! Spatiotemporal-composability checks: the `Context` undo log (temporal
-//! axis — clean unmount, no residue) and the `fixpoint` reactive loop
-//! (spatial axis — a committed fix re-runs consumers on changed text).
-
 use strictix_core::config::LintConfig;
 use strictix_core::context::Context;
 use strictix_core::diagnostic::{Diagnostic, Severity};
@@ -45,8 +41,6 @@ fn rollback_restores_in_reverse_commit_order() {
     assert!(!ctx.rollback(), "nothing left to undo");
 }
 
-/// A file rule that replaces the first occurrence of `from` with `to`.
-/// Two of these chained make a fix reveal another fix: `a` -> `b` -> `c`.
 struct ReplaceRule {
     code: &'static str,
     from: char,
@@ -165,4 +159,58 @@ fn overlapping_fixes_fail_atomically_and_preserve_diagnostics() {
     assert_eq!(run.fixed, None, "atomic: file left untouched on error");
     assert_eq!(run.passes, 0, "no commit succeeded");
     assert_eq!(run.diagnostics.len(), 2, "both findings still reported");
+}
+
+#[test]
+fn strictly_nested_fixes_converge_across_passes() {
+    struct SpanRule {
+        code: &'static str,
+        target: &'static str,
+        replacement: &'static str,
+    }
+    impl Rule for SpanRule {
+        fn code(&self) -> &'static str {
+            self.code
+        }
+        fn name(&self) -> &'static str {
+            "span"
+        }
+        fn description(&self) -> &'static str {
+            "test rule"
+        }
+        fn severity(&self) -> Severity {
+            Severity::Warning
+        }
+        fn check_file(
+            &self,
+            model: &SemanticModel,
+            _config: &LintConfig,
+            diags: &mut Vec<Diagnostic>,
+        ) {
+            if let Some(pos) = model.source().find(self.target) {
+                let range = TextRange::new(pos as u32, (pos + self.target.len()) as u32);
+                let fix = Fix::new("replace").edit(range, self.replacement);
+                diags.push(
+                    Diagnostic::new(self.code, Severity::Warning, "replace", range).with_fix(fix),
+                );
+            }
+        }
+    }
+
+    let rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(SpanRule {
+            code: "outer",
+            target: "(a)",
+            replacement: "a",
+        }),
+        Box::new(SpanRule {
+            code: "inner",
+            target: "a",
+            replacement: "b",
+        }),
+    ];
+    let run = lint(&rules, "(a)", None, &LintConfig::default(), true);
+    assert!(run.error.is_none(), "nested edits should not error");
+    assert_eq!(run.fixed.as_deref(), Some("b"));
+    assert_eq!(run.passes, 2);
 }

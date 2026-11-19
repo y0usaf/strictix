@@ -1,11 +1,3 @@
-//! Node rules: syntax-level lints that fire on one node kind each.
-//!
-//! These are the structural rules — they look only at the lossless tree,
-//! never at meaning. Each rule declares its node kind via
-//! [Rule::node_kind] and inspects exactly those nodes in
-//! [Rule::check_node]. They never touch the semantic model, so a run
-//! with only node rules enabled never builds it.
-
 use strictix_core::{
     diagnostic::{Diagnostic, Severity},
     fix::Fix,
@@ -16,19 +8,8 @@ use strictix_syntax::{
     AssertExpr, AstNode, BinExpr, Expr, IfExpr, SyntaxKind, SyntaxNode, TextRange,
 };
 
-/// Flags `if`-expressions whose condition is the literal `true` or
-/// `false`.
-///
-/// A constant condition makes one branch dead by construction. This is
-/// classic AI-generated slop — `if true then a else b` is just `a` —
-/// so the rule offers a fix that inlines the live branch.
 pub struct ConstantIf;
 
-/// Flags an `if` whose two branches are the same literal constant.
-///
-/// This rule is diagnostic-only. Replacing the expression with the literal
-/// would skip evaluation of the condition, which can change an error or
-/// divergence into a successful result.
 pub struct ConstantIfBranches;
 
 impl Rule for ConstantIfBranches {
@@ -133,11 +114,6 @@ impl Rule for ConstantIf {
     }
 }
 
-/// Flags `assert true;` — a precondition that can never fail.
-///
-/// An assertion of a statically-true condition adds noise without
-/// checking anything. The fix drops the `assert true;` prefix, keeping
-/// the body.
 pub struct AssertTrue;
 
 impl Rule for AssertTrue {
@@ -180,19 +156,14 @@ impl Rule for AssertTrue {
         );
         if let Some(semi) = node.child_tokens().find(|t| t.kind() == K::Semicolon) {
             let range = TextRange::new(node.range().start(), semi.range().end());
-            let fix = Fix::new("remove assert true").edit(range, "");
+            let replacement = crate::safe_delete_replacement(source, range);
+            let fix = Fix::new("remove assert true").edit(range, replacement);
             diag = diag.with_fix(fix);
         }
         diags.push(diag);
     }
 }
 
-/// Flags binary comparisons of an atom with itself.
-///
-/// `x == x`, `x != x`, `x && x`, and `x || x` have a fixed truth value
-/// for any `x`. Only same-kind atoms with identical source text are
-/// compared: `1 == 1` is flagged, `1 == 1.0` is not (the texts differ
-/// in kind, and floats and ints are not equal in Nix).
 pub struct Tautology;
 
 impl Rule for Tautology {
@@ -254,10 +225,6 @@ impl Rule for Tautology {
     }
 }
 
-/// The source text of an ident or int atom; `None` for anything else.
-///
-/// Tautology compares atoms only — the same-kind guard then keeps the
-/// two sides' kinds aligned (Ident/Ident, Int/Int).
 fn atom_text<'a>(expr: Expr<'a>, source: &'a str) -> Option<&'a str> {
     match expr {
         Expr::Ident(t) | Expr::Int(t) => Some(t.text(source)),

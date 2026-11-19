@@ -1,5 +1,3 @@
-//! Conservative higher-confidence rules for common generated-Nix traps.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -374,8 +372,9 @@ impl Rule for BuiltinArity {
         let mut wrapped_inner: std::collections::HashSet<(u32, u32)> =
             std::collections::HashSet::with_capacity(apply_nodes.len());
         for &n in &apply_nodes {
-            if let Some(Expr::Apply(inner)) =
-                ApplyExpr::cast(n).and_then(|a| a.func()).and_then(crate::lib_helpers::unparen)
+            if let Some(Expr::Apply(inner)) = ApplyExpr::cast(n)
+                .and_then(|a| a.func())
+                .and_then(crate::lib_helpers::unparen)
             {
                 let r = inner.range();
                 wrapped_inner.insert((r.start(), r.end()));
@@ -523,6 +522,156 @@ impl Rule for SuspiciousImportArgument {
                     "import argument is not a path or string",
                     site.path_range,
                 ));
+            }
+        }
+    }
+}
+
+const DERIVATION_BUILDERS: &[&str] = &[
+    "derivation",
+    "mkDerivation",
+    "runCommand",
+    "runCommandLocal",
+    "runCommandCC",
+    "writeText",
+    "writeTextFile",
+    "writeTextDir",
+    "writeShellScript",
+    "writeShellScriptBin",
+    "writeShellApplication",
+    "writeScript",
+    "writeScriptBin",
+    "symlinkJoin",
+    "substituteAll",
+    "replaceVars",
+    "replaceVarsWith",
+    "applyPatches",
+    "linkFarm",
+    "fetchurl",
+    "fetchFromGitHub",
+    "fetchFromGitLab",
+    "fetchgit",
+    "fetchzip",
+    "fetchTarball",
+];
+
+fn derivation_builder_name(
+    expr: Expr<'_>,
+    model: &SemanticModel<'_>,
+    fuel: usize,
+) -> Option<&'static str> {
+    let fuel = fuel.checked_sub(1)?;
+    let expr = crate::lib_helpers::unparen(expr)?;
+    let source = model.source();
+    match expr {
+        Expr::Apply(apply) => {
+            let mut head = apply.func()?;
+            while let Some(Expr::Apply(inner)) = crate::lib_helpers::unparen(head) {
+                head = inner.func()?;
+            }
+            match crate::lib_helpers::unparen(head)? {
+                Expr::Ident(tok) => {
+                    let name = tok.text(source);
+                    DERIVATION_BUILDERS.iter().copied().find(|&b| b == name)
+                }
+                Expr::Select(sel) if sel.default().is_none() => {
+                    let last = sel.attrpath()?.elements().last()?;
+                    if let AttrName::Ident(tok) = last {
+                        let name = tok.text(source);
+                        DERIVATION_BUILDERS.iter().copied().find(|&b| b == name)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+        Expr::Ident(tok) => {
+            let value = crate::static_binding::value(tok, model)?;
+            derivation_builder_name(value, model, fuel)
+        }
+        Expr::String(s) => {
+            for part in s.parts() {
+                if let strictix_syntax::StringPart::Interp(interp) = part {
+                    if let Some(inner) = interp.expr() {
+                        if let Some(builder) = derivation_builder_name(inner, model, fuel) {
+                            return Some(builder);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Expr::IndString(s) => {
+            for part in s.parts() {
+                if let strictix_syntax::StringPart::Interp(interp) = part {
+                    if let Some(inner) = interp.expr() {
+                        if let Some(builder) = derivation_builder_name(inner, model, fuel) {
+                            return Some(builder);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Expr::Bin(bin) if bin.op() == Some(SyntaxKind::Plus) => {
+            derivation_builder_name(bin.lhs()?, model, fuel)
+        }
+        _ => None,
+    }
+}
+
+pub struct ImportFromDerivation;
+
+impl Rule for ImportFromDerivation {
+    fn code(&self) -> &'static str {
+        "import-from-derivation"
+    }
+
+    fn name(&self) -> &'static str {
+        "Import from derivation"
+    }
+
+    fn description(&self) -> &'static str {
+        "Flags `import` applied to a derivation-producing call (such as `pkgs.runCommand`, `pkgs.writeText`, `stdenv.mkDerivation`, or `derivation`), which triggers Import-From-Derivation (IFD) and forces a build during evaluation."
+    }
+
+    fn severity(&self) -> Severity {
+        Severity::Warning
+    }
+
+    fn check_file(&self, model: &SemanticModel, _config: &LintConfig, diags: &mut Vec<Diagnostic>) {
+        for site in model.import_sites() {
+            let mut apply_node = None;
+            model
+                .root()
+                .walk_containing(site.call_range.start(), |node| {
+                    if let Some(app) =
+                        ApplyExpr::cast(node).filter(|a| a.range() == site.call_range)
+                    {
+                        apply_node = Some(app);
+                        true
+                    } else {
+                        false
+                    }
+                });
+            let Some(arg) = apply_node.and_then(|a| a.arg()) else {
+                continue;
+            };
+            if let Some(builder) = derivation_builder_name(arg, model, 8) {
+                diags.push(
+                    Diagnostic::new(
+                        self.code(),
+                        self.severity(),
+                        format!(
+                            "import-from-derivation via `{builder}` forces a build during evaluation"
+                        ),
+                        site.call_range,
+                    )
+                    .with_help(
+                        "compute the value in Nix or pass a static path instead of importing a derivation",
+                    ),
+                );
             }
         }
     }

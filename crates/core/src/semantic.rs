@@ -1,59 +1,3 @@
-//! The semantic model: scopes, bindings, and references for one file.
-//!
-//! The syntax crate gives us a shape-aware tree but no meaning: the `a`
-//! in `let a = 1; in a` and the `a` in `{ a = 1; }` are the same kind
-//! of token to the parser, yet one is a definition and the other a use.
-//! This module is the layer that answers "what does this ident refer
-//! to?" — it records every scope, every binding, and every ident used
-//! in expression position, then resolves each use to the binding its
-//! name and position select under Nix scoping rules.
-//!
-//! The model is LAZY: [`SemanticModel::new`] only stores the source and
-//! the tree. The first accessor call runs the one-time build and every
-//! later accessor reuses it. Rules therefore pay for the walk only when
-//! a file rule actually needs the model, and pay it exactly once per
-//! file. The build lives in a `OnceLock` rather than a
-//! `RefCell<Option<Built>>` because the accessors hand out `&[Binding]`
-//! slices: a slice borrowed through a `RefCell` guard cannot outlive
-//! the temporary guard, so the guard would have to be leaked on every
-//! access. `OnceLock` gives the same build-once semantics with plain
-//! borrows.
-//!
-//! Nix scoping, as implemented here:
-//!
-//! - `let` is sequential: binding *i* is visible in bindings *i+1..n*
-//!   and in the body, never in its own value — the classic
-//!   `let x = x;` infinite-recursion gotcha. The same rule governs
-//!   formals defaults: parameter *i* is visible in the defaults of
-//!   *j > i* and in the body.
-//! - `rec { ... }` is the opposite: every attribute name is visible in
-//!   every value, forwards and backwards.
-//! - A bare (non-rec) attrset binds nothing for resolution: its names
-//!   are not in scope anywhere, not even inside the attrset itself.
-//!   `inherit (x) a b;` inside one still records `a` and `b` as
-//!   [`BindingKind::InheritName`] entries, because rules may want to
-//!   see them.
-//! - `with e; body` introduces a fallback, never a shadow: the body's
-//!   idents resolve lexically first, and only when the whole lexical
-//!   path fails does the innermost `with` whose body covers the ident
-//!   become a candidate ([`Reference::via_with`]).
-//!
-//! Scopes are stored as byte ranges so that "which scope governs this
-//! offset" is a containment question, not a traversal one. Because the
-//! walker creates scopes depth-first in source order and every new
-//! scope's range nests inside its parent's, the innermost scope
-//! containing an offset is simply the last-created scope whose range
-//! contains it.
-//!
-//! The build runs in two passes. Pass 1 walks the tree once, creating
-//! scopes, bindings, with sites, import sites, and collecting every
-//! expression-position ident token. Pass 2 resolves each collected
-//! ident against the finished scope table and fills
-//! [`Binding::references`]. Two passes are required because `rec`
-//! makes names visible *before* their defining value: a binding must
-//! exist before any value can be resolved against it, so resolution
-//! cannot happen during the walk.
-
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -62,88 +6,41 @@ use strictix_syntax::{
     TextRange,
 };
 
-/// The stable identity of one scope.
-///
-/// A u32 index into the model's internal scope table. Opaque to
-/// consumers: comparing two ids tells you whether they are the same
-/// scope, and nothing more.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ScopeId(pub u32);
 
-/// What kind of construct created a binding. Rules use this to decide
-/// whether a binding is the kind they care about — an unused let
-/// binding is only a finding for [`BindingKind::LetBinding`], not for a
-/// formal parameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BindingKind {
-    /// `x: ...` or a formal parameter in `{ a, b ? 1, ... }`.
-    LambdaParam,
-    /// The `args` in `args@{ ... }: ...` or `{ ... } @ args: ...`.
-    AtName,
-    /// `let a = ...;` — sequential visibility.
-    LetBinding,
-    /// An attribute of `rec { ... }` — mutually visible.
-    RecAttr,
-    /// `inherit (x) a b;` — bound in the containing block per its rules.
-    InheritName,
+        LambdaParam,
+        AtName,
+        LetBinding,
+        RecAttr,
+        InheritName,
 }
 
-/// One definition: the ident token that introduces a name, the scope it
-/// lives in, and the byte ranges of the uses that resolve to it.
-///
-/// `references` is filled by the second pass of the build; before any
-/// accessor runs it is empty.
 pub struct Binding<'a> {
-    /// The defining ident token (the first element of an attrpath).
-    pub name: &'a SyntaxToken,
-    /// The scope this binding belongs to.
-    pub scope: ScopeId,
-    /// Byte ranges of resolved uses, in source order (second pass).
-    pub references: Vec<TextRange>,
-    /// What kind of construct created this binding.
-    pub kind: BindingKind,
+        pub name: &'a SyntaxToken,
+        pub scope: ScopeId,
+        pub references: Vec<TextRange>,
+        pub kind: BindingKind,
 }
 
-/// One use of a name in expression position.
-///
-/// Every ident token that appears where a value is expected is a
-/// reference. Ident tokens in binding position (attrpath elements,
-/// inherit names, formals) and select fields (`a.b`'s `b`) are not
-/// references.
 pub struct Reference<'a> {
-    /// The ident token used in expression position.
-    pub name: &'a SyntaxToken,
-    /// Index into [`SemanticModel::bindings`] when a lexical binding
-    /// was found; `None` when the name is unbound lexically.
-    pub resolved: Option<usize>,
-    /// Index into [`SemanticModel::with_sites`] when no lexical binding
-    /// was found but an enclosing `with` body covers this position.
-    /// The reference still resolves to nothing (`resolved` stays
-    /// `None`): statically we cannot know whether the with's attrset
-    /// actually provides the name, so `via_with` only records the
-    /// innermost candidate.
-    pub via_with: Option<usize>,
+        pub name: &'a SyntaxToken,
+        pub resolved: Option<usize>,
+        pub via_with: Option<usize>,
 }
 
-/// One `with e; body` construct.
 pub struct WithSite {
-    /// The whole `with` expression (from `with` through the body).
-    pub scope_range: TextRange,
-    /// The body after the semicolon — the region the fallback covers.
-    pub body_range: TextRange,
+        pub scope_range: TextRange,
+        pub body_range: TextRange,
 }
 
-/// One call to `import`, plain or via `builtins.import`.
 pub struct ImportSite {
-    /// The whole application expression.
-    pub call_range: TextRange,
-    /// The argument expression (the path or string being imported).
-    pub path_range: TextRange,
+        pub call_range: TextRange,
+        pub path_range: TextRange,
 }
 
-/// The internal classification of a scope. Only [`ScopeKind::Attrset`]
-/// scopes are excluded from resolution: they host `inherit` names but
-/// bind nothing for name lookup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScopeKind {
     Root,
@@ -154,8 +51,6 @@ enum ScopeKind {
     Attrset,
 }
 
-/// One scope: the byte range it governs, its parent, and the slice of
-/// the model's binding table it owns.
 struct ScopeIndex<'a> {
     heads: HashMap<&'a str, u32>,
     next: Vec<u32>,
@@ -181,7 +76,6 @@ pub struct Built<'a> {
     import_sites: Vec<ImportSite>,
 }
 
-/// Lazy semantic model over one parsed file.
 pub struct SemanticModel<'a> {
     source: &'a str,
     root: &'a SyntaxNode,
@@ -190,9 +84,7 @@ pub struct SemanticModel<'a> {
 }
 
 impl<'a> SemanticModel<'a> {
-    /// Wrap a parsed tree. Does no work: the build runs on the first
-    /// accessor call and is cached.
-    pub fn new(source: &'a str, root: &'a SyntaxNode) -> Self {
+        pub fn new(source: &'a str, root: &'a SyntaxNode) -> Self {
         Self {
             source,
             root,
@@ -201,73 +93,53 @@ impl<'a> SemanticModel<'a> {
         }
     }
 
-    /// Attach the on-disk path of the linted file. Rules that resolve
-    /// relative path literals (e.g. dangling imports) need to know
-    /// where the file lives; models built from anonymous sources
-    /// (tests, stdin) simply never attach one.
-    #[must_use]
+        #[must_use]
     pub fn with_path(mut self, path: Option<&'a std::path::Path>) -> Self {
         self.path = path;
         self
     }
 
-    /// The on-disk path of the linted file, when known.
-    #[must_use]
+        #[must_use]
     pub fn path(&self) -> Option<&'a std::path::Path> {
         self.path
     }
 
-    /// The source text this model was built over.
-    #[must_use]
+        #[must_use]
     pub fn source(&self) -> &'a str {
         self.source
     }
 
-    /// The parse tree this model was built over.
-    #[must_use]
+        #[must_use]
     pub fn root(&self) -> &'a SyntaxNode {
         self.root
     }
 
-    /// Build once, then return the shared result. The build is
-    /// idempotent: only the first call walks the tree.
-    fn ensure_built(&self) -> &Built<'a> {
+        fn ensure_built(&self) -> &Built<'a> {
         self.built
             .get_or_init(|| Built::build(self.source, self.root))
     }
 
-    /// All bindings, in declaration order.
-    #[must_use]
+        #[must_use]
     pub fn bindings(&self) -> &[Binding<'a>] {
         &self.ensure_built().bindings
     }
 
-    /// All references in source order.
-    #[must_use]
+        #[must_use]
     pub fn references(&self) -> &[Reference<'a>] {
         &self.ensure_built().references
     }
 
-    /// All `with` constructs, in source order.
-    #[must_use]
+        #[must_use]
     pub fn with_sites(&self) -> &[WithSite] {
         &self.ensure_built().with_sites
     }
 
-    /// All `import` calls, in source order.
-    #[must_use]
+        #[must_use]
     pub fn import_sites(&self) -> &[ImportSite] {
         &self.ensure_built().import_sites
     }
 
-    /// Resolve an ident token belonging to this tree: find the
-    /// reference with the same byte range and return the binding it
-    /// resolved to. Tokens that are not expression-position references
-    /// (attrpath elements, inherit names, formals) yield `None`.
-    ///
-    /// Tokens are `Copy` values, so identity is compared by byte range
-    /// — two tokens can never share a range within one tree.
-    #[must_use]
+        #[must_use]
     pub fn reference_at(&self, range: TextRange) -> Option<&Reference<'a>> {
         let built = self.ensure_built();
         let pos = built
@@ -293,9 +165,7 @@ impl<'a> SemanticModel<'a> {
         let lo = built
             .ref_by_start
             .partition_point(|&(start, _)| start < range.start());
-        let hi = built.ref_by_start[lo..]
-            .partition_point(|&(start, _)| start < range.end())
-            + lo;
+        let hi = built.ref_by_start[lo..].partition_point(|&(start, _)| start < range.end()) + lo;
         built.ref_by_start[lo..hi]
             .iter()
             .map(|&(_, idx)| (idx as usize, &built.references[idx as usize]))
@@ -306,9 +176,7 @@ impl<'a> SemanticModel<'a> {
         let lo = built
             .ref_by_start
             .partition_point(|&(start, _)| start < range.start());
-        let hi = built.ref_by_start[lo..]
-            .partition_point(|&(start, _)| start < range.end())
-            + lo;
+        let hi = built.ref_by_start[lo..].partition_point(|&(start, _)| start < range.end()) + lo;
         built.ref_by_start[lo..hi]
             .iter()
             .map(|&(_, idx)| &built.references[idx as usize])
@@ -319,9 +187,8 @@ impl<'a> SemanticModel<'a> {
         let lo = built
             .binding_by_start
             .partition_point(|&(start, _)| start < range.start());
-        let hi = built.binding_by_start[lo..]
-            .partition_point(|&(start, _)| start < range.end())
-            + lo;
+        let hi =
+            built.binding_by_start[lo..].partition_point(|&(start, _)| start < range.end()) + lo;
         built.binding_by_start[lo..hi]
             .iter()
             .map(|&(_, idx)| &built.bindings[idx as usize])
@@ -352,11 +219,7 @@ impl<'a> SemanticModel<'a> {
         Some(&built.bindings[idx])
     }
 
-    /// The nearest lexical binding for `name` visible at `offset`, or
-    /// `None`. Scopes are searched innermost-out and the first binding
-    /// whose scope rules make it visible at `offset` wins. No `with`
-    /// fallback — use [`Self::is_bound`] for the with-aware answer.
-    #[must_use]
+        #[must_use]
     pub fn resolve_lexical(&self, name: &str, offset: u32) -> Option<&Binding<'a>> {
         let built = self.ensure_built();
         built
@@ -364,12 +227,7 @@ impl<'a> SemanticModel<'a> {
             .map(|i| &built.bindings[i])
     }
 
-    /// The nearest outer binding shadowed by `binding`, if any.
-    ///
-    /// Nix `let` is recursive, so at its own name position a binding
-    /// resolves to itself; shadowing must therefore be checked from the
-    /// enclosing scope outward.
-    #[must_use]
+        #[must_use]
     pub fn outer_shadow(&self, binding: &Binding<'a>) -> Option<&Binding<'a>> {
         let built = self.ensure_built();
         let offset = binding.name.range().start();
@@ -380,11 +238,7 @@ impl<'a> SemanticModel<'a> {
             .map(|bi| &built.bindings[bi])
     }
 
-    /// Whether any binding — lexical, or any `with` whose body covers
-    /// `offset` — could provide `name` at `offset`. The `with` side is
-    /// deliberately conservative: statically we cannot know whether a
-    /// with's attrset provides the name, so every covering with counts.
-    #[must_use]
+        #[must_use]
     pub fn is_bound(&self, name: &str, offset: u32) -> bool {
         let built = self.ensure_built();
         built.resolve_lexical_index(name, offset).is_some()
@@ -446,7 +300,9 @@ impl<'a> Built<'a> {
         for (token, scope_id, via_with_cand) in builder.idents {
             built.record_reference(token, scope_id, via_with_cand);
         }
-        built.ref_by_start.sort_unstable_by_key(|&(start, idx)| (start, idx));
+        built
+            .ref_by_start
+            .sort_unstable_by_key(|&(start, idx)| (start, idx));
         built
     }
 
@@ -476,11 +332,7 @@ impl<'a> Built<'a> {
         self.ref_by_start.push((offset, ref_idx));
     }
 
-    /// The innermost scope whose range contains `offset`. Scopes nest
-    /// strictly (each new scope's range lies inside its parent's) and
-    /// are created depth-first in source order, so the last scope
-    /// containing the offset is the innermost.
-    fn innermost_scope(&self, offset: u32) -> Option<ScopeId> {
+        fn innermost_scope(&self, offset: u32) -> Option<ScopeId> {
         self.scopes
             .iter()
             .enumerate()
@@ -524,11 +376,7 @@ impl<'a> Built<'a> {
         }
     }
 
-    /// Whether the binding at `pos` (within `scope_id`) is visible at
-    /// `offset`. `let` and lambda scopes gate on their per-binding
-    /// visibility start; rec scopes are visible everywhere in their
-    /// range, which contains `offset` by construction.
-    fn is_visible(&self, scope_id: ScopeId, pos: usize, offset: u32) -> bool {
+        fn is_visible(&self, scope_id: ScopeId, pos: usize, offset: u32) -> bool {
         let scope = &self.scopes[scope_id.0 as usize];
         match scope.kind {
             ScopeKind::Let | ScopeKind::Lambda => {
@@ -540,8 +388,6 @@ impl<'a> Built<'a> {
     }
 }
 
-/// Pass-1 scratch state: the walker's output plus the scope stack that
-/// tracks which scope each newly created construct belongs to.
 struct Builder<'a> {
     source: &'a str,
     scopes: Vec<Scope<'a>>,
@@ -556,6 +402,10 @@ struct Builder<'a> {
 impl<'a> Builder<'a> {
     fn push_ident(&mut self, token: &'a SyntaxToken) {
         let scope_id = *self.stack.last().expect("root scope always active");
+        self.push_ident_in(token, scope_id);
+    }
+
+    fn push_ident_in(&mut self, token: &'a SyntaxToken, scope_id: ScopeId) {
         let via_with = self.with_stack.last().copied();
         self.idents.push((token, scope_id, via_with));
     }
@@ -575,13 +425,11 @@ impl<'a> Builder<'a> {
         id
     }
 
-    /// Close the current scope, restoring its parent.
-    fn pop_scope(&mut self) {
+        fn pop_scope(&mut self) {
         self.stack.pop();
     }
 
-    /// Record one binding in `scope`, visible from `visible_from`.
-    fn register(
+        fn register(
         &mut self,
         name: &'a SyntaxToken,
         kind: BindingKind,
@@ -600,20 +448,14 @@ impl<'a> Builder<'a> {
         slot.visible_from.push(visible_from);
     }
 
-    /// The first plain-name element of a binding's attrpath: the single
-    /// name that binding introduces. String-led paths (`"a".b = ...`)
-    /// bind a name we cannot represent as one token, so they are
-    /// skipped.
-    fn binding_name(binding: &strictix_syntax::Binding<'a>) -> Option<&'a SyntaxToken> {
+        fn binding_name(binding: &strictix_syntax::Binding<'a>) -> Option<&'a SyntaxToken> {
         match binding.attrpath()?.elements().next()? {
             AttrName::Ident(token) => Some(token),
             AttrName::Str(_) | AttrName::Interp(_) => None,
         }
     }
 
-    /// Whether an application is an `import` call: `import arg` or
-    /// `builtins.import arg`.
-    fn is_import(source: &str, apply: &strictix_syntax::ApplyExpr<'a>) -> bool {
+        fn is_import(source: &str, apply: &strictix_syntax::ApplyExpr<'a>) -> bool {
         match apply.func() {
             Some(Expr::Ident(token)) => token.text(source) == "import",
             Some(Expr::Select(select)) => {
@@ -638,15 +480,11 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Walk one expression subtree: open scopes, register bindings,
-    /// collect import sites, and push every expression-position ident
-    /// token for pass 2. Malformed regions never reach this function —
-    /// `Expr::cast` rejects ErrorNode subtrees — so a broken source
-    /// yields an empty or partial model, never a panic.
-    fn walk_expr(&mut self, expr: Expr<'a>) {
+        fn walk_expr(&mut self, expr: Expr<'a>) {
         match expr {
             Expr::Ident(token) => self.push_ident(token),
             Expr::Let(let_expr) => {
+                let parent_scope = *self.stack.last().expect("root scope always active");
                 let scope = self.new_scope(ScopeKind::Let, let_expr.range());
                 if let Some(bindings) = let_expr.bindings() {
                     for item in bindings.items() {
@@ -673,7 +511,7 @@ impl<'a> Builder<'a> {
                                 }
                                 for name in inherit.names() {
                                     if inherit.source().is_none() {
-                                        self.push_ident(name);
+                                        self.push_ident_in(name, parent_scope);
                                     }
                                     let visible_from = let_expr.range().start();
                                     self.register(
@@ -768,6 +606,7 @@ impl<'a> Builder<'a> {
             }
             Expr::RecAttrset(rec) => {
                 if let Some(attrset) = rec.attrset() {
+                    let parent_scope = *self.stack.last().expect("root scope always active");
                     let scope = self.new_scope(ScopeKind::Rec, attrset.range());
                     for item in attrset.items() {
                         match item {
@@ -793,7 +632,7 @@ impl<'a> Builder<'a> {
                                 }
                                 for name in inherit.names() {
                                     if inherit.source().is_none() {
-                                        self.push_ident(name);
+                                        self.push_ident_in(name, parent_scope);
                                     }
                                     self.register(
                                         name,
@@ -887,9 +726,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Walk the interpolated subexpressions of a string. Interpolations
-    /// ARE expression positions; literal content is not.
-    fn walk_string_parts(&mut self, parts: impl IntoIterator<Item = StringPart<'a>>) {
+        fn walk_string_parts(&mut self, parts: impl IntoIterator<Item = StringPart<'a>>) {
         for part in parts {
             if let StringPart::Interp(interp) = part {
                 if let Some(inner) = interp.expr() {
@@ -899,9 +736,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Interpolations inside (quoted or unquoted) attrpath segments are
-    /// evaluated, so they are expression positions.
-    fn walk_attrpath_interps(&mut self, path: Option<strictix_syntax::Attrpath<'a>>) {
+        fn walk_attrpath_interps(&mut self, path: Option<strictix_syntax::Attrpath<'a>>) {
         if let Some(p) = path {
             for element in p.elements() {
                 match element {

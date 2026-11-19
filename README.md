@@ -2,7 +2,7 @@
 
 strictix lints Nix code and fixes what it safely can.
 
-It is one Rust binary with its own Nix parser. It reports code that will fail or is likely wrong (option names and paths that don't exist, type errors in literals, dead bindings, shadowing) and suggests simpler forms of code that works. It has 114 rules; 14 are opt-in.
+It is one Rust binary with its own Nix parser. It reports code that will fail or is likely wrong (option names and paths that don't exist, type errors in literals, dead bindings, shadowing) and suggests simpler forms of code that works. It has 118 rules; 15 are opt-in.
 
 ## Build and run
 

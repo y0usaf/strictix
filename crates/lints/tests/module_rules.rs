@@ -149,3 +149,32 @@ fn imports_respect_quoted_config_and_library_shadowing() {
         assert!(check(source, ConfigDependentImports).is_empty(), "{source}");
     }
 }
+
+#[test]
+fn redundant_priority_fixes_identical_nesting_and_flags_conflicts() {
+    use strictix_lints::module_rules::RedundantPriority;
+    let rules: Vec<Box<dyn strictix_core::rules::Rule>> = vec![Box::new(RedundantPriority)];
+
+    let src1 = "{ lib, ... }: { a = lib.mkDefault (lib.mkDefault 1); }";
+    let res1 = strictix_core::rules::lint(&rules, src1, None, &LintConfig::default(), true);
+    assert!(res1.error.is_none());
+    assert_eq!(
+        res1.fixed.as_deref(),
+        Some("{ lib, ... }: { a = lib.mkDefault 1; }")
+    );
+
+    let src2 = "{ lib, ... }: { a = lib.mkForce (lib.mkDefault 1); }";
+    let res2 = strictix_core::rules::lint(&rules, src2, None, &LintConfig::default(), true);
+    assert_eq!(res2.diagnostics.len(), 1);
+    assert!(res2.diagnostics[0]
+        .message
+        .contains("conflicting nested priority wrappers"));
+    assert_eq!(res2.fixed, None, "conflicting wrappers must not auto-fix");
+
+    let src3 = "{ lib, ... }: { config = lib.mkMerge [ { a.b = lib.mkDefault 1; } { a.b = lib.mkForce 2; } ]; }";
+    let res3 = strictix_core::rules::lint(&rules, src3, None, &LintConfig::default(), false);
+    assert_eq!(res3.diagnostics.len(), 1);
+    assert!(res3.diagnostics[0]
+        .message
+        .contains("conflicting priorities"));
+}

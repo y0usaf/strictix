@@ -1,4 +1,3 @@
-//! Conservative recognition of conventional Nix library helpers and aliases.
 use strictix_core::semantic::{BindingKind, SemanticModel};
 use strictix_syntax::{AstNode, AttrName, Expr, InheritStmt, WithExpr};
 
@@ -14,6 +13,11 @@ fn member(base: LibraryValue, name: &str) -> Option<LibraryValue> {
     }
     [
         "mkIf",
+        "mkDefault",
+        "mkForce",
+        "mkOptionDefault",
+        "mkOverride",
+        "mkMerge",
         "optional",
         "optionals",
         "optionalAttrs",
@@ -68,8 +72,8 @@ fn library_value(model: &SemanticModel<'_>, expr: Expr<'_>, fuel: usize) -> Opti
                 model
                     .root()
                     .walk_containing(binding.name.range().start(), |node| {
-                        if let Some(stmt) =
-                            InheritStmt::cast(node).filter(|i| i.names().any(|n| n.range() == binding.name.range()))
+                        if let Some(stmt) = InheritStmt::cast(node)
+                            .filter(|i| i.names().any(|n| n.range() == binding.name.range()))
                         {
                             inherit = Some(stmt);
                             true

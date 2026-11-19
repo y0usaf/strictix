@@ -1,10 +1,3 @@
-//! Integration tests for the style rules.
-//!
-//! These are snapshot-style tests like the node-rule suite: every
-//! diagnostic is rendered with the contract one-line format and compared
-//! against an exact string. `run` runs all fifteen style rules and
-//! returns the rendered findings in source order.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::Diagnostic,
@@ -19,7 +12,6 @@ use strictix_lints::style_rules::{
 };
 use strictix_syntax::parse;
 
-/// All sixteen style rules.
 fn all_rules() -> Vec<Box<dyn Rule>> {
     vec![
         Box::new(EmptyLetIn {}),
@@ -40,10 +32,6 @@ fn all_rules() -> Vec<Box<dyn Rule>> {
     ]
 }
 
-/// Parse `source` and run all sixteen style rules with an empty config.
-///
-/// Diagnostics are sorted by (start, end) so results are in source
-/// order, then rendered as the contract one-line format.
 fn run(source: &str) -> Vec<String> {
     let tree = parse(source);
     let model = SemanticModel::new(source, &tree);
@@ -60,7 +48,6 @@ fn run(source: &str) -> Vec<String> {
     diags.iter().map(render).collect()
 }
 
-/// The deterministic one-line rendering shared by CLI and tests.
 fn render(diag: &Diagnostic) -> String {
     format!(
         "[{}] {} {}..{} {}",
@@ -72,7 +59,6 @@ fn render(diag: &Diagnostic) -> String {
     )
 }
 
-/// Run all rules over `source`, returning the raw diagnostics.
 fn run_rules_only(source: &str) -> Vec<Diagnostic> {
     let tree = parse(source);
     let model = SemanticModel::new(source, &tree);
@@ -88,8 +74,6 @@ fn run_rules_only(source: &str) -> Vec<Diagnostic> {
     diags
 }
 
-/// Apply the fix of the single diagnostic with `code`, returning the
-/// rewrite.
 fn fix_result(source: &str, code: &str) -> String {
     let diag = run_rules_only(source)
         .into_iter()
@@ -410,5 +394,17 @@ fn unquoted_uri_fix_quotes() {
     assert_eq!(
         fix_result("fetchurl https://example.com/x", "unquoted-uri"),
         "fetchurl \"https://example.com/x\"",
+    );
+}
+
+#[test]
+fn collapsible_let_in_skips_shadowing_or_capture() {
+    assert!(
+        run("let x = 1; in let x = 2; in x").is_empty(),
+        "collapsing duplicate let names would create a duplicate-attribute error"
+    );
+    assert!(
+        run("let y = x; in let x = 2; in y").is_empty(),
+        "collapsing would silently capture x in y"
     );
 }

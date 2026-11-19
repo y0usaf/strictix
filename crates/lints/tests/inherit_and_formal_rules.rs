@@ -123,3 +123,48 @@ fn shadowed_formal_exempts_a_generator_syntax_tree() {
     );
     assert_eq!(at(&format!("{{ window = {tree}; }}")), 1);
 }
+
+#[test]
+fn unused_inherit_fixes_single_name_in_multi_name_let_inherit() {
+    let source = "let inherit (pkgs) used unused; in used";
+    let res = strictix_core::rules::lint(
+        &[Box::new(UnusedInherit)],
+        source,
+        None,
+        &LintConfig::default(),
+        true,
+    );
+    assert!(res.error.is_none());
+    assert_eq!(
+        res.fixed.as_deref(),
+        Some("let inherit (pkgs) used; in used")
+    );
+}
+
+#[test]
+fn unused_inherit_removes_whole_statement_when_all_names_unused_in_let() {
+    let source = "let inherit (pkgs) a b; in 1";
+    let res = strictix_core::rules::lint(
+        &[Box::new(UnusedInherit)],
+        source,
+        None,
+        &LintConfig::default(),
+        true,
+    );
+    assert!(res.error.is_none());
+    assert_eq!(res.fixed.as_deref(), Some("let in 1"));
+}
+
+#[test]
+fn unused_inherit_does_not_auto_fix_rec_attrset() {
+    let source = "rec { inherit (src) used unused; x = used; }";
+    let res = strictix_core::rules::lint(
+        &[Box::new(UnusedInherit)],
+        source,
+        None,
+        &LintConfig::default(),
+        true,
+    );
+    assert!(res.error.is_none());
+    assert_eq!(res.fixed, None, "rec attrset fields are exported outputs");
+}
