@@ -408,3 +408,16 @@ fn collapsible_let_in_skips_shadowing_or_capture() {
         "collapsing would silently capture x in y"
     );
 }
+
+#[test]
+fn useless_parens_adjacent_delimiters_preserve_separator() {
+    let run = strictix_core::rules::lint(
+        &strictix_lints::all_rules(),
+        "x: [ (x)(x) ]",
+        None,
+        &LintConfig::default(),
+        true,
+    );
+    assert!(run.error.is_none());
+    assert_eq!(run.fixed.as_deref(), Some("x: [ x x ]"));
+}

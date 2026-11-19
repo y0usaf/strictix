@@ -315,7 +315,11 @@ fn select_pass_edits(diags: &[Diagnostic]) -> Vec<TextEdit> {
             && outer.range != inner.range
     };
 
-    let mut selected = Vec::new();
+    let touches = |a: &TextEdit, b: &TextEdit| -> bool {
+        a.range.end() == b.range.start() || b.range.end() == a.range.start()
+    };
+
+    let mut selected: Vec<TextEdit> = Vec::new();
     for (i, group) in groups.iter().enumerate() {
         let nested_in_other = groups.iter().enumerate().any(|(j, other)| {
             i != j
@@ -323,9 +327,16 @@ fn select_pass_edits(diags: &[Diagnostic]) -> Vec<TextEdit> {
                     .iter()
                     .all(|e_in| other.iter().any(|e_out| strictly_contains(e_out, e_in)))
         });
-        if !nested_in_other {
-            selected.extend(group.iter().cloned());
+        if nested_in_other {
+            continue;
         }
+        let touches_selected = group
+            .iter()
+            .any(|e| selected.iter().any(|s| touches(e, s)));
+        if touches_selected {
+            continue;
+        }
+        selected.extend(group.iter().cloned());
     }
     selected
 }
