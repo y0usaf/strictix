@@ -12,6 +12,10 @@
 //! schema rule caches its options.json parse in a process-wide
 //! OnceLock, so sharing is both safe and correct.
 
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod args;
 mod config;
 mod format;

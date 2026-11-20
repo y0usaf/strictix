@@ -45,7 +45,7 @@ Languages: css, glsl, javascript, lisp, lua, luau, markdown, patch, python, shel
 
 ## Dependencies
 
-Build: Rust and the tree-sitter grammars in `Cargo.lock`. Run time: nothing for `check` and `fix`. `merge`, `split` and `import` call `nix` to evaluate `--expand` helpers, to render each conversion before writing it, and to run the flake's `formatter` when it has one. The `unformatted-file` rule runs whatever formatter you configure.
+Build: Rust, the tree-sitter grammars in `Cargo.lock`, and `mimalloc` on musl targets. Linux Nix builds produce a fully static musl binary (0 dynamic libraries, 1 store path). Run time: nothing for `check`, `fix`, `list`, and `explain`. Optional external commands: `nix` is called only by `merge` (`--expand` and flake `formatter`), `split` (flake `formatter`), and `import` (round-trip rendering check); the opt-in `unformatted-file` rule runs whatever formatter command you configure in `strictix.toml`.
 
 ## Config
 
