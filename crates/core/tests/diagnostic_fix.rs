@@ -129,3 +129,16 @@ fn fix_two_edits_swap_pieces() {
         Ok("three two one".to_string()),
     );
 }
+
+#[test]
+fn mid_utf8_boundary_returns_invalid_boundary() {
+    let source = "aé";
+    assert_eq!(
+        apply_fixes(source, &[TextEdit::new(TextRange::new(2, 3), "e")]),
+        Err(FixError::InvalidBoundary(TextRange::new(2, 3))),
+    );
+    assert_eq!(
+        apply_fixes(source, &[TextEdit::new(TextRange::new(0, 2), "x")]),
+        Err(FixError::InvalidBoundary(TextRange::new(0, 2))),
+    );
+}

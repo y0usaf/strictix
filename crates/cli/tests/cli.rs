@@ -1006,3 +1006,191 @@ fn check_and_fix_lint_a_merged_file_as_the_files_it_holds() {
     std::fs::remove_dir_all(plain).unwrap();
     std::fs::remove_dir_all(merged).unwrap();
 }
+
+#[test]
+fn import_split_keeps_target_when_any_module_cannot_bind_generators() {
+    let dir = temp_tree(
+        "import-split-partial",
+        &[
+            ("x.lua", "return 1\n"),
+            ("a.nix", "{ ... }: { src = ./x.lua; }\n"),
+            ("b.nix", "pkgs: { src = ./x.lua; }\n"),
+        ],
+    );
+    let out = run_in(&dir, &["import", "--split", "."]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("x.lua").exists(), "shared file must not be deleted");
+    assert!(!dir.join("x.lua.nix").exists(), "split file must not be written");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("a.nix")).unwrap(),
+        "{ ... }: { src = ./x.lua; }\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("b.nix")).unwrap(),
+        "pkgs: { src = ./x.lua; }\n"
+    );
+    assert!(text.contains("kept "), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_target_with_unrecognized_or_unparseable_references() {
+    let dir = temp_tree(
+        "import-unrecognized",
+        &[
+            ("init.lua", "return 1\n"),
+            ("other.lua", "return 2\n"),
+            (
+                "a.nix",
+                "{ generators, ... }: {\n  text = builtins.readFile ./init.lua;\n  extra = builtins.path { path = ./init.lua; };\n  ok = builtins.readFile ./other.lua;\n}\n",
+            ),
+            ("broken.nix", "{ x = ; y = ./other.lua;\n"),
+        ],
+    );
+    let out = run_in(&dir, &["import", "."]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("init.lua").exists(), "init.lua must be kept");
+    assert!(dir.join("other.lua").exists(), "other.lua must be kept");
+    assert!(text.contains("referenced outside supported import sites"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_refuses_target_outside_scanned_root() {
+    let dir = temp_tree(
+        "import-outside-root",
+        &[
+            ("shared/init.lua", "return 1\n"),
+            (
+                "modules/a.nix",
+                "{ generators, ... }: { text = builtins.readFile ../shared/init.lua; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "modules"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("shared/init.lua").exists(), "outside file must not be deleted");
+    assert!(text.contains("outside the scanned root"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_split_refuses_to_overwrite_existing_split_file() {
+    let dir = temp_tree(
+        "import-split-exists",
+        &[
+            ("x.lua", "return 1\n"),
+            ("x.lua.nix", "{ existing = true; }\n"),
+            ("a.nix", "{ generators, ... }: { src = ./x.lua; }\n"),
+        ],
+    );
+    let out = run_in(&dir, &["import", "--split", "."]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("x.lua").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("x.lua.nix")).unwrap(),
+        "{ existing = true; }\n"
+    );
+    assert!(text.contains("already exists"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_single_file_keeps_target_referenced_by_sibling_module() {
+    let dir = temp_tree(
+        "import-single-file",
+        &[
+            ("x.lua", "return 1\n"),
+            ("a.nix", "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n"),
+            ("b.nix", "{ other = ./x.lua; }\n"),
+        ],
+    );
+    let out = run_in(&dir, &["import", "a.nix"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("x.lua").exists());
+    assert!(text.contains("referenced outside supported import sites"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn fix_json_reports_write_error_and_exits_nonzero() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = temp_tree("fix-json-write-err", &[("a.nix", "let unused = 1; in 2\n")]);
+    let file = dir.join("a.nix");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let out = run_in(&dir, &["fix", "--format", "json", "a.nix"]);
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "stdout={} stderr={stderr}", stdout(&out));
+    assert!(stderr.contains("error: a.nix:"), "{stderr}");
+    assert!(stdout(&out).trim_start().starts_with('{'), "{}", stdout(&out));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn unformatted_file_in_fix_mode_handles_utf8_and_preserves_diags_on_formatter_error() {
+    let dir = temp_tree(
+        "unformatted-fix-utf8",
+        &[
+            (
+                "strictix.toml",
+                "[lint]\nenabled = [\"unformatted-file\"]\n\n[lint.\"unformatted-file\"]\ncommand = \"tr x X\"\n",
+            ),
+            ("a.nix", "let\n  unused = 1;\n  msg = \"ééééé\";\nin\n  { x = msg; }\n"),
+        ],
+    );
+    let out = run_in(&dir, &["fix", "--dry-run", "a.nix"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("warning[unformatted-file]"), "{text}");
+
+    std::fs::write(
+        dir.join("strictix.toml"),
+        "[lint]\nenabled = [\"unformatted-file\"]\n\n[lint.\"unformatted-file\"]\ncommand = \"false\"\n",
+    )
+    .unwrap();
+    let failed = run_in(&dir, &["check", "a.nix"]);
+    let text = stdout(&failed);
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(stderr.contains("the formatter false failed"), "{stderr}");
+    assert!(text.contains("warning[unused-let-binding]"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}

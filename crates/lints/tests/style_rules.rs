@@ -433,3 +433,31 @@ fn useless_parens_adjacent_delimiters_preserve_separator() {
     assert!(run.error.is_none());
     assert_eq!(run.fixed.as_deref(), Some("x: [ x x ]"));
 }
+
+#[test]
+fn collapsible_let_in_preserves_comments_without_fix() {
+    let src = "let x = 1; in # keep me\nlet y = 2; in x + y";
+    let diags = strictix_core::rules::lint(
+        &strictix_lints::all_rules(),
+        src,
+        None,
+        &LintConfig::default(),
+        false,
+    )
+    .diagnostics;
+    let collapsible: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == "collapsible-let-in")
+        .collect();
+    assert_eq!(collapsible.len(), 1);
+    assert!(collapsible[0].fix.is_none());
+
+    let fixed_run = strictix_core::rules::lint(
+        &strictix_lints::all_rules(),
+        src,
+        None,
+        &LintConfig::default(),
+        true,
+    );
+    assert!(fixed_run.fixed.is_none());
+}

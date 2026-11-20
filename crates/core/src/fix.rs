@@ -88,12 +88,17 @@ pub enum FixError {
 /// - `Overlap` if two edits' ranges intersect.
 pub fn apply_fixes(source: &str, edits: &[TextEdit]) -> Result<String, FixError> {
     let mut sorted: Vec<&TextEdit> = edits.iter().collect();
-    sorted.sort_by_key(|b| std::cmp::Reverse(b.range.start()));
+    sorted.sort_by_key(|b| (std::cmp::Reverse(b.range.start()), std::cmp::Reverse(b.range.end())));
 
-    let src_len = source.len() as u32;
+    let src_len = source.len();
     for edit in &sorted {
-        if edit.range.end() > src_len {
+        let start = edit.range.start() as usize;
+        let end = edit.range.end() as usize;
+        if start > end || end > src_len {
             return Err(FixError::InvalidRange(edit.range));
+        }
+        if !source.is_char_boundary(start) || !source.is_char_boundary(end) {
+            return Err(FixError::InvalidBoundary(edit.range));
         }
     }
 

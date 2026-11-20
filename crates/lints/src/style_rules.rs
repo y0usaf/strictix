@@ -253,17 +253,25 @@ impl Rule for CollapsibleLetIn {
             return;
         };
         let range = TextRange::new(in_token.range().start(), let_token.range().end());
-        let replacement = crate::safe_delete_replacement(source, range);
-        let fix = Fix::new("collapse let-in").edit(range, replacement);
-        diags.push(
-            Diagnostic::new(
-                "collapsible-let-in",
-                Severity::Warning,
-                "these let-in expressions are collapsible",
-                node.content_range(),
-            )
-            .with_fix(fix),
+        let has_comments = node
+            .child_tokens()
+            .chain(inner.syntax().child_tokens())
+            .any(|t| {
+                t.kind() == K::Comment
+                    && t.range().start() >= range.start()
+                    && t.range().end() <= range.end()
+            });
+        let mut diag = Diagnostic::new(
+            "collapsible-let-in",
+            Severity::Warning,
+            "these let-in expressions are collapsible",
+            node.content_range(),
         );
+        if !has_comments {
+            let replacement = crate::safe_delete_replacement(source, range);
+            diag = diag.with_fix(Fix::new("collapse let-in").edit(range, replacement));
+        }
+        diags.push(diag);
     }
 }
 

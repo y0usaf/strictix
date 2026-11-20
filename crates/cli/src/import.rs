@@ -13,6 +13,7 @@
 //! is and reported.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -38,11 +39,18 @@ enum Place {
 
 struct Site {
     module: PathBuf,
+    canon_module: PathBuf,
     range: TextRange,
     place: Place,
     line: usize,
-    /// Whether `generators` is in scope where the file is named.
     bound: bool,
+}
+
+struct PathRef {
+    module: PathBuf,
+    canon_module: PathBuf,
+    range: TextRange,
+    line: usize,
 }
 
 pub struct Options {
@@ -70,28 +78,79 @@ pub fn run(options: &Options) -> Result<Report, String> {
         options.paths.clone()
     };
     let (files, _, _) = walk::collect_files(&paths, None)?;
+    let mut scanned_roots: Vec<PathBuf> = Vec::new();
+    let mut has_file_arg = false;
+    for path in &paths {
+        let root = if path.is_dir() {
+            path.as_path()
+        } else {
+            has_file_arg = true;
+            module_dir(path)
+        };
+        let canonical = std::fs::canonicalize(root)
+            .map_err(|e| format!("cannot resolve {}: {e}", root.display()))?;
+        if !scanned_roots.contains(&canonical) {
+            scanned_roots.push(canonical);
+        }
+    }
+    let extra_ref_files = if has_file_arg {
+        let (all, _, _) = walk::collect_files(&scanned_roots, None)?;
+        all
+    } else {
+        Vec::new()
+    };
+
     let mut report = Report::default();
     let mut sites: BTreeMap<PathBuf, Vec<Site>> = BTreeMap::new();
-    let mut modules: Vec<(PathBuf, String, SyntaxNode)> = Vec::new();
+    let mut all_refs: BTreeMap<PathBuf, Vec<PathRef>> = BTreeMap::new();
+    let mut unparsed_files: Vec<(PathBuf, String)> = Vec::new();
+    let mut modules: Vec<(PathBuf, PathBuf, String, SyntaxNode)> = Vec::new();
+    let mut module_formals: BTreeMap<PathBuf, Result<u32, String>> = BTreeMap::new();
+    let mut seen_modules: BTreeSet<PathBuf> = BTreeSet::new();
+
     for module in &files {
-        let source = std::fs::read_to_string(module)
-            .map_err(|e| format!("cannot read {}: {e}", module.display()))?;
-        let tree = parse(&source);
-        if tree.error_nodes().next().is_some() {
+        let canon_module = std::fs::canonicalize(module)
+            .map_err(|e| format!("cannot resolve {}: {e}", module.display()))?;
+        if !seen_modules.insert(canon_module.clone()) {
             continue;
         }
-        let dir = module.parent().unwrap_or(Path::new("")).to_path_buf();
+        let source = std::fs::read_to_string(module)
+            .map_err(|e| format!("cannot read {}: {e}", module.display()))?;
+        let dir = module_dir(module);
+        collect_path_refs(&source, module, &canon_module, dir, &mut all_refs);
+        let tree = parse(&source);
+        if tree.error_nodes().next().is_some() {
+            unparsed_files.push((module.clone(), source));
+            continue;
+        }
         let model = SemanticModel::new(&source, &tree);
-        for site in find(&source, &tree, &dir) {
+        for site in find(&source, &tree, dir) {
             sites.entry(site.key).or_default().push(Site {
                 module: module.clone(),
+                canon_module: canon_module.clone(),
                 range: site.range,
                 place: site.place,
                 line: site.line,
                 bound: model.is_bound("generators", site.range.start()),
             });
         }
-        modules.push((module.clone(), source, tree));
+        module_formals.insert(canon_module.clone(), formal_spot(&tree));
+        modules.push((module.clone(), canon_module, source, tree));
+    }
+
+    for extra_file in &extra_ref_files {
+        let canon_file = std::fs::canonicalize(extra_file)
+            .map_err(|e| format!("cannot resolve {}: {e}", extra_file.display()))?;
+        if !seen_modules.insert(canon_file.clone()) {
+            continue;
+        }
+        let source = std::fs::read_to_string(extra_file)
+            .map_err(|e| format!("cannot read {}: {e}", extra_file.display()))?;
+        let dir = module_dir(extra_file);
+        collect_path_refs(&source, extra_file, &canon_file, dir, &mut all_refs);
+        if parse(&source).error_nodes().next().is_some() {
+            unparsed_files.push((extra_file.clone(), source));
+        }
     }
 
     let generators = match &options.generators {
@@ -106,13 +165,59 @@ pub fn run(options: &Options) -> Result<Report, String> {
         }
     };
     let mut imported: BTreeMap<PathBuf, Imported> = BTreeMap::new();
-    let mut owners: BTreeMap<PathBuf, &PathBuf> = BTreeMap::new();
+    let mut calls: BTreeMap<PathBuf, String> = BTreeMap::new();
+    let mut split: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
     for (target, found) in &sites {
+        let first = &found[0];
+        if !scanned_roots.iter().any(|root| target.starts_with(root)) {
+            report.kept.push((
+                target.clone(),
+                format!(
+                    "{}:{}: outside the scanned root",
+                    first.module.display(),
+                    first.line
+                ),
+            ));
+            continue;
+        }
+        if let Some(unrecognized) = all_refs.get(target).and_then(|refs| {
+            refs.iter().find(|r| {
+                !found.iter().any(|site| {
+                    site.canon_module == r.canon_module
+                        && site.range.start() <= r.range.start()
+                        && r.range.end() <= site.range.end()
+                })
+            })
+        }) {
+            report.kept.push((
+                target.clone(),
+                format!(
+                    "{}:{}: referenced outside supported import sites",
+                    unrecognized.module.display(),
+                    unrecognized.line
+                ),
+            ));
+            continue;
+        }
+        if let Some(file_name) = target.file_name().and_then(|name| name.to_str()) {
+            if let Some((broken, _)) = unparsed_files
+                .iter()
+                .find(|(_, source)| source.contains(file_name))
+            {
+                report.kept.push((
+                    target.clone(),
+                    format!(
+                        "{}: may be referenced by a file with syntax errors",
+                        broken.display()
+                    ),
+                ));
+                continue;
+            }
+        }
         let mut users: BTreeSet<&PathBuf> = BTreeSet::new();
         for site in found {
             users.insert(&site.module);
         }
-        let first = &found[0];
         if users.len() > 1 && !options.split {
             let names: Vec<String> = users
                 .iter()
@@ -129,9 +234,44 @@ pub fn run(options: &Options) -> Result<Report, String> {
             ));
             continue;
         }
+        if options.split {
+            let dest = split_path(target);
+            if dest.exists() {
+                report.kept.push((
+                    target.clone(),
+                    format!(
+                        "{}:{}: {} already exists",
+                        first.module.display(),
+                        first.line,
+                        dest.display()
+                    ),
+                ));
+                continue;
+            }
+        }
+        let blocked_formal = found.iter().find_map(|site| {
+            if site.bound {
+                return None;
+            }
+            match module_formals.get(&site.canon_module) {
+                Some(Err(reason)) => Some((site, reason.as_str())),
+                None => Some((site, "the file could not be analyzed")),
+                Some(Ok(_)) => None,
+            }
+        });
+        if let Some((site, reason)) = blocked_formal {
+            report.kept.push((
+                target.clone(),
+                format!("{}:{}: {reason}", site.module.display(), site.line),
+            ));
+            continue;
+        }
         match convert(target) {
             Ok(converted) => {
-                owners.insert(target.clone(), &first.module);
+                calls.insert(target.clone(), converted.call());
+                if options.split {
+                    split.insert(target.clone(), split_path(target));
+                }
                 imported.insert(target.clone(), converted);
             }
             Err(reason) => report.kept.push((
@@ -140,57 +280,23 @@ pub fn run(options: &Options) -> Result<Report, String> {
             )),
         }
     }
-    let languages: BTreeSet<&str> = imported
-        .values()
-        .filter_map(Imported::tree_language)
-        .collect();
-    let attrs = generator_attrs(&generators, &languages)?;
-    let mut calls: BTreeMap<PathBuf, String> = BTreeMap::new();
-    let mut split: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
-    for (target, converted) in &imported {
-        let Some(owner) = owners.get(target) else {
-            continue;
-        };
-        let Some((_, source, tree)) = modules.iter().find(|(module, _, _)| module == *owner) else {
-            continue;
-        };
-        let model = SemanticModel::new(source, tree);
-        let site = &sites[target][0];
-        let known = converted
-            .tree_language()
-            .and_then(|language| attrs.get(language));
-        let extra: Vec<String> = converted
-            .names()
-            .iter()
-            .filter(|name| {
-                known.is_none_or(|known| !known.contains(*name))
-                    && model.resolve_lexical(name, site.range.start()).is_some()
-            })
-            .cloned()
-            .collect();
-        if options.split {
-            let path = split_path(target);
-            split.insert(target.clone(), path);
-            calls.insert(target.clone(), converted.call(&[]));
-        } else {
-            calls.insert(target.clone(), converted.call(&extra));
-        }
-    }
     for (target, reason) in check(&generators, &calls)? {
         calls.remove(&target);
+        split.remove(&target);
         report.kept.push((target, reason));
     }
 
     let mut spliced: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut rewritten_counts: BTreeMap<PathBuf, usize> = BTreeMap::new();
     let mut rewritten: Vec<(PathBuf, String)> = Vec::new();
-    for (module, source, tree) in &modules {
+    for (module, canon_module, source, tree) in &modules {
         let local: Vec<(&PathBuf, &Site)> = sites
             .iter()
             .filter(|(target, _)| calls.contains_key(*target))
             .flat_map(|(target, found)| {
                 found
                     .iter()
-                    .filter(|site| &site.module == module)
+                    .filter(|site| &site.canon_module == canon_module)
                     .map(move |site| (target, site))
             })
             .collect();
@@ -203,17 +309,9 @@ pub fn run(options: &Options) -> Result<Report, String> {
         }
         let needs_generators = local.iter().any(|(_, site)| !site.bound);
         let formal = if needs_generators {
-            match formal_spot(tree) {
-                Ok(at) => Some(at),
-                Err(reason) => {
-                    for (target, found) in &by_target {
-                        report.kept.push((
-                            (*target).clone(),
-                            format!("{}:{}: {reason}", module.display(), found[0].line),
-                        ));
-                    }
-                    continue;
-                }
+            match module_formals.get(canon_module) {
+                Some(Ok(at)) => Some(*at),
+                _ => continue,
             }
         } else {
             None
@@ -231,6 +329,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
                 None
             };
             spliced.insert(target.clone());
+            *rewritten_counts.entry(target.clone()).or_default() += found.len();
             for site in found {
                 let imported = split.get(target).map_or_else(
                     || code.clone(),
@@ -260,7 +359,9 @@ pub fn run(options: &Options) -> Result<Report, String> {
             };
             edits.push((TextRange::new(at, at), text));
         }
-        edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start()));
+        edits.sort_by_key(|(range, _)| {
+            (std::cmp::Reverse(range.start()), std::cmp::Reverse(range.end()))
+        });
         let mut text = source.clone();
         for (range, replacement) in edits {
             text.replace_range(range.start() as usize..range.end() as usize, &replacement);
@@ -270,6 +371,9 @@ pub fn run(options: &Options) -> Result<Report, String> {
     }
 
     for target in split.keys() {
+        if !spliced.contains(target) {
+            continue;
+        }
         let Some(code) = calls.get(target) else {
             continue;
         };
@@ -291,7 +395,9 @@ pub fn run(options: &Options) -> Result<Report, String> {
     }
     if options.dry_run {
         for (target, path) in &split {
-            println!("{} would become {}", target.display(), path.display());
+            if spliced.contains(target) {
+                println!("{} would become {}", target.display(), path.display());
+            }
         }
         for (module, text) in &rewritten {
             let original = std::fs::read_to_string(module)
@@ -301,8 +407,16 @@ pub fn run(options: &Options) -> Result<Report, String> {
         return Ok(report);
     }
     for (target, path) in &split {
+        if !spliced.contains(target) {
+            continue;
+        }
         if let Some(code) = calls.get(target) {
-            std::fs::write(path, format!("{{generators}}: {code}\n"))
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+            file.write_all(format!("{{generators}}: {code}\n").as_bytes())
                 .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         }
     }
@@ -312,6 +426,10 @@ pub fn run(options: &Options) -> Result<Report, String> {
         report.modules.push(module);
     }
     for target in &spliced {
+        let expected = sites.get(target).map_or(0, Vec::len);
+        if rewritten_counts.get(target).copied() != Some(expected) {
+            continue;
+        }
         std::fs::remove_file(target)
             .map_err(|e| format!("cannot delete {}: {e}", target.display()))?;
         report.deleted.push(target.clone());
@@ -334,6 +452,43 @@ pub fn run(options: &Options) -> Result<Report, String> {
         })
         .collect();
     Ok(report)
+}
+
+fn module_dir(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+}
+
+fn collect_path_refs(
+    source: &str,
+    module: &Path,
+    canon_module: &Path,
+    dir: &Path,
+    refs: &mut BTreeMap<PathBuf, Vec<PathRef>>,
+) {
+    for token in strictix_syntax::lex(source) {
+        if token.kind != SyntaxKind::Path {
+            continue;
+        }
+        let text = token.text(source);
+        if text.starts_with("~/") || text.contains("${") {
+            continue;
+        }
+        let Ok(resolved) = std::fs::canonicalize(dir.join(text)) else {
+            continue;
+        };
+        if !resolved.is_file() {
+            continue;
+        }
+        let range = TextRange::new(token.start, token.start + token.len);
+        refs.entry(resolved).or_default().push(PathRef {
+            module: module.to_path_buf(),
+            canon_module: canon_module.to_path_buf(),
+            range,
+            line: line_of(source, token.start),
+        });
+    }
 }
 
 struct Found {
@@ -422,7 +577,18 @@ fn find(source: &str, tree: &strictix_syntax::SyntaxNode, dir: &Path) -> Vec<Fou
             }
         }
     }
-    found
+    found.sort_by_key(|item| (item.range.start(), std::cmp::Reverse(item.range.end())));
+    let mut non_overlapping: Vec<Found> = Vec::with_capacity(found.len());
+    for item in found {
+        if non_overlapping
+            .last()
+            .is_some_and(|prev| item.range.start() < prev.range.end())
+        {
+            continue;
+        }
+        non_overlapping.push(item);
+    }
+    non_overlapping
 }
 
 /// The binding's last attribute name when it is static text: a `source`
@@ -572,23 +738,14 @@ impl Imported {
         }
     }
 
-    /// The call that prints the file. `extra` are names the tree reads that
-    /// the generator set does not hold and the module does.
-    fn call(&self, extra: &[String]) -> String {
+    fn call(&self) -> String {
         match self {
             Self::Tree {
                 language,
                 tree,
                 names,
             } => {
-                let set = if extra.is_empty() {
-                    format!("generators.{language}")
-                } else {
-                    format!(
-                        "(generators.{language} // {{ inherit {}; }})",
-                        extra.join(" ")
-                    )
-                };
+                let set = format!("generators.{language}");
                 let applied = if strictix_import::bound(language) {
                     format!("({tree}) {set}")
                 } else {
@@ -606,22 +763,6 @@ impl Imported {
             Self::Value {
                 generator, value, ..
             } => format!("generators.{generator} {value}"),
-        }
-    }
-
-    /// The language whose generator set holds this tree, if it is one.
-    fn tree_language(&self) -> Option<&'static str> {
-        match self {
-            Self::Tree { language, .. } => Some(language),
-            Self::Value { .. } => None,
-        }
-    }
-
-    /// The identifiers the tree reads that the generator set must supply.
-    fn names(&self) -> &[String] {
-        match self {
-            Self::Tree { names, .. } => names,
-            Self::Value { .. } => &[],
         }
     }
 }
@@ -679,45 +820,6 @@ fn eval_expression(expression: &str) -> Result<(bool, String, String), String> {
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
     ))
-}
-
-/// The attributes each generator set holds, so a tree's other formals can
-/// be taken from the module instead.
-fn generator_attrs(
-    generators: &str,
-    languages: &BTreeSet<&str>,
-) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    if languages.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-    let fields: Vec<String> = languages
-        .iter()
-        .map(|language| format!("{language} = builtins.attrNames generators.{language};"))
-        .collect();
-    let expression = format!(
-        "let generators = {generators}; in {{ {} }}",
-        fields.join(" ")
-    );
-    let (ok, stdout, stderr) = eval_expression(&expression)?;
-    if !ok {
-        return Err(format!("reading the generator sets failed:\n{stderr}"));
-    }
-    let json =
-        JsonValue::parse(&stdout).map_err(|e| format!("parsing nix eval output: {}", e.message))?;
-    let mut attrs = BTreeMap::new();
-    for (language, names) in json
-        .as_object()
-        .ok_or("the generator sets are not an object")?
-    {
-        let names = names
-            .as_array()
-            .ok_or("a generator's attributes are not a list")?
-            .iter()
-            .filter_map(|name| name.as_str().map(str::to_owned))
-            .collect();
-        attrs.insert(language.clone(), names);
-    }
-    Ok(attrs)
 }
 
 fn language(extension: &str) -> Option<&'static str> {

@@ -151,6 +151,36 @@
 
               nix eval --store dummy:// --impure --json --expr "$letcheck" | tee let-nix-out
               grep -qx true let-nix-out
+
+              mkdir -p splitpristine splitmodule
+              cp "$samples/lua.lua" splitpristine/shared.lua
+              cp "$samples/lua.lua" splitpristine/ok.lua
+              cp "$samples/lua.lua" splitmodule/shared.lua
+              cp "$samples/lua.lua" splitmodule/ok.lua
+              printf '{ ... }: {\n  shared = builtins.readFile ./shared.lua;\n  ok = builtins.readFile ./ok.lua;\n}\n' > splitmodule/a.nix
+              printf 'pkgs: {\n  shared = builtins.readFile ./shared.lua;\n}\n' > splitmodule/b.nix
+              printf '{ ... }: {\n  ok = builtins.readFile ./ok.lua;\n}\n' > splitmodule/c.nix
+
+              strictix import --split --generators "($generators)" splitmodule | tee split-report
+              test -f splitmodule/shared.lua
+              test ! -f splitmodule/shared.lua.nix
+              test ! -f splitmodule/ok.lua
+              test -f splitmodule/ok.lua.nix
+
+              splitcheck="
+                let
+                  generators = $generators;
+                  a = import ./splitmodule/a.nix { inherit generators; };
+                  b = import ./splitmodule/b.nix {};
+                  c = import ./splitmodule/c.nix { inherit generators; };
+                  origShared = builtins.readFile ./splitpristine/shared.lua;
+                  origOk = builtins.readFile ./splitpristine/ok.lua;
+                in
+                a.shared == origShared && b.shared == origShared && a.ok == origOk && c.ok == origOk
+              "
+
+              nix eval --store dummy:// --impure --json --expr "$splitcheck" | tee split-nix-out
+              grep -qx true split-nix-out
               touch $out
             '';      });
     };

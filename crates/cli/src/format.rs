@@ -5,7 +5,7 @@ use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_syntax::TextRange;
 
-const CODE: &str = "unformatted-file";
+pub const CODE: &str = "unformatted-file";
 
 pub fn command(config: &LintConfig) -> Option<&str> {
     (config.is_enabled(CODE) && config.enabled.iter().any(|code| code == CODE))
@@ -31,7 +31,7 @@ pub fn apply(
             result.diagnostics.sort_by_key(|d| d.range.start());
         }
         Ok(None) => {}
-        Err(message) => result.read_error = Some(format!("{}: {message}", path.display())),
+        Err(message) => result.format_error = Some(format!("{}: {message}", path.display())),
     }
 }
 

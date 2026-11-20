@@ -128,7 +128,7 @@ fn line_col(source: &str, offset: u32) -> (u32, u32) {
 /// offset sits past the end of the source.
 fn source_excerpt(source: &str, range: TextRange) -> Option<(&str, String)> {
     let start = range.start() as usize;
-    if start > source.len() {
+    if start > source.len() || !source.is_char_boundary(start) {
         return None;
     }
     let line_start = source[..start].rfind('\n').map_or(0, |i| i + 1);

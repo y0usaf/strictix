@@ -169,14 +169,39 @@ fn parse_string_array(value: &str) -> Result<Vec<String>, String> {
     if !value.starts_with('[') || !value.ends_with(']') {
         return Err("expected an array of strings".to_owned());
     }
-    let inner = &value[1..value.len() - 1];
-    if inner.trim().is_empty() {
-        return Ok(Vec::new());
+    let mut rest = value[1..value.len() - 1].trim();
+    let mut items = Vec::new();
+    while !rest.is_empty() {
+        if !rest.starts_with('"') {
+            return Err("expected a quoted string".to_owned());
+        }
+        let mut chars = rest.char_indices();
+        chars.next();
+        let mut escaped = false;
+        let mut end = None;
+        for (idx, c) in chars {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                end = Some(idx);
+                break;
+            }
+        }
+        let end = end.ok_or_else(|| "unterminated quoted string".to_owned())?;
+        items.push(parse_toml_string(&rest[..=end])?);
+        rest = rest[end + 1..].trim_start();
+        if rest.is_empty() {
+            break;
+        }
+        if let Some(after_comma) = rest.strip_prefix(',') {
+            rest = after_comma.trim_start();
+        } else {
+            return Err("expected ',' between array elements".to_owned());
+        }
     }
-    inner
-        .split(',')
-        .map(|s| parse_toml_string(s.trim()))
-        .collect()
+    Ok(items)
 }
 
 /// Parse a TOML basic string: `"..."` with the usual escapes.
@@ -231,5 +256,21 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["a.b", "c"]
         );
+    }
+
+    #[test]
+    fn string_arrays_support_commas_escapes_and_trailing_comma() {
+        let config = parse_config(
+            "[lint]\ngenerated = [\"a,b\", \"c\\\"d,e\", \"f\\\\\",]\n",
+        )
+        .unwrap();
+        assert_eq!(config.generated, [std::path::PathBuf::from("a,b"), std::path::PathBuf::from("c\"d,e"), std::path::PathBuf::from("f\\")]);
+    }
+
+    #[test]
+    fn string_arrays_reject_malformed_elements() {
+        assert!(parse_config("[lint]\ndisabled = [\"a\" \"b\"]\n").is_err());
+        assert!(parse_config("[lint]\ndisabled = [\"a\", , \"b\"]\n").is_err());
+        assert!(parse_config("[lint]\ndisabled = [\"unterminated]\n").is_err());
     }
 }

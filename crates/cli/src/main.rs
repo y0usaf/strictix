@@ -518,6 +518,7 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
                             path: path.clone(),
                             diagnostics,
                             read_error: None,
+                            format_error: None,
                             fixes_applied: 0,
                             fixed: None,
                             write_error: None,
@@ -541,6 +542,10 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
             eprintln!("error: {err}");
             any_error = true;
         } else {
+            if let Some(err) = &result.format_error {
+                eprintln!("error: {err}");
+                any_error = true;
+            }
             linted += 1;
             total_diags += result.diagnostics.len();
             let src = if args.format == Format::Human {
@@ -564,7 +569,12 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
                     if i > 0 {
                         println!();
                     }
-                    println!("{}", render::human(diag, &path, src, color));
+                    let diag_src = if diag.code == format::CODE {
+                        result.fixed.as_deref().unwrap_or(src)
+                    } else {
+                        src
+                    };
+                    println!("{}", render::human(diag, &path, diag_src, color));
                 }
             }
         }
@@ -587,9 +597,9 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
         }
     }
 
-    if fix_mode && args.format == Format::Human {
+    if fix_mode {
         for (input, result) in inputs.iter().zip(&results) {
-            if result.fixes_applied > 0 {
+            if args.format == Format::Human && result.fixes_applied > 0 {
                 let verb = if args.dry_run {
                     "would apply"
                 } else {
@@ -668,6 +678,7 @@ struct FileResult {
     path: PathBuf,
     diagnostics: Vec<Diagnostic>,
     read_error: Option<String>,
+    format_error: Option<String>,
     fixes_applied: usize,
     fixed: Option<String>,
     write_error: Option<String>,
@@ -722,6 +733,7 @@ fn process_file(
                 path: path.clone(),
                 diagnostics: Vec::new(),
                 read_error: Some(err.to_owned()),
+                format_error: None,
                 fixes_applied: 0,
                 fixed: None,
                 write_error: None,
@@ -784,6 +796,7 @@ fn process_file(
         path: path.clone(),
         diagnostics,
         read_error: None,
+        format_error: None,
         fixes_applied,
         fixed,
         write_error,
