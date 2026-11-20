@@ -1150,6 +1150,11 @@ fn fix_json_reports_write_error_and_exits_nonzero() {
     let dir = temp_tree("fix-json-write-err", &[("a.nix", "let unused = 1; in 2\n")]);
     let file = dir.join("a.nix");
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().write(true).open(&file).is_ok() {
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+        return;
+    }
     let out = run_in(&dir, &["fix", "--format", "json", "a.nix"]);
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -1192,5 +1197,388 @@ fn unformatted_file_in_fix_mode_handles_utf8_and_preserves_diags_on_formatter_er
     assert_eq!(failed.status.code(), Some(1));
     assert!(stderr.contains("the formatter false failed"), "{stderr}");
     assert!(text.contains("warning[unused-let-binding]"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_targets_under_interpolated_or_dynamic_directory_paths() {
+    let cases = [
+        (
+            "interp-same-dir",
+            "{ generators, ... }: { a = builtins.readFile ./a.lua; }\n",
+            "map (n: builtins.readFile ./${n}.lua) [ \"a\" ]\n",
+        ),
+        (
+            "interp-prefix",
+            "{ generators, ... }: { a = builtins.readFile ./a.lua; }\n",
+            "map (n: builtins.readFile ./a${n}.lua) [ \"\" ]\n",
+        ),
+        (
+            "dir-concat",
+            "{ generators, ... }: { a = builtins.readFile ./a.lua; }\n",
+            "{ other = builtins.readFile (./. + \"/a.lua\"); }\n",
+        ),
+        (
+            "dir-string-interp",
+            "{ generators, ... }: { a = builtins.readFile ./a.lua; }\n",
+            "{ other = builtins.readFile \"${./.}/a.lua\"; }\n",
+        ),
+        (
+            "dir-readdir",
+            "{ generators, ... }: { a = builtins.readFile ./a.lua; }\n",
+            "{ entries = builtins.readDir ./.; }\n",
+        ),
+    ];
+    for (name, mod_a, mod_b) in cases {
+        let dir = temp_tree(
+            name,
+            &[
+                ("a.lua", "return 1\n"),
+                ("a.nix", mod_a),
+                ("b.nix", mod_b),
+            ],
+        );
+        let out = run_in(&dir, &["import", "."]);
+        let text = stdout(&out);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{name}: {text}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(dir.join("a.lua").exists(), "{name}: a.lua must not be deleted");
+        assert!(
+            text.contains("may be referenced dynamically"),
+            "{name}: expected dynamic-ref keep reason, got:\n{text}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    let dir = temp_tree(
+        "interp-prefix-existing-dir",
+        &[
+            ("sub/keep.txt", "x\n"),
+            ("sub-extra/a.lua", "return 1\n"),
+            (
+                "a.nix",
+                "{ generators, ... }: { a = builtins.readFile ./sub-extra/a.lua; }\n",
+            ),
+            (
+                "b.nix",
+                "map (n: builtins.readFile ./sub${n}/a.lua) [ \"-extra\" ]\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "."]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "interp-prefix-existing-dir: {text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.join("sub-extra/a.lua").exists(),
+        "sub-extra/a.lua must not be deleted when ./sub is an existing directory"
+    );
+    assert!(
+        text.contains("may be referenced dynamically"),
+        "expected dynamic-ref keep reason, got:\n{text}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_target_referenced_from_sibling_directory_outside_scanned_root() {
+    let dir = temp_tree(
+        "sibling-ref",
+        &[
+            ("flake.nix", "{ outputs = _: {}; }\n"),
+            ("modules/x.lua", "return 1\n"),
+            (
+                "modules/a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+            (
+                "hosts/b.nix",
+                "{ text = builtins.readFile ../modules/x.lua; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "modules"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.join("modules/x.lua").exists(),
+        "x.lua must not be deleted when hosts/b.nix references it"
+    );
+    assert!(
+        text.contains("kept") && text.contains("hosts/b.nix"),
+        "expected kept reason mentioning hosts/b.nix, got:\n{text}"
+    );
+
+    let out_sub = run_in(&dir.join("modules"), &["import", "."]);
+    let text_sub = stdout(&out_sub);
+    assert_eq!(
+        out_sub.status.code(),
+        Some(0),
+        "{text_sub}\n{}",
+        String::from_utf8_lossy(&out_sub.stderr)
+    );
+    assert!(
+        dir.join("modules/x.lua").exists(),
+        "x.lua must not be deleted when run from inside modules/"
+    );
+    assert!(
+        text_sub.contains("kept") && text_sub.contains("hosts/b.nix"),
+        "expected kept reason mentioning hosts/b.nix from subdir, got:\n{text_sub}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_targets_when_flake_copies_project_root() {
+    let cases = [
+        (
+            "flake-src-dot",
+            "{ outputs = _: { src = ./.; }; }\n",
+        ),
+        (
+            "flake-clean-source-dot",
+            "{ outputs = { lib, ... }: { clean = lib.cleanSource ./.; }; }\n",
+        ),
+        (
+            "flake-filter-source-dot",
+            "{ outputs = _: { clean = builtins.filterSource (_: _: true) ./.; }; }\n",
+        ),
+        (
+            "flake-fileset-dot",
+            "{ outputs = { lib, ... }: { clean = lib.fileset.unions [ ./. ]; }; }\n",
+        ),
+        (
+            "flake-sources-regex-dot",
+            "{ outputs = { lib, ... }: { clean = lib.sources.sourceByRegex ./. [ \".*\" ]; }; }\n",
+        ),
+    ];
+    for (name, flake) in cases {
+        let dir = temp_tree(
+            name,
+            &[
+                ("flake.nix", flake),
+                ("modules/x.lua", "return 1\n"),
+                (
+                    "modules/a.nix",
+                    "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+                ),
+            ],
+        );
+        let out = run_in(&dir, &["import", "--dry-run", "modules"]);
+        let text = stdout(&out);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{name}: {text}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            dir.join("modules/x.lua").exists(),
+            "{name}: modules/x.lua must be preserved"
+        );
+        assert!(
+            text.contains("may be referenced dynamically"),
+            "{name}: expected dynamic-dir keep reason, got:\n{text}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[test]
+fn import_allows_conversion_when_flake_has_non_copy_modules_dir() {
+    let dir = temp_tree(
+        "flake-modules-dir",
+        &[
+            (
+                "flake.nix",
+                "{ outputs = _: { modules = [ ./hosts/x ./modules ]; }; }\n",
+            ),
+            ("hosts/x/default.nix", "{}\n"),
+            ("modules/default.nix", "{}\n"),
+            ("modules/x.lua", "return 1\n"),
+            (
+                "modules/a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+            (
+                "modules/b.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "--dry-run", "modules"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !text.contains("may be referenced dynamically"),
+        "non-copy modules = [ ./hosts/x ] must not block conversions:\n{text}"
+    );
+    assert!(
+        text.contains("read by several modules"),
+        "expected import to advance past dynamic-dir checks, got:\n{text}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_target_under_xdg_config_source_dir() {
+    let dir = temp_tree(
+        "xdg-source-dir",
+        &[
+            ("nvim/init.lua", "return 1\n"),
+            (
+                "a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./nvim/init.lua; }\n",
+            ),
+            (
+                "b.nix",
+                "{ xdg.configFile.\"nvim\".source = ./nvim; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "."]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.join("nvim/init.lua").exists(),
+        "nvim/init.lua must not be deleted when xdg.configFile.nvim.source = ./nvim"
+    );
+    assert!(
+        text.contains("may be referenced dynamically"),
+        "expected dynamic-dir keep reason, got:\n{text}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn import_reference_walk_tolerates_unreadable_dirs_and_non_utf8_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = temp_tree(
+        "ref-walk-tolerant",
+        &[
+            ("flake.nix", "{ outputs = _: {}; }\n"),
+            ("modules/x.lua", "return 1\n"),
+            (
+                "modules/a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+            (
+                "modules/b.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+        ],
+    );
+    let restricted = dir.join("restricted");
+    std::fs::create_dir(&restricted).unwrap();
+    std::fs::write(restricted.join("secret.nix"), "{}\n").unwrap();
+    std::fs::set_permissions(&restricted, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let actually_unreadable = std::fs::read_dir(&restricted).is_err();
+    let out_unreadable = run_in(&dir, &["import", "--dry-run", "modules"]);
+    std::fs::set_permissions(&restricted, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(dir.join("bad.nix"), b"\xff\xfe unrelated\n").unwrap();
+    let out_readable = run_in(&dir, &["import", "--dry-run", "modules"]);
+
+    if actually_unreadable {
+        let text = stdout(&out_unreadable);
+        assert_eq!(
+            out_unreadable.status.code(),
+            Some(0),
+            "{text}\n{}",
+            String::from_utf8_lossy(&out_unreadable.stderr)
+        );
+        assert!(
+            text.contains("reference scan incomplete"),
+            "expected incomplete reference scan to keep target safely, got:\n{text}"
+        );
+    }
+
+    let text_readable = stdout(&out_readable);
+    assert_eq!(
+        out_readable.status.code(),
+        Some(0),
+        "{text_readable}\n{}",
+        String::from_utf8_lossy(&out_readable.stderr)
+    );
+    assert!(
+        text_readable.contains("read by several modules"),
+        "expected unrelated non-UTF-8 file not to block import, got:\n{text_readable}"
+    );
+
+    std::fs::write(dir.join("bad.nix"), b"\xff\xfe ./modules/x.lua\n").unwrap();
+    let out2 = run_in(&dir, &["import", "--dry-run", "modules"]);
+    let text2 = stdout(&out2);
+    assert_eq!(
+        out2.status.code(),
+        Some(0),
+        "{text2}\n{}",
+        String::from_utf8_lossy(&out2.stderr)
+    );
+    assert!(
+        text2.contains("may be referenced by a file with syntax errors"),
+        "expected non-UTF-8 file mentioning x.lua to protect it, got:\n{text2}"
+    );
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_scans_strictixignore_files_for_references() {
+    let dir = temp_tree(
+        "strictixignore-ref",
+        &[
+            ("flake.nix", "{ outputs = _: {}; }\n"),
+            (".strictixignore", "hosts/\n"),
+            ("modules/x.lua", "return 1\n"),
+            (
+                "modules/a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+            (
+                "hosts/legacy.nix",
+                "{ text = builtins.readFile ../modules/x.lua; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "modules"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.join("modules/x.lua").exists(),
+        "x.lua must not be deleted when ignored hosts/legacy.nix references it"
+    );
+    assert!(
+        text.contains("kept") && text.contains("hosts/legacy.nix"),
+        "expected kept reason mentioning hosts/legacy.nix, got:\n{text}"
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }

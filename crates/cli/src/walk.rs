@@ -15,6 +15,7 @@
 //! descending) and to files alike. Comments and blank lines are
 //! skipped.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -157,13 +158,6 @@ impl Filter {
 ///
 /// - A path that does not exist.
 /// - An explicitly requested ignore file that cannot be read.
-pub fn collect_files(
-    paths: &[PathBuf],
-    ignore_file: Option<&Path>,
-) -> Result<(Vec<PathBuf>, Vec<PathBuf>, Filter), String> {
-    collect_files_filtered(paths, ignore_file, true)
-}
-
 pub fn collect_files_filtered(
     paths: &[PathBuf],
     ignore_file: Option<&Path>,
@@ -197,6 +191,139 @@ pub fn collect_files_filtered(
     }
     let roots = paths.iter().filter(|path| path.is_dir()).cloned().collect();
     Ok((out, others, Filter { ignore, roots }))
+}
+
+const MAX_REF_WALK_DIRS: usize = 50_000;
+
+fn is_ref_walk_skipped(name: &str) -> bool {
+    is_default_skipped(name)
+        || matches!(
+            name,
+            "node_modules" | ".direnv" | ".venv" | "venv" | "__pycache__" | ".cache"
+        )
+}
+
+pub fn collect_nix_files_best_effort(paths: &[PathBuf]) -> (Vec<PathBuf>, Option<String>) {
+    let mut out = Vec::new();
+    let mut visited_dirs = 0usize;
+    let mut visited_canon_dirs: HashSet<PathBuf> = HashSet::new();
+    let mut incomplete = None;
+    for path in paths {
+        if !path.is_dir() {
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "nix") {
+                out.push(path.clone());
+            }
+            continue;
+        }
+        if let Ok(canon) = fs::canonicalize(path) {
+            if !visited_canon_dirs.insert(canon) {
+                continue;
+            }
+        }
+        walk_nix_best_effort(
+            path,
+            &mut out,
+            &mut visited_dirs,
+            &mut visited_canon_dirs,
+            &mut incomplete,
+        );
+    }
+    out.sort();
+    (out, incomplete)
+}
+
+fn walk_nix_best_effort(
+    dir: &Path,
+    out: &mut Vec<PathBuf>,
+    visited_dirs: &mut usize,
+    visited_canon_dirs: &mut HashSet<PathBuf>,
+    incomplete: &mut Option<String>,
+) {
+    if *visited_dirs >= MAX_REF_WALK_DIRS {
+        if incomplete.is_none() {
+            *incomplete = Some(format!("directory limit reached at {}", dir.display()));
+        }
+        return;
+    }
+    *visited_dirs += 1;
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            if incomplete.is_none() {
+                *incomplete = Some(format!("cannot read {}: {e}", dir.display()));
+            }
+            return;
+        }
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                if incomplete.is_none() {
+                    *incomplete = Some(format!("cannot read {}: {e}", dir.display()));
+                }
+                continue;
+            }
+        };
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if is_ref_walk_skipped(&name) {
+            continue;
+        }
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(e) => {
+                if incomplete.is_none() {
+                    *incomplete = Some(format!("cannot stat {}: {e}", path.display()));
+                }
+                continue;
+            }
+        };
+        if file_type.is_dir() {
+            if let Ok(canon) = fs::canonicalize(&path) {
+                if !visited_canon_dirs.insert(canon) {
+                    continue;
+                }
+            }
+            walk_nix_best_effort(&path, out, visited_dirs, visited_canon_dirs, incomplete);
+        } else if file_type.is_file() {
+            if path.extension().is_some_and(|ext| ext == "nix") {
+                out.push(path);
+            }
+        } else if file_type.is_symlink() {
+            match fs::metadata(&path) {
+                Ok(meta) if meta.is_dir() => match fs::canonicalize(&path) {
+                    Ok(canon) => {
+                        if visited_canon_dirs.insert(canon) {
+                            walk_nix_best_effort(
+                                &path,
+                                out,
+                                visited_dirs,
+                                visited_canon_dirs,
+                                incomplete,
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        if incomplete.is_none() {
+                            *incomplete = Some(format!("cannot resolve {}: {e}", path.display()));
+                        }
+                    }
+                },
+                Ok(meta) if meta.is_file() => {
+                    if path.extension().is_some_and(|ext| ext == "nix") {
+                        out.push(path);
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    if path.extension().is_some_and(|ext| ext == "nix") && incomplete.is_none() {
+                        *incomplete = Some(format!("cannot stat {}: {e}", path.display()));
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn walk_dir(

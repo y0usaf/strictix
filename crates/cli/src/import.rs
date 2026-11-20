@@ -53,6 +53,12 @@ struct PathRef {
     line: usize,
 }
 
+struct DirRef {
+    dir: PathBuf,
+    module: PathBuf,
+    line: usize,
+}
+
 pub struct Options {
     pub root: PathBuf,
     pub paths: Vec<PathBuf>,
@@ -77,14 +83,12 @@ pub fn run(options: &Options) -> Result<Report, String> {
     } else {
         options.paths.clone()
     };
-    let (files, _, _) = walk::collect_files(&paths, None)?;
+    let (files, _, _) = walk::collect_files_filtered(&paths, None, false)?;
     let mut scanned_roots: Vec<PathBuf> = Vec::new();
-    let mut has_file_arg = false;
     for path in &paths {
         let root = if path.is_dir() {
             path.as_path()
         } else {
-            has_file_arg = true;
             module_dir(path)
         };
         let canonical = std::fs::canonicalize(root)
@@ -93,16 +97,25 @@ pub fn run(options: &Options) -> Result<Report, String> {
             scanned_roots.push(canonical);
         }
     }
-    let extra_ref_files = if has_file_arg {
-        let (all, _, _) = walk::collect_files(&scanned_roots, None)?;
-        all
-    } else {
-        Vec::new()
-    };
+    let mut ref_roots: Vec<PathBuf> = Vec::new();
+    if let Ok(canon_root) = std::fs::canonicalize(&options.root) {
+        if canon_root.is_dir() {
+            ref_roots.push(find_project_root(&canon_root).unwrap_or(canon_root));
+        }
+    }
+    for root in &scanned_roots {
+        let candidate = find_project_root(root).unwrap_or_else(|| root.clone());
+        if !ref_roots.iter().any(|existing| candidate.starts_with(existing)) {
+            ref_roots.retain(|existing| !existing.starts_with(&candidate));
+            ref_roots.push(candidate);
+        }
+    }
+    let (extra_ref_files, mut ref_scan_incomplete) = walk::collect_nix_files_best_effort(&ref_roots);
 
     let mut report = Report::default();
     let mut sites: BTreeMap<PathBuf, Vec<Site>> = BTreeMap::new();
     let mut all_refs: BTreeMap<PathBuf, Vec<PathRef>> = BTreeMap::new();
+    let mut dynamic_dirs: Vec<DirRef> = Vec::new();
     let mut unparsed_files: Vec<(PathBuf, String)> = Vec::new();
     let mut modules: Vec<(PathBuf, PathBuf, String, SyntaxNode)> = Vec::new();
     let mut module_formals: BTreeMap<PathBuf, Result<u32, String>> = BTreeMap::new();
@@ -117,9 +130,19 @@ pub fn run(options: &Options) -> Result<Report, String> {
         let source = std::fs::read_to_string(module)
             .map_err(|e| format!("cannot read {}: {e}", module.display()))?;
         let dir = module_dir(module);
-        collect_path_refs(&source, module, &canon_module, dir, &mut all_refs);
         let tree = parse(&source);
-        if tree.error_nodes().next().is_some() {
+        let has_errors = tree.error_nodes().next().is_some();
+        let dyn_dir_ranges = (!has_errors).then(|| dynamic_dir_ranges(&source, &tree));
+        collect_path_refs(
+            &source,
+            module,
+            &canon_module,
+            dir,
+            dyn_dir_ranges.as_ref(),
+            &mut all_refs,
+            &mut dynamic_dirs,
+        );
+        if has_errors {
             unparsed_files.push((module.clone(), source));
             continue;
         }
@@ -139,16 +162,50 @@ pub fn run(options: &Options) -> Result<Report, String> {
     }
 
     for extra_file in &extra_ref_files {
-        let canon_file = std::fs::canonicalize(extra_file)
-            .map_err(|e| format!("cannot resolve {}: {e}", extra_file.display()))?;
+        let canon_file = match std::fs::canonicalize(extra_file) {
+            Ok(path) => path,
+            Err(e) => {
+                if ref_scan_incomplete.is_none() {
+                    ref_scan_incomplete =
+                        Some(format!("cannot resolve {}: {e}", extra_file.display()));
+                }
+                continue;
+            }
+        };
         if !seen_modules.insert(canon_file.clone()) {
             continue;
         }
-        let source = std::fs::read_to_string(extra_file)
-            .map_err(|e| format!("cannot read {}: {e}", extra_file.display()))?;
+        let source = match std::fs::read_to_string(extra_file) {
+            Ok(text) => text,
+            Err(e) => {
+                match std::fs::read(extra_file) {
+                    Ok(bytes) => unparsed_files.push((
+                        extra_file.clone(),
+                        String::from_utf8_lossy(&bytes).into_owned(),
+                    )),
+                    Err(_) if ref_scan_incomplete.is_none() => {
+                        ref_scan_incomplete =
+                            Some(format!("cannot read {}: {e}", extra_file.display()));
+                    }
+                    Err(_) => {}
+                }
+                continue;
+            }
+        };
         let dir = module_dir(extra_file);
-        collect_path_refs(&source, extra_file, &canon_file, dir, &mut all_refs);
-        if parse(&source).error_nodes().next().is_some() {
+        let tree = parse(&source);
+        let has_errors = tree.error_nodes().next().is_some();
+        let dyn_dir_ranges = (!has_errors).then(|| dynamic_dir_ranges(&source, &tree));
+        collect_path_refs(
+            &source,
+            extra_file,
+            &canon_file,
+            dir,
+            dyn_dir_ranges.as_ref(),
+            &mut all_refs,
+            &mut dynamic_dirs,
+        );
+        if has_errors {
             unparsed_files.push((extra_file.clone(), source));
         }
     }
@@ -196,6 +253,24 @@ pub fn run(options: &Options) -> Result<Report, String> {
                     unrecognized.module.display(),
                     unrecognized.line
                 ),
+            ));
+            continue;
+        }
+        if let Some(dyn_ref) = dynamic_dirs.iter().find(|d| target.starts_with(&d.dir)) {
+            report.kept.push((
+                target.clone(),
+                format!(
+                    "{}:{}: may be referenced dynamically",
+                    dyn_ref.module.display(),
+                    dyn_ref.line
+                ),
+            ));
+            continue;
+        }
+        if let Some(reason) = &ref_scan_incomplete {
+            report.kept.push((
+                target.clone(),
+                format!("reference scan incomplete: {reason}"),
             ));
             continue;
         }
@@ -288,7 +363,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
 
     let mut spliced: BTreeSet<PathBuf> = BTreeSet::new();
     let mut rewritten_counts: BTreeMap<PathBuf, usize> = BTreeMap::new();
-    let mut rewritten: Vec<(PathBuf, String)> = Vec::new();
+    let mut rewritten: Vec<(PathBuf, String, String)> = Vec::new();
     for (module, canon_module, source, tree) in &modules {
         let local: Vec<(&PathBuf, &Site)> = sites
             .iter()
@@ -367,7 +442,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
             text.replace_range(range.start() as usize..range.end() as usize, &replacement);
         }
 
-        rewritten.push((module.clone(), text));
+        rewritten.push((module.clone(), source.clone(), text));
     }
 
     for target in split.keys() {
@@ -385,7 +460,7 @@ pub fn run(options: &Options) -> Result<Report, String> {
             ));
         }
     }
-    for (module, text) in &rewritten {
+    for (module, _, text) in &rewritten {
         if parse(text).error_nodes().next().is_some() {
             return Err(format!(
                 "the rewrite of {} does not parse; nothing was written",
@@ -399,30 +474,46 @@ pub fn run(options: &Options) -> Result<Report, String> {
                 println!("{} would become {}", target.display(), path.display());
             }
         }
-        for (module, text) in &rewritten {
-            let original = std::fs::read_to_string(module)
-                .map_err(|e| format!("cannot read {}: {e}", module.display()))?;
-            print!("{}", crate::render::diff(&original, text, false));
+        for (_, original, text) in &rewritten {
+            print!("{}", crate::render::diff(original, text, false));
         }
         return Ok(report);
     }
+    let mut written_splits: Vec<&PathBuf> = Vec::new();
     for (target, path) in &split {
         if !spliced.contains(target) {
             continue;
         }
         if let Some(code) = calls.get(target) {
-            let mut file = std::fs::OpenOptions::new()
+            let res = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(path)
-                .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
-            file.write_all(format!("{{generators}}: {code}\n").as_bytes())
-                .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+                .and_then(|mut file| {
+                    written_splits.push(path);
+                    file.write_all(format!("{{generators}}: {code}\n").as_bytes())
+                });
+            if let Err(e) = res {
+                for created in written_splits {
+                    let _ = std::fs::remove_file(created);
+                }
+                return Err(format!("cannot write {}: {e}", path.display()));
+            }
         }
     }
-    for (module, text) in rewritten {
-        std::fs::write(&module, &text)
-            .map_err(|e| format!("cannot write {}: {e}", module.display()))?;
+    let mut written_modules: Vec<(PathBuf, String)> = Vec::new();
+    for (module, original, text) in rewritten {
+        if let Err(e) = std::fs::write(&module, &text) {
+            let _ = std::fs::write(&module, &original);
+            for (prev_module, prev_original) in written_modules.into_iter().rev() {
+                let _ = std::fs::write(&prev_module, &prev_original);
+            }
+            for created in written_splits {
+                let _ = std::fs::remove_file(created);
+            }
+            return Err(format!("cannot write {}: {e}", module.display()));
+        }
+        written_modules.push((module.clone(), original));
         report.modules.push(module);
     }
     for target in &spliced {
@@ -454,10 +545,161 @@ pub fn run(options: &Options) -> Result<Report, String> {
     Ok(report)
 }
 
+fn find_project_root(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|dir| dir.join("flake.nix").exists() || dir.join(".git").exists())
+        .map(Path::to_path_buf)
+}
+
 fn module_dir(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."))
+}
+
+fn mark_node_paths(node: &SyntaxNode, dynamic: &mut BTreeSet<(u32, u32)>) {
+    for desc in node.descendants() {
+        for token in desc.child_tokens() {
+            if token.kind() == SyntaxKind::Path {
+                let r = token.range();
+                dynamic.insert((r.start(), r.end()));
+            }
+        }
+    }
+}
+
+fn mark_expr_paths(expr: Expr<'_>, dynamic: &mut BTreeSet<(u32, u32)>) {
+    match expr {
+        Expr::Path(token) => {
+            let r = token.range();
+            dynamic.insert((r.start(), r.end()));
+        }
+        Expr::Ident(_)
+        | Expr::Int(_)
+        | Expr::Float(_)
+        | Expr::SearchPath(_)
+        | Expr::Uri(_) => {}
+        Expr::Let(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::With(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::Assert(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::If(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::Attrset(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::RecAttrset(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::List(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::Lambda(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::Apply(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::Unary(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::Bin(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::Select(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::HasAttr(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::String(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::IndString(n) => mark_node_paths(n.syntax(), dynamic),
+        Expr::Paren(n) => mark_node_paths(n.syntax(), dynamic),
+    }
+}
+
+fn call_head(mut expr: Expr<'_>) -> Expr<'_> {
+    loop {
+        expr = unparen(expr);
+        if let Expr::Apply(apply) = expr {
+            match apply.func() {
+                Some(func) => expr = func,
+                None => return expr,
+            }
+        } else {
+            return expr;
+        }
+    }
+}
+
+fn is_dynamic_dir_func(name: &str) -> bool {
+    matches!(
+        name,
+        "readDir"
+            | "builtins.readDir"
+            | "listFilesRecursive"
+            | "path.append"
+            | "lib.path.append"
+            | "cleanSource"
+            | "lib.cleanSource"
+            | "cleanSourceWith"
+            | "lib.cleanSourceWith"
+            | "filterSource"
+            | "builtins.filterSource"
+            | "builtins.path"
+            | "sourceByRegex"
+            | "toString"
+            | "builtins.toString"
+    ) || name.starts_with("lib.fileset.")
+        || name.starts_with("fileset.")
+        || name.starts_with("lib.sources.")
+        || name.starts_with("sources.")
+        || name.starts_with("lib.filesystem.")
+        || name.contains(".lib.fileset.")
+        || name.contains(".lib.sources.")
+        || name.contains(".lib.filesystem.")
+        || name.ends_with(".lib.cleanSource")
+        || name.ends_with(".lib.cleanSourceWith")
+}
+
+fn dynamic_dir_ranges(source: &str, tree: &SyntaxNode) -> BTreeSet<(u32, u32)> {
+    let mut dynamic = BTreeSet::new();
+    for node in tree.descendants() {
+        if node.kind() == SyntaxKind::InterpExpr {
+            mark_node_paths(node, &mut dynamic);
+        }
+        if let Some(binding) = Binding::cast(node) {
+            if let Some(Some(last)) = last_segment(binding, source) {
+                if matches!(
+                    last.as_str(),
+                    "source" | "src" | "srcs" | "path" | "root" | "fileset" | "directory"
+                ) {
+                    if let Some(value) = binding.value() {
+                        mark_expr_paths(value, &mut dynamic);
+                    }
+                }
+            }
+        }
+        if let Some(Expr::Bin(bin)) = Expr::cast(node) {
+            if bin.op() == Some(SyntaxKind::Plus) {
+                if let Some(lhs) = bin.lhs() {
+                    mark_expr_paths(lhs, &mut dynamic);
+                }
+            }
+        }
+        if let Some(Expr::Apply(apply)) = Expr::cast(node) {
+            let is_dir_func = apply
+                .func()
+                .map(call_head)
+                .and_then(|func| dotted(func, source))
+                .is_some_and(|name| is_dynamic_dir_func(&name));
+            if is_dir_func {
+                if let Some(arg) = apply.arg() {
+                    mark_expr_paths(arg, &mut dynamic);
+                }
+            }
+        }
+    }
+    dynamic
+}
+
+fn resolve_prefix_dir(base_dir: &Path, prefix: &str, trailing_slash: bool) -> Option<PathBuf> {
+    if prefix.starts_with("~/") {
+        return None;
+    }
+    let dir_part = if trailing_slash || prefix.ends_with('/') {
+        prefix
+    } else {
+        match prefix.rsplit_once('/') {
+            Some(("", _)) => "/",
+            Some((parent, _)) => parent,
+            None => ".",
+        }
+    };
+    std::fs::canonicalize(base_dir.join(dir_part))
+        .ok()
+        .filter(|path| path.is_dir())
 }
 
 fn collect_path_refs(
@@ -465,29 +707,92 @@ fn collect_path_refs(
     module: &Path,
     canon_module: &Path,
     dir: &Path,
+    dyn_dir_ranges: Option<&BTreeSet<(u32, u32)>>,
     refs: &mut BTreeMap<PathBuf, Vec<PathRef>>,
+    dynamic_dirs: &mut Vec<DirRef>,
 ) {
-    for token in strictix_syntax::lex(source) {
+    let tokens = strictix_syntax::lex(source);
+    for (idx, token) in tokens.iter().enumerate() {
+        let token_end = token.start + token.len;
+        if token.kind == SyntaxKind::Ident {
+            if let (Some(slash), Some(interp)) = (tokens.get(idx + 1), tokens.get(idx + 2)) {
+                if slash.kind == SyntaxKind::Slash
+                    && interp.kind == SyntaxKind::InterpStart
+                    && token_end == slash.start
+                    && slash.start + slash.len == interp.start
+                {
+                    if let Some(resolved) = resolve_prefix_dir(dir, token.text(source), true) {
+                        dynamic_dirs.push(DirRef {
+                            dir: resolved,
+                            module: module.to_path_buf(),
+                            line: line_of(source, token.start),
+                        });
+                    }
+                }
+            }
+            continue;
+        }
         if token.kind != SyntaxKind::Path {
             continue;
         }
         let text = token.text(source);
-        if text.starts_with("~/") || text.contains("${") {
+        if text.starts_with("~/") {
+            continue;
+        }
+        if let Some(pos) = text.find("${") {
+            let prefix = &text[..pos];
+            if let Some(resolved) = resolve_prefix_dir(dir, prefix, prefix.ends_with('/')) {
+                dynamic_dirs.push(DirRef {
+                    dir: resolved,
+                    module: module.to_path_buf(),
+                    line: line_of(source, token.start),
+                });
+            }
+            continue;
+        }
+        let adjacent_interp = tokens
+            .get(idx + 1)
+            .is_some_and(|next| next.kind == SyntaxKind::InterpStart && token_end == next.start);
+        let adjacent_slash_interp = matches!(
+            (tokens.get(idx + 1), tokens.get(idx + 2)),
+            (Some(slash), Some(interp))
+                if slash.kind == SyntaxKind::Slash
+                    && interp.kind == SyntaxKind::InterpStart
+                    && token_end == slash.start
+                    && slash.start + slash.len == interp.start
+        );
+        if adjacent_interp || adjacent_slash_interp {
+            if let Some(resolved) = resolve_prefix_dir(dir, text, adjacent_slash_interp || text.ends_with('/')) {
+                dynamic_dirs.push(DirRef {
+                    dir: resolved,
+                    module: module.to_path_buf(),
+                    line: line_of(source, token.start),
+                });
+            }
             continue;
         }
         let Ok(resolved) = std::fs::canonicalize(dir.join(text)) else {
             continue;
         };
-        if !resolved.is_file() {
-            continue;
+        if resolved.is_file() {
+            let range = TextRange::new(token.start, token_end);
+            refs.entry(resolved).or_default().push(PathRef {
+                module: module.to_path_buf(),
+                canon_module: canon_module.to_path_buf(),
+                range,
+                line: line_of(source, token.start),
+            });
+        } else if resolved.is_dir() {
+            let is_dynamic = dyn_dir_ranges
+                .map_or(true, |ranges| ranges.contains(&(token.start, token_end)));
+            if is_dynamic {
+                dynamic_dirs.push(DirRef {
+                    dir: resolved,
+                    module: module.to_path_buf(),
+                    line: line_of(source, token.start),
+                });
+            }
         }
-        let range = TextRange::new(token.start, token.start + token.len);
-        refs.entry(resolved).or_default().push(PathRef {
-            module: module.to_path_buf(),
-            canon_module: canon_module.to_path_buf(),
-            range,
-            line: line_of(source, token.start),
-        });
     }
 }
 
