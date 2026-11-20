@@ -220,6 +220,12 @@
                   echo "strictix has a PT_INTERP dynamic loader segment"
                   exit 1
                 fi
+                ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isx86_64 ''
+                  if ! readelf -dW "$bin" | awk '$2 == "(RELR)" { found = 1 } END { exit !found }'; then
+                    echo "strictix does not pack its relative relocations"
+                    exit 1
+                  fi
+                ''}
                 needed=$(readelf -dW "$bin" 2>/dev/null | awk '$2 == "(NEEDED)" { print }')
                 if [ -n "$needed" ]; then
                   echo "strictix has dynamic NEEDED libraries:"
