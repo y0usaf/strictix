@@ -74,7 +74,7 @@
       checks = forAll (
         pkgs:
         let
-          pkg = self.packages.${pkgs.system}.default;
+          pkg = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
         in
         {
           build = pkg;
@@ -84,7 +84,7 @@
               {
                 nativeBuildInputs = [
                   pkg
-                  iets.packages.${pkgs.system}.default
+                  iets.packages.${pkgs.stdenv.hostPlatform.system}.default
                   pkgs.nix
                 ];
               }

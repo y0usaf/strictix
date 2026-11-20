@@ -1,17 +1,3 @@
-//! `import`: turn the files a module reads into the generator data that
-//! prints them, inline at the option that uses them.
-//!
-//! A module that points at a source file (`text = builtins.readFile
-//! ./x.lisp`, `environment.etc."x.css".source = ./x.css`, a `src` or
-//! `patches` list) is rewritten in place: the path becomes the finix
-//! generator call whose syntax tree, or CSS value, holds the file's data,
-//! and the source file is deleted. Nothing is written beside the module.
-//!
-//! Every conversion is checked before anything is written: the generator
-//! call is evaluated with nix and must render the original file byte for
-//! byte. A file the generator cannot print back exactly is left where it
-//! is and reported.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -20,20 +6,16 @@ use std::process::Command;
 use strictix_core::json::JsonValue;
 use strictix_core::semantic::SemanticModel;
 use strictix_syntax::{
-    parse, AstNode, AttrName, Binding, Expr, LambdaParam, Root, StringPart, SyntaxKind, SyntaxNode,
-    TextRange,
+    parse, AstNode, AttrName, Binding, Expr, LambdaParam, NodeOrToken, Root, StringPart,
+    SyntaxKind, SyntaxNode, TextRange,
 };
 
 use crate::merge;
 use crate::walk;
 
-/// Where a module points at a file.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Place {
-    /// The whole expression is the file's text (`builtins.readFile ./x`).
     Text,
-    /// The expression is the file itself (a `source`, a `src` entry, a
-    /// file entry's value).
     File,
 }
 
@@ -64,8 +46,6 @@ pub struct Options {
     pub paths: Vec<PathBuf>,
     pub generators: Option<String>,
     pub dry_run: bool,
-    /// Write each tree to its own `<file>.nix` beside the source and import
-    /// it, instead of inlining it at the option.
     pub split: bool,
 }
 
@@ -105,12 +85,16 @@ pub fn run(options: &Options) -> Result<Report, String> {
     }
     for root in &scanned_roots {
         let candidate = find_project_root(root).unwrap_or_else(|| root.clone());
-        if !ref_roots.iter().any(|existing| candidate.starts_with(existing)) {
+        if !ref_roots
+            .iter()
+            .any(|existing| candidate.starts_with(existing))
+        {
             ref_roots.retain(|existing| !existing.starts_with(&candidate));
             ref_roots.push(candidate);
         }
     }
-    let (extra_ref_files, mut ref_scan_incomplete) = walk::collect_nix_files_best_effort(&ref_roots);
+    let (extra_ref_files, mut ref_scan_incomplete) =
+        walk::collect_nix_files_best_effort(&ref_roots);
 
     let mut report = Report::default();
     let mut sites: BTreeMap<PathBuf, Vec<Site>> = BTreeMap::new();
@@ -441,7 +425,10 @@ pub fn run(options: &Options) -> Result<Report, String> {
             edits.push((TextRange::new(at, at), text));
         }
         edits.sort_by_key(|(range, _)| {
-            (std::cmp::Reverse(range.start()), std::cmp::Reverse(range.end()))
+            (
+                std::cmp::Reverse(range.start()),
+                std::cmp::Reverse(range.end()),
+            )
         });
         let mut text = source.clone();
         for (range, replacement) in edits {
@@ -605,10 +592,8 @@ fn safe_dir_ranges(source: &str, tree: &SyntaxNode) -> BTreeSet<(u32, u32)> {
                 .map(unparen)
                 .and_then(|func| dotted(func, source))
                 .is_some_and(|name| {
-                    matches!(
-                        name.as_str(),
-                        "import" | "builtins.import" | "callPackage"
-                    ) || name.ends_with(".callPackage")
+                    matches!(name.as_str(), "import" | "builtins.import" | "callPackage")
+                        || name.ends_with(".callPackage")
                 });
             if is_safe_call {
                 if let Some(Expr::Path(token)) = apply.arg().map(unparen) {
@@ -666,40 +651,49 @@ fn is_dynamic_dir_func(name: &str) -> bool {
         || name.ends_with(".lib.path.append")
 }
 
-fn is_self_ref(expr: Expr<'_>, source: &str) -> bool {
+fn self_name(expr: Expr<'_>, source: &str, shadowed: bool) -> Option<String> {
+    let name = dotted(unparen(expr), source)?;
+    match name.strip_prefix("inputs.") {
+        Some(rest) if rest == "self" || rest.starts_with("self.") => Some(rest.to_owned()),
+        _ if !shadowed && (name == "self" || name.starts_with("self.")) => Some(name),
+        _ => None,
+    }
+}
+
+fn is_self_path(expr: Expr<'_>, source: &str, shadowed: bool) -> bool {
     matches!(
-        dotted(unparen(expr), source).as_deref(),
-        Some("self" | "inputs.self")
+        self_name(expr, source, shadowed).as_deref(),
+        Some("self" | "self.outPath" | "self.sourceInfo" | "self.sourceInfo.outPath")
     )
 }
 
-fn node_uses_self(node: &SyntaxNode, source: &str) -> bool {
-    for desc in node.descendants() {
-        if let Some(expr) = Expr::cast(desc) {
-            if is_self_ref(expr, source) {
-                return true;
-            }
-        }
-        if matches!(
-            desc.kind(),
-            SyntaxKind::Attrpath
-                | SyntaxKind::Formals
-                | SyntaxKind::LambdaExpr
-                | SyntaxKind::InheritStmt
-        ) {
-            continue;
-        }
-        for token in desc.child_tokens() {
-            if token.kind() == SyntaxKind::Ident && token.text(source) == "self" {
-                return true;
-            }
-        }
-    }
-    false
+fn is_self_root(expr: Expr<'_>, source: &str, shadowed: bool) -> bool {
+    self_name(expr, source, shadowed).as_deref() == Some("self")
 }
 
-fn expr_uses_self(expr: Expr<'_>, source: &str) -> bool {
-    if is_self_ref(expr, source) {
+fn binds_self(lambda: strictix_syntax::LambdaExpr<'_>, source: &str) -> bool {
+    matches!(lambda.param(), LambdaParam::Ident(t) if t.text(source) == "self")
+}
+
+fn node_uses_self(node: &SyntaxNode, source: &str, shadowed: bool) -> bool {
+    let names_only = matches!(
+        node.kind(),
+        SyntaxKind::Attrpath | SyntaxKind::InheritStmt | SyntaxKind::Formals
+    );
+    node.children().iter().any(|child| match child {
+        NodeOrToken::Node(inner) => match Expr::cast(inner) {
+            Some(expr) => expr_uses_self(expr, source, shadowed),
+            None => node_uses_self(inner, source, shadowed),
+        },
+        NodeOrToken::Token(token) => {
+            !names_only
+                && Expr::cast_token(token).is_some_and(|e| expr_uses_self(e, source, shadowed))
+        }
+    })
+}
+
+fn expr_uses_self(expr: Expr<'_>, source: &str, shadowed: bool) -> bool {
+    if is_self_path(expr, source, shadowed) {
         return true;
     }
     match expr {
@@ -709,22 +703,48 @@ fn expr_uses_self(expr: Expr<'_>, source: &str) -> bool {
         | Expr::Path(_)
         | Expr::SearchPath(_)
         | Expr::Uri(_) => false,
-        Expr::Let(n) => node_uses_self(n.syntax(), source),
-        Expr::With(n) => node_uses_self(n.syntax(), source),
-        Expr::Assert(n) => node_uses_self(n.syntax(), source),
-        Expr::If(n) => node_uses_self(n.syntax(), source),
-        Expr::Attrset(n) => node_uses_self(n.syntax(), source),
-        Expr::RecAttrset(n) => node_uses_self(n.syntax(), source),
-        Expr::List(n) => node_uses_self(n.syntax(), source),
-        Expr::Lambda(n) => node_uses_self(n.syntax(), source),
-        Expr::Apply(n) => node_uses_self(n.syntax(), source),
-        Expr::Unary(n) => node_uses_self(n.syntax(), source),
-        Expr::Bin(n) => node_uses_self(n.syntax(), source),
-        Expr::Select(n) => node_uses_self(n.syntax(), source),
-        Expr::HasAttr(n) => node_uses_self(n.syntax(), source),
-        Expr::String(n) => node_uses_self(n.syntax(), source),
-        Expr::IndString(n) => node_uses_self(n.syntax(), source),
-        Expr::Paren(n) => node_uses_self(n.syntax(), source),
+        Expr::Select(select) => {
+            let base_is_self = select
+                .base()
+                .is_some_and(|b| is_self_root(b, source, shadowed));
+            let attr_uses_self = select
+                .attrpath()
+                .is_some_and(|path| node_uses_self(path.syntax(), source, shadowed));
+            let default_uses_self = select
+                .default()
+                .is_some_and(|d| expr_uses_self(d, source, shadowed));
+            let base_uses_self = !base_is_self
+                && select
+                    .base()
+                    .is_some_and(|b| expr_uses_self(b, source, shadowed));
+            attr_uses_self || default_uses_self || base_uses_self
+        }
+        Expr::HasAttr(has) => {
+            has.attrpath()
+                .is_some_and(|path| node_uses_self(path.syntax(), source, shadowed))
+                || has.base().is_some_and(|b| {
+                    !is_self_root(b, source, shadowed) && expr_uses_self(b, source, shadowed)
+                })
+        }
+        Expr::Lambda(lambda) => {
+            let shadowed = shadowed || binds_self(lambda, source);
+            lambda
+                .body()
+                .is_some_and(|b| expr_uses_self(b, source, shadowed))
+        }
+        Expr::Let(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::With(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::Assert(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::If(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::Attrset(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::RecAttrset(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::List(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::Apply(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::Unary(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::Bin(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::String(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::IndString(n) => node_uses_self(n.syntax(), source, shadowed),
+        Expr::Paren(n) => node_uses_self(n.syntax(), source, shadowed),
     }
 }
 
@@ -738,19 +758,34 @@ fn collect_self_dynamic_dir(
     let Some(project_root) = find_project_root(module_dir(canon_module)) else {
         return;
     };
+    let shadow_ranges: Vec<TextRange> = tree
+        .descendants()
+        .filter_map(|node| match Expr::cast(node) {
+            Some(Expr::Lambda(lambda)) if binds_self(lambda, source) => {
+                lambda.body().map(|body| body.range())
+            }
+            _ => None,
+        })
+        .collect();
     for node in tree.descendants() {
+        let start = node.range().start();
+        let shadowed = shadow_ranges
+            .iter()
+            .any(|r| r.start() <= start && start < r.end());
         let hit = if node.kind() == SyntaxKind::InterpExpr {
-            node_uses_self(node, source)
+            node_uses_self(node, source, shadowed)
         } else if let Some(Expr::Bin(bin)) = Expr::cast(node) {
             bin.op() == Some(SyntaxKind::Plus)
-                && bin.lhs().is_some_and(|lhs| is_self_ref(lhs, source))
+                && bin
+                    .lhs()
+                    .is_some_and(|lhs| is_self_path(lhs, source, shadowed))
         } else if let Some(binding) = Binding::cast(node) {
             matches!(
                 last_segment(binding, source).and_then(|s| s).as_deref(),
                 Some("source" | "src" | "srcs" | "path" | "root" | "fileset" | "directory")
             ) && binding
                 .value()
-                .is_some_and(|value| expr_uses_self(value, source))
+                .is_some_and(|value| expr_uses_self(value, source, shadowed))
         } else if let Some(Expr::Apply(apply)) = Expr::cast(node) {
             apply
                 .func()
@@ -759,7 +794,7 @@ fn collect_self_dynamic_dir(
                 .is_some_and(|name| is_dynamic_dir_func(&name))
                 && apply
                     .arg()
-                    .is_some_and(|arg| expr_uses_self(arg, source))
+                    .is_some_and(|arg| expr_uses_self(arg, source, shadowed))
         } else {
             false
         };
@@ -767,7 +802,7 @@ fn collect_self_dynamic_dir(
             dynamic_dirs.push(DirRef {
                 dir: project_root,
                 module: module.to_path_buf(),
-                line: line_of(source, node.range().start()),
+                line: line_of(source, node.content_range().start()),
             });
             return;
         }
@@ -852,7 +887,9 @@ fn collect_path_refs(
                     && slash.start + slash.len == interp.start
         );
         if adjacent_interp || adjacent_slash_interp {
-            if let Some(resolved) = resolve_prefix_dir(dir, text, adjacent_slash_interp || text.ends_with('/')) {
+            if let Some(resolved) =
+                resolve_prefix_dir(dir, text, adjacent_slash_interp || text.ends_with('/'))
+            {
                 dynamic_dirs.push(DirRef {
                     dir: resolved,
                     module: module.to_path_buf(),
@@ -873,8 +910,8 @@ fn collect_path_refs(
                 line: line_of(source, token.start),
             });
         } else if resolved.is_dir() {
-            let is_safe = safe_dirs
-                .is_some_and(|ranges| ranges.contains(&(token.start, token_end)));
+            let is_safe =
+                safe_dirs.is_some_and(|ranges| ranges.contains(&(token.start, token_end)));
             if !is_safe {
                 dynamic_dirs.push(DirRef {
                     dir: resolved,
@@ -986,8 +1023,6 @@ fn find(source: &str, tree: &strictix_syntax::SyntaxNode, dir: &Path) -> Vec<Fou
     non_overlapping
 }
 
-/// The binding's last attribute name when it is static text: a `source`
-/// entry, a file entry (`\\"x.css\\"`) or a list of files.
 fn last_segment(binding: Binding<'_>, source: &str) -> Option<Option<String>> {
     let path = binding.attrpath()?;
     let last = path.elements().last()?;
@@ -1007,7 +1042,6 @@ fn last_segment(binding: Binding<'_>, source: &str) -> Option<Option<String>> {
     })
 }
 
-/// Whether some generator prints this file's kind.
 fn convertible(path: &Path) -> bool {
     let extension = path
         .extension()
@@ -1017,14 +1051,10 @@ fn convertible(path: &Path) -> bool {
     extension == "css" || language(&extension).is_some()
 }
 
-/// A binding whose value is a file to keep: a `source`, a package's `src`
-/// or `patches`, or an entry named like a file (`\"x.css\"`).
 fn is_path_binding(name: &str) -> bool {
     matches!(name, "source" | "src" | "srcs" | "patches") || is_file_name(name)
 }
 
-/// Every path under a node, so a `src` or `patches` value that nests or
-/// concatenates lists keeps every file it names.
 fn paths_in(node: &SyntaxNode) -> Vec<Expr<'_>> {
     node.descendants()
         .flat_map(|child| child.child_tokens())
@@ -1090,8 +1120,6 @@ fn dotted(expr: Expr<'_>, source: &str) -> Option<String> {
     }
 }
 
-/// The names a tree leaves to the set it is applied to: its outer lambda's
-/// formals, which the importers write from the names the source leaves free.
 fn formals_of(tree: &str) -> Option<Vec<String>> {
     let parsed = parse(tree);
     if parsed.error_nodes().next().is_some() {
@@ -1111,8 +1139,6 @@ fn formals_of(tree: &str) -> Option<Vec<String>> {
     )
 }
 
-/// What a file becomes: a generator syntax tree with the constructors it
-/// names, or a value a value generator prints.
 enum Imported {
     Tree {
         language: &'static str,
@@ -1190,8 +1216,6 @@ fn convert(target: &Path) -> Result<Imported, String> {
     })
 }
 
-/// Evaluate an expression that is too large for an argument, through a
-/// temporary file.
 fn eval_expression(expression: &str) -> Result<(bool, String, String), String> {
     let mut path = std::env::temp_dir();
     let unique = std::time::SystemTime::now()
@@ -1234,8 +1258,6 @@ fn language(extension: &str) -> Option<&'static str> {
     })
 }
 
-/// Where `generators` joins a module's formals: before `...` when the
-/// formals are open, otherwise before the closing brace.
 fn formal_spot(tree: &SyntaxNode) -> Result<u32, String> {
     let Some(root) = Root::cast(tree).and_then(|root| root.expr()) else {
         return Err("the file holds no expression".into());
@@ -1263,10 +1285,6 @@ fn formal_spot(tree: &SyntaxNode) -> Result<u32, String> {
     spot.ok_or_else(|| "the formals list has no closing brace".to_owned())
 }
 
-/// Where hoisted bindings go: before the `in` of the module's own top-level
-/// `let`, or else in front of the module's body in a new `let`, flagged by
-/// whether the spot is inside an existing `let`. Either way the bindings see
-/// the module's arguments.
 fn let_spot(tree: &SyntaxNode) -> Option<(u32, bool)> {
     let root = Root::cast(tree)?.expr()?;
     let Expr::Lambda(lambda) = unparen(root) else {
@@ -1285,8 +1303,6 @@ fn let_spot(tree: &SyntaxNode) -> Option<(u32, bool)> {
     Some((body.content_range().start(), false))
 }
 
-/// Where a split tree goes: beside the file it replaces, named after it so
-/// the two are never confused.
 fn split_path(target: &Path) -> PathBuf {
     let name = target
         .file_name()
@@ -1295,7 +1311,6 @@ fn split_path(target: &Path) -> PathBuf {
     target.with_file_name(format!("{name}.nix"))
 }
 
-/// A path from the module to the file it names, as Nix writes it.
 fn relative(module: &Path, path: &Path) -> String {
     let module = std::fs::canonicalize(module).unwrap_or_else(|_| module.to_path_buf());
     let from = module.parent().unwrap_or(Path::new(""));
@@ -1332,7 +1347,6 @@ fn named_file(target: &Path, code: &str) -> String {
     )
 }
 
-/// A free `let` name for a file used more than once in one module.
 fn binding_name(source: &str, target: &Path) -> String {
     let stem: String = target
         .file_stem()
@@ -1350,8 +1364,6 @@ fn binding_name(source: &str, target: &Path) -> String {
     name
 }
 
-/// Every call must render its file byte for byte. A call that fails to
-/// evaluate, or prints other bytes, is reported and left unconverted.
 fn check(
     generators: &str,
     calls: &BTreeMap<PathBuf, String>,
@@ -1416,8 +1428,6 @@ fn check(
     Ok(failures)
 }
 
-/// Where the generator's text leaves the file: both are printed and
-/// compared line by line.
 fn first_difference(generators: &str, target: &Path, code: &str) -> Result<String, String> {
     let expression = format!("let generators = {generators}; in ({code})");
     let (ok, stdout, stderr) = eval_expression(&expression)?;
@@ -1463,7 +1473,6 @@ fn comparison(target: &Path, code: &str) -> String {
     )
 }
 
-/// The error line of a nix-stack-trace, which ends every message.
 fn last_error(stderr: &str) -> String {
     stderr
         .lines()

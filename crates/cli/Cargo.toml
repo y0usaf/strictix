@@ -16,4 +16,4 @@ strictix-lints = { path = "../lints" }
 strictix-import = { path = "../import" }
 
 [target.'cfg(target_env = "musl")'.dependencies]
-mimalloc = { version = "0.1", default-features = false, features = ["v2", "no_thp"] }
+mimalloc = { version = "0.1", default-features = false, features = ["no_thp"] }
