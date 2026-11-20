@@ -132,16 +132,19 @@ pub fn run(options: &Options) -> Result<Report, String> {
         let dir = module_dir(module);
         let tree = parse(&source);
         let has_errors = tree.error_nodes().next().is_some();
-        let dyn_dir_ranges = (!has_errors).then(|| dynamic_dir_ranges(&source, &tree));
+        let safe_dirs = (!has_errors).then(|| safe_dir_ranges(&source, &tree));
         collect_path_refs(
             &source,
             module,
             &canon_module,
             dir,
-            dyn_dir_ranges.as_ref(),
+            safe_dirs.as_ref(),
             &mut all_refs,
             &mut dynamic_dirs,
         );
+        if !has_errors {
+            collect_self_dynamic_dir(&source, &tree, module, &canon_module, &mut dynamic_dirs);
+        }
         if has_errors {
             unparsed_files.push((module.clone(), source));
             continue;
@@ -195,16 +198,19 @@ pub fn run(options: &Options) -> Result<Report, String> {
         let dir = module_dir(extra_file);
         let tree = parse(&source);
         let has_errors = tree.error_nodes().next().is_some();
-        let dyn_dir_ranges = (!has_errors).then(|| dynamic_dir_ranges(&source, &tree));
+        let safe_dirs = (!has_errors).then(|| safe_dir_ranges(&source, &tree));
         collect_path_refs(
             &source,
             extra_file,
             &canon_file,
             dir,
-            dyn_dir_ranges.as_ref(),
+            safe_dirs.as_ref(),
             &mut all_refs,
             &mut dynamic_dirs,
         );
+        if !has_errors {
+            collect_self_dynamic_dir(&source, &tree, extra_file, &canon_file, &mut dynamic_dirs);
+        }
         if has_errors {
             unparsed_files.push((extra_file.clone(), source));
         }
@@ -558,45 +564,61 @@ fn module_dir(path: &Path) -> &Path {
         .unwrap_or(Path::new("."))
 }
 
-fn mark_node_paths(node: &SyntaxNode, dynamic: &mut BTreeSet<(u32, u32)>) {
-    for desc in node.descendants() {
-        for token in desc.child_tokens() {
-            if token.kind() == SyntaxKind::Path {
-                let r = token.range();
-                dynamic.insert((r.start(), r.end()));
+fn mark_safe_module_list(expr: Expr<'_>, safe: &mut BTreeSet<(u32, u32)>) {
+    match unparen(expr) {
+        Expr::List(list) => {
+            for item in list.items() {
+                if let Expr::Path(token) = unparen(item) {
+                    let r = token.range();
+                    safe.insert((r.start(), r.end()));
+                }
             }
         }
+        Expr::Bin(bin) if bin.op() == Some(SyntaxKind::PlusPlus) => {
+            if let Some(lhs) = bin.lhs() {
+                mark_safe_module_list(lhs, safe);
+            }
+            if let Some(rhs) = bin.rhs() {
+                mark_safe_module_list(rhs, safe);
+            }
+        }
+        _ => {}
     }
 }
 
-fn mark_expr_paths(expr: Expr<'_>, dynamic: &mut BTreeSet<(u32, u32)>) {
-    match expr {
-        Expr::Path(token) => {
-            let r = token.range();
-            dynamic.insert((r.start(), r.end()));
+fn safe_dir_ranges(source: &str, tree: &SyntaxNode) -> BTreeSet<(u32, u32)> {
+    let mut safe = BTreeSet::new();
+    for node in tree.descendants() {
+        if let Some(binding) = Binding::cast(node) {
+            if matches!(
+                last_segment(binding, source).and_then(|s| s).as_deref(),
+                Some("imports" | "modules")
+            ) {
+                if let Some(value) = binding.value() {
+                    mark_safe_module_list(value, &mut safe);
+                }
+            }
         }
-        Expr::Ident(_)
-        | Expr::Int(_)
-        | Expr::Float(_)
-        | Expr::SearchPath(_)
-        | Expr::Uri(_) => {}
-        Expr::Let(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::With(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::Assert(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::If(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::Attrset(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::RecAttrset(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::List(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::Lambda(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::Apply(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::Unary(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::Bin(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::Select(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::HasAttr(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::String(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::IndString(n) => mark_node_paths(n.syntax(), dynamic),
-        Expr::Paren(n) => mark_node_paths(n.syntax(), dynamic),
+        if let Some(Expr::Apply(apply)) = Expr::cast(node) {
+            let is_safe_call = apply
+                .func()
+                .map(unparen)
+                .and_then(|func| dotted(func, source))
+                .is_some_and(|name| {
+                    matches!(
+                        name.as_str(),
+                        "import" | "builtins.import" | "callPackage"
+                    ) || name.ends_with(".callPackage")
+                });
+            if is_safe_call {
+                if let Some(Expr::Path(token)) = apply.arg().map(unparen) {
+                    let r = token.range();
+                    safe.insert((r.start(), r.end()));
+                }
+            }
+        }
     }
+    safe
 }
 
 fn call_head(mut expr: Expr<'_>) -> Expr<'_> {
@@ -641,47 +663,115 @@ fn is_dynamic_dir_func(name: &str) -> bool {
         || name.contains(".lib.filesystem.")
         || name.ends_with(".lib.cleanSource")
         || name.ends_with(".lib.cleanSourceWith")
+        || name.ends_with(".lib.path.append")
 }
 
-fn dynamic_dir_ranges(source: &str, tree: &SyntaxNode) -> BTreeSet<(u32, u32)> {
-    let mut dynamic = BTreeSet::new();
-    for node in tree.descendants() {
-        if node.kind() == SyntaxKind::InterpExpr {
-            mark_node_paths(node, &mut dynamic);
-        }
-        if let Some(binding) = Binding::cast(node) {
-            if let Some(Some(last)) = last_segment(binding, source) {
-                if matches!(
-                    last.as_str(),
-                    "source" | "src" | "srcs" | "path" | "root" | "fileset" | "directory"
-                ) {
-                    if let Some(value) = binding.value() {
-                        mark_expr_paths(value, &mut dynamic);
-                    }
-                }
+fn is_self_ref(expr: Expr<'_>, source: &str) -> bool {
+    matches!(
+        dotted(unparen(expr), source).as_deref(),
+        Some("self" | "inputs.self")
+    )
+}
+
+fn node_uses_self(node: &SyntaxNode, source: &str) -> bool {
+    for desc in node.descendants() {
+        if let Some(expr) = Expr::cast(desc) {
+            if is_self_ref(expr, source) {
+                return true;
             }
         }
-        if let Some(Expr::Bin(bin)) = Expr::cast(node) {
-            if bin.op() == Some(SyntaxKind::Plus) {
-                if let Some(lhs) = bin.lhs() {
-                    mark_expr_paths(lhs, &mut dynamic);
-                }
-            }
+        if matches!(
+            desc.kind(),
+            SyntaxKind::Attrpath
+                | SyntaxKind::Formals
+                | SyntaxKind::LambdaExpr
+                | SyntaxKind::InheritStmt
+        ) {
+            continue;
         }
-        if let Some(Expr::Apply(apply)) = Expr::cast(node) {
-            let is_dir_func = apply
-                .func()
-                .map(call_head)
-                .and_then(|func| dotted(func, source))
-                .is_some_and(|name| is_dynamic_dir_func(&name));
-            if is_dir_func {
-                if let Some(arg) = apply.arg() {
-                    mark_expr_paths(arg, &mut dynamic);
-                }
+        for token in desc.child_tokens() {
+            if token.kind() == SyntaxKind::Ident && token.text(source) == "self" {
+                return true;
             }
         }
     }
-    dynamic
+    false
+}
+
+fn expr_uses_self(expr: Expr<'_>, source: &str) -> bool {
+    if is_self_ref(expr, source) {
+        return true;
+    }
+    match expr {
+        Expr::Ident(_)
+        | Expr::Int(_)
+        | Expr::Float(_)
+        | Expr::Path(_)
+        | Expr::SearchPath(_)
+        | Expr::Uri(_) => false,
+        Expr::Let(n) => node_uses_self(n.syntax(), source),
+        Expr::With(n) => node_uses_self(n.syntax(), source),
+        Expr::Assert(n) => node_uses_self(n.syntax(), source),
+        Expr::If(n) => node_uses_self(n.syntax(), source),
+        Expr::Attrset(n) => node_uses_self(n.syntax(), source),
+        Expr::RecAttrset(n) => node_uses_self(n.syntax(), source),
+        Expr::List(n) => node_uses_self(n.syntax(), source),
+        Expr::Lambda(n) => node_uses_self(n.syntax(), source),
+        Expr::Apply(n) => node_uses_self(n.syntax(), source),
+        Expr::Unary(n) => node_uses_self(n.syntax(), source),
+        Expr::Bin(n) => node_uses_self(n.syntax(), source),
+        Expr::Select(n) => node_uses_self(n.syntax(), source),
+        Expr::HasAttr(n) => node_uses_self(n.syntax(), source),
+        Expr::String(n) => node_uses_self(n.syntax(), source),
+        Expr::IndString(n) => node_uses_self(n.syntax(), source),
+        Expr::Paren(n) => node_uses_self(n.syntax(), source),
+    }
+}
+
+fn collect_self_dynamic_dir(
+    source: &str,
+    tree: &SyntaxNode,
+    module: &Path,
+    canon_module: &Path,
+    dynamic_dirs: &mut Vec<DirRef>,
+) {
+    let Some(project_root) = find_project_root(module_dir(canon_module)) else {
+        return;
+    };
+    for node in tree.descendants() {
+        let hit = if node.kind() == SyntaxKind::InterpExpr {
+            node_uses_self(node, source)
+        } else if let Some(Expr::Bin(bin)) = Expr::cast(node) {
+            bin.op() == Some(SyntaxKind::Plus)
+                && bin.lhs().is_some_and(|lhs| is_self_ref(lhs, source))
+        } else if let Some(binding) = Binding::cast(node) {
+            matches!(
+                last_segment(binding, source).and_then(|s| s).as_deref(),
+                Some("source" | "src" | "srcs" | "path" | "root" | "fileset" | "directory")
+            ) && binding
+                .value()
+                .is_some_and(|value| expr_uses_self(value, source))
+        } else if let Some(Expr::Apply(apply)) = Expr::cast(node) {
+            apply
+                .func()
+                .map(call_head)
+                .and_then(|func| dotted(func, source))
+                .is_some_and(|name| is_dynamic_dir_func(&name))
+                && apply
+                    .arg()
+                    .is_some_and(|arg| expr_uses_self(arg, source))
+        } else {
+            false
+        };
+        if hit {
+            dynamic_dirs.push(DirRef {
+                dir: project_root,
+                module: module.to_path_buf(),
+                line: line_of(source, node.range().start()),
+            });
+            return;
+        }
+    }
 }
 
 fn resolve_prefix_dir(base_dir: &Path, prefix: &str, trailing_slash: bool) -> Option<PathBuf> {
@@ -707,7 +797,7 @@ fn collect_path_refs(
     module: &Path,
     canon_module: &Path,
     dir: &Path,
-    dyn_dir_ranges: Option<&BTreeSet<(u32, u32)>>,
+    safe_dirs: Option<&BTreeSet<(u32, u32)>>,
     refs: &mut BTreeMap<PathBuf, Vec<PathRef>>,
     dynamic_dirs: &mut Vec<DirRef>,
 ) {
@@ -783,9 +873,9 @@ fn collect_path_refs(
                 line: line_of(source, token.start),
             });
         } else if resolved.is_dir() {
-            let is_dynamic = dyn_dir_ranges
-                .map_or(true, |ranges| ranges.contains(&(token.start, token_end)));
-            if is_dynamic {
+            let is_safe = safe_dirs
+                .is_some_and(|ranges| ranges.contains(&(token.start, token_end)));
+            if !is_safe {
                 dynamic_dirs.push(DirRef {
                     dir: resolved,
                     module: module.to_path_buf(),

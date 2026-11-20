@@ -1582,3 +1582,56 @@ fn import_scans_strictixignore_files_for_references() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn import_keeps_target_when_dir_is_bound_via_let_or_self() {
+    let dir = temp_tree(
+        "let-dir-binding",
+        &[
+            ("nvim/init.lua", "return 1\n"),
+            (
+                "a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./nvim/init.lua; }\n",
+            ),
+            (
+                "b.nix",
+                "let nvimDir = ./nvim; in { xdg.configFile.\"nvim\".source = nvimDir; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "."]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(dir.join("nvim/init.lua").exists());
+    assert!(text.contains("may be referenced dynamically"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+
+    for (name, flake) in [
+        (
+            "self-interp",
+            "{ outputs = { self, ... }: { text = builtins.readFile \"${self}/modules/x.lua\"; }; }\n",
+        ),
+        (
+            "self-src",
+            "{ outputs = { self, ... }: { src = self; }; }\n",
+        ),
+    ] {
+        let dir = temp_tree(
+            name,
+            &[
+                ("flake.nix", flake),
+                ("modules/x.lua", "return 1\n"),
+                (
+                    "modules/a.nix",
+                    "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+                ),
+            ],
+        );
+        let out = run_in(&dir, &["import", "--dry-run", "modules"]);
+        let text = stdout(&out);
+        assert_eq!(out.status.code(), Some(0), "{name}: {text}");
+        assert!(dir.join("modules/x.lua").exists());
+        assert!(text.contains("may be referenced dynamically"), "{name}: {text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
