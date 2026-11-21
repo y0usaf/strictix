@@ -46,7 +46,7 @@
         pkgs:
         let
           rustPlatform =
-            if pkgs.stdenv.isLinux then
+            if pkgs.stdenv.hostPlatform.isLinux then
               pkgs.pkgsStatic.rustPlatform
             else
               pkgs.rustPlatform;
@@ -62,7 +62,7 @@
                 outputHashes."tree-sitter-vbscript-0.0.1" = "sha256-P1kpdbUropKYs9Bi1FPt+SQTetzzR5HvskmBkRVqMg8=";
               };
             }
-            // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               stripAllList = [ "bin" ];
             }
           );
@@ -235,7 +235,7 @@
                 touch $out
               '';
         }
-        // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           self-contained =
             let
               closure = pkgs.closureInfo { rootPaths = [ pkg ]; };

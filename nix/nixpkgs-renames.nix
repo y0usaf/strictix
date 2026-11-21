@@ -6,14 +6,16 @@ let
   inherit (nixpkgs) lib;
   pkgs = nixpkgs.legacyPackages.${system};
   marker = "__strictixRenamed";
-  capture = message: value: if builtins.isBool value then value else { ${marker} = message; };
+  capture =
+    message: value:
+    if builtins.isAttrs value then value // { ${marker} = message; } else value;
   aliases = import "${nixpkgs}/pkgs/top-level/aliases.nix" (
     lib
     // {
       warn = capture;
       warnOnInstantiate = capture;
     }
-  ) pkgs { };
+  ) (pkgs // aliases) { };
   forced = value: builtins.tryEval value;
   captured =
     value:
