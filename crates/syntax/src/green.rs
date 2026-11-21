@@ -232,25 +232,6 @@ impl SyntaxNode {
         let start = self.range.start as usize;
         &source[start..self.range().len() as usize + start]
     }
-
-    /// Reconstruct all token texts in this subtree, in source order.
-    ///
-    /// For a well-formed tree this reproduces the source exactly.
-    #[must_use]
-    pub fn reassemble(&self, source: &str) -> String {
-        let mut out = String::new();
-        self.reassemble_into(source, &mut out);
-        out
-    }
-
-    fn reassemble_into(&self, source: &str, out: &mut String) {
-        for child in &self.children {
-            match child {
-                NodeOrToken::Node(node) => node.reassemble_into(source, out),
-                NodeOrToken::Token(token) => out.push_str(token.text(source)),
-            }
-        }
-    }
 }
 
 /// Incremental builder that assembles a [`SyntaxNode`] tree from a

@@ -98,8 +98,6 @@ impl JsonValue {
         }
     }
 
-    /// This value as an object's entries in insertion order, if it is
-    /// one.
     #[must_use]
     pub fn as_object(&self) -> Option<&[(String, JsonValue)]> {
         match self {
@@ -421,23 +419,6 @@ impl Parser<'_> {
 }
 
 impl JsonValue {
-    /// This value as a number, if it is one.
-    #[must_use]
-    pub fn as_number(&self) -> Option<f64> {
-        match self {
-            JsonValue::Number(n) => Some(*n),
-            _ => None,
-        }
-    }
-
-    /// Serialize to an indented (pretty) JSON string.
-    #[must_use]
-    pub fn to_string_pretty(&self) -> String {
-        let mut out = String::new();
-        self.write_pretty(&mut out, 0);
-        out
-    }
-
     fn write_compact(&self, out: &mut String) {
         match self {
             JsonValue::Null => out.push_str("null"),
@@ -464,51 +445,6 @@ impl JsonValue {
                     out.push(':');
                     v.write_compact(out);
                 }
-                out.push('}');
-            }
-        }
-    }
-
-    fn write_pretty(&self, out: &mut String, indent: usize) {
-        match self {
-            JsonValue::Null => out.push_str("null"),
-            JsonValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-            JsonValue::Number(n) => out.push_str(&format_number(*n)),
-            JsonValue::String(s) => write_json_string(s, out),
-            JsonValue::Array(items) => {
-                if items.is_empty() {
-                    out.push_str("[]");
-                    return;
-                }
-                out.push_str("[\n");
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(",\n");
-                    }
-                    out.push_str(&"  ".repeat(indent + 1));
-                    item.write_pretty(out, indent + 1);
-                }
-                out.push('\n');
-                out.push_str(&"  ".repeat(indent));
-                out.push(']');
-            }
-            JsonValue::Object(entries) => {
-                if entries.is_empty() {
-                    out.push_str("{}");
-                    return;
-                }
-                out.push_str("{\n");
-                for (i, (k, v)) in entries.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(",\n");
-                    }
-                    out.push_str(&"  ".repeat(indent + 1));
-                    write_json_string(k, out);
-                    out.push_str(": ");
-                    v.write_pretty(out, indent + 1);
-                }
-                out.push('\n');
-                out.push_str(&"  ".repeat(indent));
                 out.push('}');
             }
         }

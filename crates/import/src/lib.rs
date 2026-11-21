@@ -70,21 +70,6 @@ pub fn bound(language: &str) -> bool {
     BOUND.contains(&language)
 }
 
-pub fn data_file(language: &str, source: &str, holes: &[String]) -> Result<String, String> {
-    let expression = expression(language, source, holes)?;
-    if bound(language) {
-        return Ok(format!("{expression}\n"));
-    }
-    let names = constructors(&expression);
-    let formals = if names.is_empty() {
-        "_".to_owned()
-    } else {
-        let names: String = names.iter().map(|name| format!("  {name},\n")).collect();
-        format!("{{\n{names}  ...\n}}")
-    };
-    Ok(format!("{formals}: {expression}\n"))
-}
-
 pub fn constructors(expression: &str) -> Vec<String> {
     nix::identifiers(expression)
         .into_iter()

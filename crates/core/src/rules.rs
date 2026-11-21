@@ -102,17 +102,6 @@ pub fn run_path_rules(
     diags
 }
 
-pub fn run_rules(
-    rules: &[Box<dyn Rule>],
-    tree: &SyntaxNode,
-    model: &SemanticModel,
-    config: &LintConfig,
-    source: &str,
-    diags: &mut Vec<Diagnostic>,
-) {
-    run_rules_project_inner(rules, tree, model, config, source, None, false, diags);
-}
-
 pub fn run_rules_project(
     rules: &[Box<dyn Rule>],
     tree: &SyntaxNode,
@@ -122,21 +111,7 @@ pub fn run_rules_project(
     project: Option<&crate::project::ProjectContext>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    run_rules_project_inner(rules, tree, model, config, source, project, true, diags);
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_rules_project_inner(
-    rules: &[Box<dyn Rule>],
-    tree: &SyntaxNode,
-    model: &SemanticModel,
-    config: &LintConfig,
-    source: &str,
-    project: Option<&crate::project::ProjectContext>,
-    include_syntax: bool,
-    diags: &mut Vec<Diagnostic>,
-) {
-    if include_syntax && syntax_diagnostics(tree, diags) {
+    if syntax_diagnostics(tree, diags) {
         apply_suppressions(source, diags);
         return;
     }

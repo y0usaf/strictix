@@ -17,8 +17,7 @@ use std::fmt::Display;
 use std::io::IsTerminal;
 
 use strictix_core::diagnostic::{Diagnostic, Severity};
-use strictix_core::fix::Fix;
-use strictix_core::json::{write_json_str, JsonValue};
+use strictix_core::json::write_json_str;
 use strictix_syntax::TextRange;
 
 /// Standard ANSI styles inherit the terminal's configured color palette.
@@ -65,21 +64,6 @@ fn paint<T: Display>(enabled: bool, code: &str, value: T) -> String {
     } else {
         value.to_string()
     }
-}
-
-/// The deterministic one-line rendering shared by CLI and tests:
-/// `[code] severity start..end message`.
-#[must_use]
-#[allow(dead_code)]
-pub fn one_line(diag: &Diagnostic) -> String {
-    format!(
-        "[{}] {} {}..{} {}",
-        diag.code,
-        diag.severity_str(),
-        diag.range.start(),
-        diag.range.end(),
-        diag.message
-    )
 }
 
 /// Render one diagnostic in the human format (path, line/col, message,
@@ -141,98 +125,6 @@ fn source_excerpt(source: &str, range: TextRange) -> Option<(&str, String)> {
     let width = (range.end() as usize - start).min(available);
     let caret = format!("{}{}", " ".repeat(col), "^".repeat(width));
     Some((text, caret))
-}
-
-/// Build the JSON document for a whole run: one entry per file holding
-/// that file's diagnostics, plus a summary object. `fix` is `null`
-/// when a diagnostic carries no fix; `help` likewise.
-#[allow(dead_code)]
-pub fn json(files: &[JsonFile]) -> JsonValue {
-    let mut file_values = Vec::with_capacity(files.len());
-    let mut diag_total = 0usize;
-    for file in files {
-        let mut diags = Vec::with_capacity(file.diagnostics.len());
-        for diag in &file.diagnostics {
-            diag_total += 1;
-            diags.push(JsonValue::Object(vec![
-                ("code".to_owned(), JsonValue::String(diag.code.to_string())),
-                (
-                    "severity".to_owned(),
-                    JsonValue::String(diag.severity_str().to_owned()),
-                ),
-                (
-                    "message".to_owned(),
-                    JsonValue::String(diag.message.clone()),
-                ),
-                ("range".to_owned(), range_json(diag.range)),
-                (
-                    "help".to_owned(),
-                    diag.help
-                        .as_ref()
-                        .map_or(JsonValue::Null, |h| JsonValue::String(h.clone())),
-                ),
-                (
-                    "fix".to_owned(),
-                    diag.fix.as_ref().map_or(JsonValue::Null, fix_json),
-                ),
-            ]));
-        }
-        file_values.push(JsonValue::Object(vec![
-            ("path".to_owned(), JsonValue::String(file.path.clone())),
-            ("diagnostics".to_owned(), JsonValue::Array(diags)),
-        ]));
-    }
-    JsonValue::Object(vec![
-        ("files".to_owned(), JsonValue::Array(file_values)),
-        (
-            "summary".to_owned(),
-            JsonValue::Object(vec![
-                ("files".to_owned(), JsonValue::Number(files.len() as f64)),
-                (
-                    "diagnostics".to_owned(),
-                    JsonValue::Number(diag_total as f64),
-                ),
-            ]),
-        ),
-    ])
-}
-
-/// The JSON shape of one fix: label plus its edits.
-#[allow(dead_code)]
-fn fix_json(fix: &Fix) -> JsonValue {
-    let edits: Vec<JsonValue> = fix
-        .edits
-        .iter()
-        .map(|edit| {
-            JsonValue::Object(vec![
-                ("range".to_owned(), range_json(edit.range)),
-                (
-                    "replacement".to_owned(),
-                    JsonValue::String(edit.replacement.clone()),
-                ),
-            ])
-        })
-        .collect();
-    JsonValue::Object(vec![
-        ("label".to_owned(), JsonValue::String(fix.label.clone())),
-        ("edits".to_owned(), JsonValue::Array(edits)),
-    ])
-}
-
-/// The JSON object for a text range: `{"start": n, "end": m}`.
-#[allow(dead_code)]
-fn range_json(range: TextRange) -> JsonValue {
-    JsonValue::Object(vec![
-        ("start".to_owned(), JsonValue::Number(range.start() as f64)),
-        ("end".to_owned(), JsonValue::Number(range.end() as f64)),
-    ])
-}
-
-/// One file's worth of results, as the JSON renderer consumes it.
-#[allow(dead_code)]
-pub struct JsonFile {
-    pub path: String,
-    pub diagnostics: Vec<Diagnostic>,
 }
 
 pub fn write_json_doc(

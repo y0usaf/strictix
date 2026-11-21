@@ -14,9 +14,3 @@ pub mod json;
 pub mod project;
 pub mod rules;
 pub mod semantic;
-
-/// Reports crate version so the CLI smoke test can call into this crate.
-#[must_use]
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}

@@ -1,1 +1,0 @@
-{ config, lib, pkgs, ... }: { config.services.example.enable = true; options.services.example.port = lib.mkOption { type = lib.types.int; }; environment.systemPackages = config.environment.systemPackages; }

@@ -28,23 +28,11 @@ pub struct LintConfig {
 }
 
 impl LintConfig {
-    /// Builder: replace the list of explicitly enabled rules.
-    pub fn with_enabled(mut self, codes: impl IntoIterator<Item = String>) -> Self {
-        self.enabled = codes.into_iter().collect();
-        self
-    }
-
     /// Whether the rule with `code` should run: true unless `disabled`
     /// contains `code`.
     #[must_use]
     pub fn is_enabled(&self, code: &str) -> bool {
         !self.disabled.iter().any(|d| d == code)
-    }
-
-    /// Builder: replace the disabled list with `codes`.
-    pub fn with_disabled(mut self, codes: impl IntoIterator<Item = String>) -> Self {
-        self.disabled = codes.into_iter().collect();
-        self
     }
 
     /// The options.json that applies to `file`: the longest matching
@@ -72,19 +60,6 @@ impl LintConfig {
         self.generated
             .iter()
             .any(|prefix| file.starts_with(bare(prefix)))
-    }
-
-    /// Builder: set the schema path, enabling the schema rule.
-    pub fn with_schema(mut self, path: impl Into<PathBuf>) -> Self {
-        self.schema = Some(path.into());
-        self
-    }
-
-    pub fn with_setting(mut self, code: &str, key: &str, value: impl Into<String>) -> Self {
-        self.settings.retain(|(c, k, _)| !(c == code && k == key));
-        self.settings
-            .push((code.to_owned(), key.to_owned(), value.into()));
-        self
     }
 
     #[must_use]

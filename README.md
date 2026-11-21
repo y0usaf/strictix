@@ -9,7 +9,7 @@ It is one Rust binary with its own Nix parser. It reports code that will fail or
 ```
 nix build                  # result/bin/strictix
 nix run . -- check .
-nix flake check            # build, the import round-trip check, and the rename table against the locked nixpkgs
+nix flake check            # build, locked rename table, and Linux binary self-containment
 nix run .#nixpkgs-renames  # rewrite the rename table from the locked nixpkgs
 nix develop                # cargo, rustc, rustfmt, clippy
 ```
@@ -44,7 +44,7 @@ Common flags: `--format human|json`, `--enable CODE`, `--disable CODE` (wins ove
 
 A source file is deleted only when nothing else can reach it. It stays a file when another module, a file outside the scanned root, or a file the walk could not read refers to it; when a directory holding it is referenced anywhere other than an `imports`/`modules` list or the argument of `import`, `builtins.import` or `callPackage` (so `let dir = ./nvim;`, `source = ./nvim` and `lib.fileset` calls all keep it); when a path prefix with an interpolation (`./sub${n}/x`) could name its directory; when a file that fails to parse holds any path to it; and when any file in the project treats the flake source as a directory — `self` or `inputs.self` (or their `outPath`/`sourceInfo`) as a `src`/`source`/`path`-style value, as the base of `+ "/x"`, inside an interpolation, or as the argument of `readDir`, `cleanSource`, `filterSource`, `builtins.path`, `toString` or a `lib.fileset`/`lib.sources` function. Attribute selects such as `self.shortRev` or `self.packages.x` and a `self:` fixpoint parameter do not count; `inputs.self` still does inside one.
 
-Languages: css, glsl, javascript, lisp, lua, luau, markdown, patch, python, shell, ts, vbs. Before anything is written, every call is evaluated with nix and must render the original file byte for byte; a file the generator cannot print back exactly stays a file and is named with the line that reads it. `--generators EXPR` names the generator set (default: the current flake's `nix-generators` library). A tree can go two ways: inline at the option (the default), or with `--split` into a `<file>.nix` beside the source that the module imports — `{generators}: generators.lua.render (...)` — which several modules can share, since the file is written once and each site imports it. `checks/import` holds one sample per language; `nix flake check` runs the conversion over a module reading all twelve, then requires nix and iets to render every value to the original bytes, and converts a module with a `let` of its own, whose binding must land in that `let` with nothing left for `collapsible-let-in` to report.
+Languages: css, glsl, javascript, lisp, lua, luau, markdown, patch, python, shell, ts, vbs. Before anything is written, every call is evaluated with nix and must render the original file byte for byte; a file the generator cannot print back exactly stays a file and is named with the line that reads it. `--generators EXPR` names the generator set (default: the current flake's `nix-generators` library). A tree can go two ways: inline at the option (the default), or with `--split` into a `<file>.nix` beside the source that the module imports — `{generators}: generators.lua.render (...)` — which several modules can share, since the file is written once and each site imports it.
 
 ## Dependencies
 
@@ -70,6 +70,10 @@ To make a schema from any module evaluation `e`:
 ```
 nix eval --impure --json --expr 'let lib = (builtins.getFlake (toString ./.)).inputs.nixpkgs.lib; e = ...; in { options = builtins.listToAttrs (map (o: { name = o.name; value = { type = o.type or ""; }; }) (lib.optionAttrSetToDocList e.options)); }'
 ```
+
+## Verification
+
+Strictix does not commit unit or integration tests. For a behavior-preserving change, compare the built binaries on real Nix repositories, including `check` output and the output and file changes from `fix` on a disposable copy. Verify changes to behavior against real inputs without adding fixtures or scripts to the repository.
 
 ## License
 
