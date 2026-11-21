@@ -17,7 +17,7 @@ const KEYWORDS: [&str; 10] = [
     "if", "then", "else", "assert", "with", "let", "in", "rec", "inherit", "or",
 ];
 
-fn is_ident(name: &str) -> bool {
+pub(crate) fn is_ident(name: &str) -> bool {
     let mut chars = name.chars();
     chars
         .next()

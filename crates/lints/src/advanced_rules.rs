@@ -191,7 +191,7 @@ fn is_bare_attr_name(name: &str) -> bool {
         && name != "or"
 }
 
-fn with_removal_fix(m: &SemanticModel, site: usize) -> Option<Fix> {
+pub(crate) fn with_removal_fix(m: &SemanticModel, site: usize) -> Option<Fix> {
     let s = m.source();
     let sites = m.with_sites();
     let range = sites[site].scope_range;

@@ -2,14 +2,15 @@
 
 strictix lints Nix code and fixes what it safely can.
 
-It is one Rust binary with its own Nix parser. It reports code that will fail or is likely wrong (option names and paths that don't exist, type errors in literals, dead bindings, shadowing) and suggests simpler forms of code that works. It has 118 rules; 15 are opt-in.
+It is one Rust binary with its own Nix parser. It reports code that will fail or is likely wrong (option names and paths that don't exist, type errors in literals, dead bindings, shadowing) and suggests simpler forms of code that works. It has 119 rules; 15 are opt-in.
 
 ## Build and run
 
 ```
 nix build                  # result/bin/strictix
 nix run . -- check .
-nix flake check            # build, plus the import round-trip check
+nix flake check            # build, the import round-trip check, and the rename table against the locked nixpkgs
+nix run .#nixpkgs-renames  # rewrite the rename table from the locked nixpkgs
 nix develop                # cargo, rustc, rustfmt, clippy
 ```
 
@@ -47,7 +48,7 @@ Languages: css, glsl, javascript, lisp, lua, luau, markdown, patch, python, shel
 
 ## Dependencies
 
-Build: Rust, the tree-sitter grammars in `Cargo.lock`, and `mimalloc` on musl targets. Linux Nix builds produce a fully static musl binary (0 dynamic libraries, 1 store path). Run time: nothing for `check`, `fix`, `list` and `explain`. `merge`, `split` and `import` call `nix` to evaluate `--expand` helpers and the default `--generators` flake, to render each conversion before writing it, and to run the flake's `formatter` when it has one. The `unformatted-file` rule runs whatever formatter you configure.
+Build: Rust, the tree-sitter grammars in `Cargo.lock`, and `mimalloc` on musl targets. Linux Nix builds produce a fully static musl binary (0 dynamic libraries, 1 store path). `deprecated-package-alias` carries `crates/lints/data/nixpkgs-renames.tsv`, every `'OLD' has been renamed to 'NEW'` warning alias in the locked nixpkgs' `pkgs/top-level/aliases.nix`, written by `nix run .#nixpkgs-renames` and compared by `nix flake check`; after `nix flake update nixpkgs`, run it again. Run time: nothing for `check`, `fix`, `list` and `explain`. `merge`, `split` and `import` call `nix` to evaluate `--expand` helpers and the default `--generators` flake, to render each conversion before writing it, and to run the flake's `formatter` when it has one. The `unformatted-file` rule runs whatever formatter you configure.
 
 ## Config
 

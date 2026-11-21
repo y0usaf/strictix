@@ -31,6 +31,15 @@
         "aarch64-darwin"
       ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      renamesData = "crates/lints/data/nixpkgs-renames.tsv";
+      renames =
+        pkgs:
+        pkgs.writeText "nixpkgs-renames.tsv" (
+          import ./nix/nixpkgs-renames.nix {
+            inherit nixpkgs;
+            system = builtins.head systems;
+          }
+        );
     in
     {
       packages = forAll (
@@ -60,6 +69,20 @@
         }
       );
 
+      apps = forAll (pkgs: {
+        nixpkgs-renames = {
+          type = "app";
+          meta.description = "Write ${renamesData} from the locked nixpkgs aliases";
+          program = toString (
+            pkgs.writeShellScript "nixpkgs-renames" ''
+              set -eu
+              test -f ${renamesData}
+              install -m 644 ${renames pkgs} ${renamesData}
+            ''
+          );
+        };
+      });
+
       devShells = forAll (pkgs: {
         default = pkgs.mkShell {
           packages = [
@@ -78,6 +101,14 @@
         in
         {
           build = pkg;
+
+          nixpkgs-renames = pkgs.runCommand "strictix-nixpkgs-renames" { } ''
+            if ! diff -u ${./. + "/${renamesData}"} ${renames pkgs}; then
+              echo "${renamesData} differs from the locked nixpkgs; run nix run .#nixpkgs-renames"
+              exit 1
+            fi
+            touch $out
+          '';
 
           import-inline =
             pkgs.runCommand "strictix-import-inline"

@@ -7,6 +7,7 @@ pub mod cognitive_complexity;
 pub mod config_file_rules;
 mod config_text_generator;
 pub mod constant_option;
+pub mod deprecated_package_alias;
 pub mod duplicate_attr;
 pub mod duplicate_definitions;
 pub mod duplicate_formal;
@@ -67,6 +68,7 @@ use call_simplification::{
 use cognitive_complexity::CognitiveComplexity;
 use config_file_rules::{HandMaintainedDataFile, HandWrittenConfig, MaskedGenerator};
 use constant_option::ConstantOption;
+use deprecated_package_alias::DeprecatedPackageAlias;
 use duplicate_attr::DuplicateAttribute;
 use duplicate_definitions::DuplicateDefinitions;
 use duplicate_formal::DuplicateFormal;
@@ -241,6 +243,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         ManualHasattr,
         ManualGetattr,
         DeprecatedIsNull,
+        DeprecatedPackageAlias,
         ManualOptional,
         OptionalListArgument,
         SingletonOptionals,

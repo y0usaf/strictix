@@ -1,5 +1,3 @@
-//! Literal value contracts that can be checked without evaluating Nix.
-
 use std::collections::HashSet;
 
 use strictix_core::{
@@ -321,7 +319,7 @@ fn static_entry<'a>(expr: Expr<'a>, source: &str) -> Option<Entry<'a>> {
     Some(entry)
 }
 
-fn literal_string(string: StringExpr<'_>, source: &str) -> Option<String> {
+pub(crate) fn literal_string(string: StringExpr<'_>, source: &str) -> Option<String> {
     let mut out = String::new();
     for part in string.parts() {
         let StringPart::Content(token) = part else {
