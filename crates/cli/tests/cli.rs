@@ -1,0 +1,1762 @@
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+use strictix_core::json::JsonValue;
+
+fn run(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_strictix"))
+        .args(args)
+        .output()
+        .expect("binary starts")
+}
+
+fn run_in(cwd: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_strictix"))
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .expect("binary starts")
+}
+
+fn fixture(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(rel)
+}
+
+fn rules_available() -> bool {
+    let out = run(&["list"]);
+    out.status.code() == Some(0)
+        && String::from_utf8_lossy(&out.stdout).contains("unused-let-binding")
+}
+
+#[test]
+fn help_exits_zero_and_mentions_commands() {
+    let out = run(&["--help"]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("check"), "help mentions check");
+    assert!(stdout.contains("fix"), "help mentions fix");
+}
+
+#[test]
+fn version_prints_crate_version() {
+    let out = run(&["--version"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "strictix 0.1.0"
+    );
+}
+
+#[test]
+fn list_exits_zero_and_prints_rules() {
+    let out = run(&["list"]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.is_empty(), "list output is non-empty");
+    if stdout.lines().any(|l| l.contains("unused-let-binding")) {
+        let line = stdout
+            .lines()
+            .find(|l| l.contains("unused-let-binding"))
+            .expect("line exists");
+        assert!(
+            line.contains("warning"),
+            "rule line carries a severity: {line}"
+        );
+    }
+}
+
+#[test]
+fn check_clean_fixture_is_clean() {
+    let out = run(&["check", fixture("clean.nix").to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("0 diagnostics"),
+        "summary says clean: {stdout}"
+    );
+}
+
+#[test]
+fn check_clean_fixture_json_summary() {
+    let out = run(&[
+        "check",
+        "--format",
+        "json",
+        fixture("clean.nix").to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let value = JsonValue::parse(&stdout).expect("output is valid JSON");
+    assert_eq!(
+        value
+            .get("summary")
+            .and_then(|s| s.get("diagnostics"))
+            .and_then(JsonValue::as_number),
+        Some(0.0),
+        "json summary reports zero diagnostics"
+    );
+}
+
+#[test]
+fn check_dirty_fixture_fails_when_rules_exist() {
+    let out = run(&["check", fixture("dirty.nix").to_str().unwrap()]);
+    let code = out.status.code();
+    if !rules_available() {
+        assert_eq!(code, Some(0), "empty registry: exit 0 only");
+        return;
+    }
+    assert_eq!(code, Some(1), "diagnostics found -> exit 1");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("unused-let-binding"),
+        "output names the fired rule: {stdout}"
+    );
+}
+
+#[test]
+fn disable_rule_cleans_dirty_fixture() {
+    if !rules_available() {
+        return;
+    }
+    let out = run(&[
+        "check",
+        "--disable",
+        "unused-let-binding",
+        fixture("dirty.nix").to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("0 diagnostics"), "rule disabled: {stdout}");
+}
+
+#[test]
+fn fix_rewrites_dirty_copy() {
+    if !rules_available() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "strictix-cli-fix-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let copy = dir.join("dirty-copy.nix");
+    std::fs::copy(fixture("dirty.nix"), &copy).expect("copy fixture");
+
+    let before = std::fs::read_to_string(&copy).expect("read before");
+    let out = run(&["fix", copy.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    let after = std::fs::read_to_string(&copy).expect("read after");
+
+    assert_ne!(before, after, "fix changed the file");
+    assert_eq!(after, "2", "body survives: {after}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains(copy.to_str().unwrap()) || stdout.contains("fix"),
+        "output mentions the file or a fix count: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fix_dry_run_does_not_write_and_shows_diff() {
+    if !rules_available() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "strictix-cli-dry-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let copy = dir.join("dirty-copy.nix");
+    std::fs::copy(fixture("dirty.nix"), &copy).expect("copy fixture");
+
+    let before = std::fs::read_to_string(&copy).expect("read before");
+    let out = run(&["fix", "--dry-run", copy.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    let after = std::fs::read_to_string(&copy).expect("read after");
+    assert_eq!(before, after, "dry-run leaves the file untouched");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("would apply 1 fix(es)"),
+        "dry-run says would-apply: {stdout}"
+    );
+    assert!(
+        stdout.contains("-let x = 1; in 2") && stdout.contains("+2"),
+        "diff shown: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn unknown_flag_is_an_error() {
+    let out = run(&["check", "--definitely-not-a-flag"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("error:"),
+        "stderr carries error: prefix"
+    );
+}
+
+#[test]
+fn unknown_command_is_an_error() {
+    let out = run(&["frobnicate"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("error:"));
+}
+
+#[test]
+fn ignore_file_prunes_subdir() {
+    let dir = fixture("ignore");
+    let out = run_in(&dir, &["check", "."]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("dirty"),
+        "ignored subdir is pruned: {stdout}"
+    );
+    assert!(
+        stdout.contains("0 diagnostics"),
+        "only the clean file: {stdout}"
+    );
+}
+
+#[test]
+fn walk_counts_nested_files() {
+    let out = run(&["check", fixture("walk").to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("2 file(s) linted"),
+        "both nested files linted: {stdout}"
+    );
+}
+
+#[test]
+fn missing_path_is_an_error() {
+    let out = run(&["check", "/definitely/not/a/real/path.nix"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("error:"),
+        "stderr carries error: prefix"
+    );
+}
+
+#[test]
+fn shallow_merge_requires_opt_in_and_disable_wins() {
+    let dir = std::env::temp_dir().join(format!("strictix-opt-in-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("input.nix"), "{ a.x = 1; } // { a.y = 2; }").unwrap();
+    let has_warning = |out: Output| {
+        assert!(matches!(out.status.code(), Some(0 | 1)));
+        String::from_utf8_lossy(&out.stdout).contains("shallow-merge-overwrite")
+    };
+    assert!(!has_warning(run_in(&dir, &["check", "input.nix"])));
+    assert!(has_warning(run_in(
+        &dir,
+        &["check", "input.nix", "--enable", "shallow-merge-overwrite"]
+    )));
+    std::fs::write(
+        dir.join("strictix.toml"),
+        "[lint]\nenabled = [\"shallow-merge-overwrite\"]\n",
+    )
+    .unwrap();
+    assert!(has_warning(run_in(&dir, &["check", "input.nix"])));
+    assert!(!has_warning(run_in(
+        &dir,
+        &["check", "input.nix", "--disable", "shallow-merge-overwrite"]
+    )));
+    assert!(!has_warning(run_in(
+        &dir,
+        &[
+            "check",
+            "input.nix",
+            "--enable",
+            "shallow-merge-overwrite",
+            "--disable",
+            "shallow-merge-overwrite"
+        ]
+    )));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn scattered_documentation_reports_markdown_beside_the_document() {
+    let dir = temp_tree(
+        "docs",
+        &[
+            (
+                "strictix.toml",
+                "[lint]\nenabled = [\"scattered-documentation\"]\n\n[lint.\"scattered-documentation\"]\nfile = \"modules/README.md\"\n",
+            ),
+            ("modules/README.md", "# Layout\n"),
+            ("modules/a/README.md", "# A\n"),
+            ("modules/a/default.nix", "{ }\n"),
+            ("modules/a/notes.txt", "text\n"),
+        ],
+    );
+    let out = run_in(&dir, &["check"]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(
+        text.contains("./modules/a/README.md:1:1: warning[scattered-documentation]: documentation outside modules/README.md"),
+        "{text}"
+    );
+    assert!(
+        text.contains("1 file(s) linted, 1 diagnostic(s) found"),
+        "{text}"
+    );
+    let off = run_in(&dir, &["check", "--disable", "scattered-documentation"]);
+    assert_eq!(off.status.code(), Some(0), "{}", stdout(&off));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn unformatted_file_reports_the_first_line_the_formatter_changes() {
+    let config = |command: &str| {
+        format!("[lint]\nenabled = [\"unformatted-file\"]\n\n[lint.\"unformatted-file\"]\ncommand = \"{command}\"\n")
+    };
+    let dir = temp_tree(
+        "unformatted",
+        &[
+            ("strictix.toml", &config("tr i I")),
+            ("a.nix", "let\n  a = 1;\nin\n  a + 1\n"),
+            ("b.nix", "{\n  i = ;\n}\n"),
+        ],
+    );
+    let out = run_in(&dir, &["check"]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    assert!(
+        text.contains("./a.nix:3:1: warning[unformatted-file]: the formatter would change this file from this line on"),
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("warning[unformatted-file]").count(),
+        1,
+        "{text}"
+    );
+    assert!(text.contains("./b.nix:2:"), "{text}");
+    std::fs::write(dir.join("strictix.toml"), config("cat")).unwrap();
+    std::fs::write(dir.join("b.nix"), "{ }\n").unwrap();
+    let clean = run_in(&dir, &["check"]);
+    assert_eq!(clean.status.code(), Some(0), "{}", stdout(&clean));
+    std::fs::write(dir.join("strictix.toml"), config("false")).unwrap();
+    let failed = run_in(&dir, &["check"]);
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&failed.stderr).contains("the formatter false failed"),
+        "{}",
+        String::from_utf8_lossy(&failed.stderr)
+    );
+    let off = run_in(&dir, &["check", "--disable", "unformatted-file"]);
+    assert_eq!(off.status.code(), Some(0), "{}", stdout(&off));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+fn temp_tree(name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "strictix-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    for (rel, text) in files {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        std::fs::write(path, text).expect("write");
+    }
+    dir
+}
+
+fn read_tree(dir: &Path) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        for entry in std::fs::read_dir(&current).expect("read dir") {
+            let path = entry.expect("entry").path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                let rel = path.strip_prefix(dir).expect("under dir");
+                out.insert(
+                    rel.display().to_string(),
+                    std::fs::read_to_string(&path).expect("read"),
+                );
+            }
+        }
+    }
+    out
+}
+
+fn nix_available() -> bool {
+    Command::new("nix")
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success())
+}
+
+fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+const FLAKE_TREE: &[(&str, &str)] = &[
+    (
+        "flake.nix",
+        "{\n  description = \"t\";\n  outputs = inputs: import ./modules/outputs.nix inputs;\n}\n",
+    ),
+    (
+        "modules/outputs.nix",
+        "inputs: let\n  shared = ./shared.nix;\n  hosts = {\n    a = [./a.nix ./shared.nix];\n    b = [./b.nix ./shared.nix];\n  };\nin {\n  inherit hosts;\n  nixosModules.a = ./a.nix;\n  lint = import ./lint.nix;\n  modules = [shared];\n}\n",
+    ),
+    ("modules/a.nix", "{...}: {}\n"),
+    ("modules/b.nix", "{config = {};}\n"),
+    ("modules/shared.nix", "{}\n"),
+    ("modules/lint.nix", "{schemas = {\"modules/named.nix\" = \"\";};}\n"),
+    ("modules/named.nix", "{x = 1;}\n"),
+];
+
+#[test]
+fn merge_flake_in_place_keeps_an_attrset_and_split_restores_it() {
+    let dir = temp_tree("merge-flake", FLAKE_TREE);
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report = stdout(&out);
+    assert!(report.contains("inlined 7 files"), "{report}");
+    assert!(
+        report.contains("keyed module modules/shared.nix"),
+        "{report}"
+    );
+    let after = read_tree(&dir);
+    assert_eq!(
+        after.keys().collect::<Vec<_>>(),
+        ["flake.nix"],
+        "one file left"
+    );
+    let merged = &after["flake.nix"];
+    assert!(merged.starts_with("{\n  description = \"t\";"), "{merged}");
+    assert!(merged.contains("outputs = inputs: let"), "{merged}");
+    assert!(
+        merged.contains("merge_keyed_module \"modules/shared.nix\""),
+        "{merged}"
+    );
+    assert!(
+        merged.contains("nixosModules.a = (merge_keyed_module \"modules/a.nix\" modules_a);"),
+        "{merged}"
+    );
+    assert!(merged.contains("\"modules/named.nix\" = \"\""), "{merged}");
+
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        read_tree(&dir),
+        before,
+        "split restores every file byte for byte"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_large_tree_round_trips_byte_for_byte() {
+    let count = 150usize;
+    let mut owned: Vec<(String, String)> = Vec::new();
+    let mut listed = String::new();
+    for i in 0..count {
+        for dir in ["alpha", "beta"] {
+            owned.push((
+                format!("modules/{dir}/m{i}.nix"),
+                format!("{{...}}: {{ x = {i}; }}\n"),
+            ));
+            listed.push_str(&format!("    ./{dir}/m{i}.nix\n"));
+        }
+    }
+    owned.push((
+        "modules/outputs.nix".into(),
+        format!("inputs: {{\n  modules = [\n{listed}  ];\n}}\n"),
+    ));
+    owned.push((
+        "flake.nix".into(),
+        "{ description = \"t\"; outputs = inputs: import ./modules/outputs.nix inputs; }\n".into(),
+    ));
+    let files: Vec<(&str, &str)> = owned
+        .iter()
+        .map(|(path, text)| (path.as_str(), text.as_str()))
+        .collect();
+    let dir = temp_tree("roundtrip-large", &files);
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        read_tree(&dir),
+        before,
+        "split restores every file byte for byte"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn split_notes_a_manifest_entry_whose_binding_is_gone() {
+    let dir = temp_tree("split-unused-entry", FLAKE_TREE);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let merged = std::fs::read_to_string(dir.join("flake.nix")).unwrap();
+    let stripped = merged.replace("  modules_b =\n{config = {};}\n  ;\n", "");
+    assert_ne!(merged, stripped, "the merged fixture holds modules_b");
+    std::fs::write(dir.join("flake.nix"), stripped).unwrap();
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report = stdout(&out);
+    assert!(
+        report.contains("the manifest names modules_b for modules/b.nix"),
+        "{report}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn split_restores_an_import_inherited_from() {
+    let dir = temp_tree(
+        "split-inherit-import",
+        &[
+            (
+                "flake.nix",
+                "{\n  description = \"t\";\n  outputs = inputs: import ./modules/outputs.nix inputs;\n}\n",
+            ),
+            (
+                "modules/outputs.nix",
+                "inputs: {\n  a = import ./a.nix;\n  b = import ./sub/b.nix;\n}\n",
+            ),
+            (
+                "modules/a.nix",
+                "let\n  inherit (import ./x.nix) model vocabulary;\nin {\n  inherit model vocabulary;\n}\n",
+            ),
+            (
+                "modules/sub/b.nix",
+                "let\n  inherit (import ../x.nix) model;\nin\n  model\n",
+            ),
+            ("modules/x.nix", "{\n  model = \"m\";\n  vocabulary = [\"v\"];\n}\n"),
+        ],
+    );
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let merged = read_tree(&dir)["flake.nix"].clone();
+    assert!(merged.contains("inherit (x) model vocabulary;"), "{merged}");
+
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        read_tree(&dir),
+        before,
+        "split restores every file byte for byte"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn merge_names_bindings_by_their_shortest_unique_path_suffix() {
+    let dir = temp_tree(
+        "merge-names",
+        &[
+            (
+                "flake.nix",
+                "{\n  description = \"t\";\n  outputs = inputs: import ./modules/outputs.nix inputs;\n}\n",
+            ),
+            (
+                "modules/outputs.nix",
+                "inputs: {\n  a = import ./tomoe/bar.nix;\n  b = import ./lisp/bar.nix;\n  c = import ./tomoe/hud.nix;\n  d = import ./core/packages.nix;\n  packages = 1;\n}\n",
+            ),
+            ("modules/tomoe/bar.nix", "1\n"),
+            ("modules/lisp/bar.nix", "2\n"),
+            ("modules/tomoe/hud.nix", "3\n"),
+            ("modules/core/packages.nix", "4\n"),
+        ],
+    );
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let merged = read_tree(&dir)["flake.nix"].clone();
+    for binding in [
+        "a = tomoe_bar;",
+        "b = lisp_bar;",
+        "c = hud;",
+        "d = core_packages;",
+    ] {
+        assert!(merged.contains(binding), "{binding}\n{merged}");
+    }
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(read_tree(&dir), before, "split restores every file");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn merge_leaves_lockfiles_at_their_paths() {
+    let dir = temp_tree(
+        "merge-lockfiles",
+        &[
+            (
+                "flake.nix",
+                "{\n  description = \"t\";\n  outputs = inputs: import ./modules/outputs.nix inputs;\n}\n",
+            ),
+            (
+                "modules/outputs.nix",
+                "inputs: {\n  npm = ./app/package-lock.json;\n  cargo = ./app/Cargo.lock;\n}\n",
+            ),
+            ("modules/app/package-lock.json", "{\"lockfileVersion\": 3}\n"),
+            ("modules/app/Cargo.lock", "version = 4\n"),
+        ],
+    );
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &["merge", ".", "--entry", "flake.nix", "--out", "flake.nix"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let after = read_tree(&dir);
+    assert_eq!(
+        after.keys().collect::<Vec<_>>(),
+        [
+            "flake.nix",
+            "modules/app/Cargo.lock",
+            "modules/app/package-lock.json"
+        ],
+        "the lockfiles stay"
+    );
+    assert_eq!(
+        after["modules/app/Cargo.lock"],
+        before["modules/app/Cargo.lock"]
+    );
+    let merged = &after["flake.nix"];
+    assert!(
+        merged.contains("npm = ./modules/app/package-lock.json;"),
+        "{merged}"
+    );
+    assert!(
+        merged.contains("cargo = ./modules/app/Cargo.lock;"),
+        "{merged}"
+    );
+    let out = run_in(&dir, &["split", ".", "--merged", "flake.nix"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(read_tree(&dir), before, "split restores every file");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn merge_reports_why_a_path_named_file_stays() {
+    let dir = temp_tree(
+        "merge-kept",
+        &[
+            ("default.nix", "import ./lint.nix\n"),
+            ("lint.nix", "{text = \"${./lint.nix}\";}\n"),
+        ],
+    );
+    let out = run_in(
+        &dir,
+        &[
+            "merge",
+            ".",
+            "--entry",
+            "default.nix",
+            "--out",
+            "merged.nix",
+            "--dry-run",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout(&out).contains("kept lint.nix as a file: named by the path `./lint.nix` in lint.nix outside import, callPackage and module lists"),
+        "{}",
+        stdout(&out)
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn merge_expands_a_discovery_call_bound_in_a_reachable_file() {
+    if !nix_available() {
+        return;
+    }
+    let dir = temp_tree(
+        "merge-expand",
+        &[
+            ("default.nix", "import ./modules/outputs.nix\n"),
+            (
+                "modules/outputs.nix",
+                "let\n  found = dir: map (name: dir + \"/${name}\") (builtins.attrNames (builtins.readDir dir));\n  other = 1;\nin {\n  imports = found ./mods ++ [./mods/b.nix];\n  inherit other;\n}\n",
+            ),
+            ("modules/mods/a.nix", "{}\n"),
+            ("modules/mods/b.nix", "{}\n"),
+        ],
+    );
+    let before = read_tree(&dir);
+    let out = run_in(
+        &dir,
+        &[
+            "merge",
+            ".",
+            "--entry",
+            "default.nix",
+            "--out",
+            "default.nix",
+            "--expand",
+            "found",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report = stdout(&out);
+    assert!(
+        report.contains("expanded `modules/outputs.nix: found ./mods` into 2 modules"),
+        "{report}"
+    );
+    assert!(
+        report.contains("removed let binding modules/outputs.nix: found"),
+        "{report}"
+    );
+    assert!(
+        report.contains("keyed module modules/mods/b.nix"),
+        "{report}"
+    );
+    assert_eq!(read_tree(&dir).len(), 1, "one file left");
+    let out = run_in(&dir, &["split", ".", "--merged", "default.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout(&out).contains("restored 1 expanded calls"),
+        "{}",
+        stdout(&out)
+    );
+    assert_eq!(
+        read_tree(&dir),
+        before,
+        "split restores the call and the binding"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+const LINT_TREE: &[(&str, &str)] = &[
+    (
+        "default.nix",
+        "let\n  modules = [./modules/a.nix ./modules/b.nix ./vendor/c.nix];\nin\n  import ./modules/eval.nix modules\n",
+    ),
+    ("modules/eval.nix", "modules: {imports = modules;}\n"),
+    (
+        "modules/a.nix",
+        "{lib, ...}: {\n  options.foo.enable = lib.mkEnableOption \"foo\";\n  config = {};\n}\n",
+    ),
+    (
+        "modules/b.nix",
+        "{...}: {\n  config = let\n    unused = 1;\n  in {};\n}\n",
+    ),
+    ("vendor/c.nix", "{...}: let\n  unused = 1;\nin {}\n"),
+    ("strictix.toml", "[schemas]\n\"modules/b.nix\" = \"\"\n"),
+    (".strictixignore", "vendor/\n"),
+];
+
+fn diagnostics(dir: &Path) -> Vec<(String, String)> {
+    let out = run_in(
+        dir,
+        &[
+            "check",
+            ".",
+            "--format",
+            "json",
+            "--enable",
+            "never-enabled-option",
+        ],
+    );
+    let value = JsonValue::parse(&stdout(&out)).expect("json");
+    let mut found: Vec<(String, String)> = value
+        .get("files")
+        .and_then(JsonValue::as_array)
+        .expect("files")
+        .iter()
+        .flat_map(|file| {
+            file.get("diagnostics")
+                .and_then(JsonValue::as_array)
+                .unwrap_or_default()
+        })
+        .map(|diag| {
+            let field = |key: &str| {
+                diag.get(key)
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+            };
+            (field("code"), field("message"))
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn check_and_fix_lint_a_merged_file_as_the_files_it_holds() {
+    if !rules_available() {
+        return;
+    }
+    let plain = temp_tree("lint-plain", LINT_TREE);
+    let merged = temp_tree("lint-merged", LINT_TREE);
+    let out = run_in(
+        &merged,
+        &[
+            "merge",
+            ".",
+            "--entry",
+            "default.nix",
+            "--out",
+            "default.nix",
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!merged.join("modules").exists(), "the modules were inlined");
+
+    let expected = diagnostics(&plain);
+    assert!(
+        expected
+            .iter()
+            .any(|(code, _)| code == "unused-let-binding"),
+        "{expected:?}"
+    );
+    assert!(
+        expected
+            .iter()
+            .any(|(code, _)| code == "never-enabled-option"),
+        "{expected:?}"
+    );
+    assert!(
+        !expected.iter().any(|(code, _)| code == "dangling-path"),
+        "{expected:?}"
+    );
+    assert_eq!(
+        diagnostics(&merged),
+        expected,
+        "same findings merged and unmerged"
+    );
+
+    let out = run_in(&merged, &["check", "default.nix"]);
+    assert!(
+        stdout(&out).contains("default.nix:"),
+        "diagnostics point into the merged file: {}",
+        stdout(&out)
+    );
+
+    for dir in [&plain, &merged] {
+        let out = run_in(dir, &["fix", "."]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let out = run_in(&merged, &["split", ".", "--merged", "default.nix"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let fixed = read_tree(&plain);
+    assert!(
+        !fixed["modules/b.nix"].contains("unused"),
+        "{}",
+        fixed["modules/b.nix"]
+    );
+    assert!(
+        fixed["vendor/c.nix"].contains("unused"),
+        "ignored file untouched"
+    );
+    assert_eq!(
+        read_tree(&merged),
+        fixed,
+        "fixing the merged file fixes the same files"
+    );
+    std::fs::remove_dir_all(plain).unwrap();
+    std::fs::remove_dir_all(merged).unwrap();
+}
+
+#[test]
+fn import_split_keeps_target_when_any_module_cannot_bind_generators() {
+    let dir = temp_tree(
+        "import-split-partial",
+        &[
+            ("x.lua", "return 1\n"),
+            ("a.nix", "{ ... }: { src = ./x.lua; }\n"),
+            ("b.nix", "pkgs: { src = ./x.lua; }\n"),
+        ],
+    );
+    let out = run_in(&dir, &["import", "--split", "."]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.join("x.lua").exists(),
+        "shared file must not be deleted"
+    );
+    assert!(
+        !dir.join("x.lua.nix").exists(),
+        "split file must not be written"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("a.nix")).unwrap(),
+        "{ ... }: { src = ./x.lua; }\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("b.nix")).unwrap(),
+        "pkgs: { src = ./x.lua; }\n"
+    );
+    assert!(text.contains("kept "), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_target_with_unrecognized_or_unparseable_references() {
+    let dir = temp_tree(
+        "import-unrecognized",
+        &[
+            ("init.lua", "return 1\n"),
+            ("other.lua", "return 2\n"),
+            (
+                "a.nix",
+                "{ generators, ... }: {\n  text = builtins.readFile ./init.lua;\n  extra = builtins.path { path = ./init.lua; };\n  ok = builtins.readFile ./other.lua;\n}\n",
+            ),
+            ("broken.nix", "{ x = ; y = ./other.lua;\n"),
+        ],
+    );
+    let out = run_in(&dir, &["import", "."]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("init.lua").exists(), "init.lua must be kept");
+    assert!(dir.join("other.lua").exists(), "other.lua must be kept");
+    assert!(
+        text.contains("referenced outside supported import sites"),
+        "{text}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_refuses_target_outside_scanned_root() {
+    let dir = temp_tree(
+        "import-outside-root",
+        &[
+            ("shared/init.lua", "return 1\n"),
+            (
+                "modules/a.nix",
+                "{ generators, ... }: { text = builtins.readFile ../shared/init.lua; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "modules"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.join("shared/init.lua").exists(),
+        "outside file must not be deleted"
+    );
+    assert!(text.contains("outside the scanned root"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_split_refuses_to_overwrite_existing_split_file() {
+    let dir = temp_tree(
+        "import-split-exists",
+        &[
+            ("x.lua", "return 1\n"),
+            ("x.lua.nix", "{ existing = true; }\n"),
+            ("a.nix", "{ generators, ... }: { src = ./x.lua; }\n"),
+        ],
+    );
+    let out = run_in(&dir, &["import", "--split", "."]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("x.lua").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("x.lua.nix")).unwrap(),
+        "{ existing = true; }\n"
+    );
+    assert!(text.contains("already exists"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_single_file_keeps_target_referenced_by_sibling_module() {
+    let dir = temp_tree(
+        "import-single-file",
+        &[
+            ("x.lua", "return 1\n"),
+            (
+                "a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+            ("b.nix", "{ other = ./x.lua; }\n"),
+        ],
+    );
+    let out = run_in(&dir, &["import", "a.nix"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("x.lua").exists());
+    assert!(
+        text.contains("referenced outside supported import sites"),
+        "{text}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn fix_json_reports_write_error_and_exits_nonzero() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = temp_tree("fix-json-write-err", &[("a.nix", "let unused = 1; in 2\n")]);
+    let file = dir.join("a.nix");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().write(true).open(&file).is_ok() {
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+        return;
+    }
+    let out = run_in(&dir, &["fix", "--format", "json", "a.nix"]);
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "stdout={} stderr={stderr}",
+        stdout(&out)
+    );
+    assert!(stderr.contains("error: a.nix:"), "{stderr}");
+    assert!(
+        stdout(&out).trim_start().starts_with('{'),
+        "{}",
+        stdout(&out)
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn unformatted_file_in_fix_mode_handles_utf8_and_preserves_diags_on_formatter_error() {
+    let dir = temp_tree(
+        "unformatted-fix-utf8",
+        &[
+            (
+                "strictix.toml",
+                "[lint]\nenabled = [\"unformatted-file\"]\n\n[lint.\"unformatted-file\"]\ncommand = \"tr x X\"\n",
+            ),
+            ("a.nix", "let\n  unused = 1;\n  msg = \"ééééé\";\nin\n  { x = msg; }\n"),
+        ],
+    );
+    let out = run_in(&dir, &["fix", "--dry-run", "a.nix"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("warning[unformatted-file]"), "{text}");
+
+    std::fs::write(
+        dir.join("strictix.toml"),
+        "[lint]\nenabled = [\"unformatted-file\"]\n\n[lint.\"unformatted-file\"]\ncommand = \"false\"\n",
+    )
+    .unwrap();
+    let failed = run_in(&dir, &["check", "a.nix"]);
+    let text = stdout(&failed);
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(stderr.contains("the formatter false failed"), "{stderr}");
+    assert!(text.contains("warning[unused-let-binding]"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_targets_under_interpolated_or_dynamic_directory_paths() {
+    let cases = [
+        (
+            "interp-same-dir",
+            "{ generators, ... }: { a = builtins.readFile ./a.lua; }\n",
+            "map (n: builtins.readFile ./${n}.lua) [ \"a\" ]\n",
+        ),
+        (
+            "interp-prefix",
+            "{ generators, ... }: { a = builtins.readFile ./a.lua; }\n",
+            "map (n: builtins.readFile ./a${n}.lua) [ \"\" ]\n",
+        ),
+        (
+            "dir-concat",
+            "{ generators, ... }: { a = builtins.readFile ./a.lua; }\n",
+            "{ other = builtins.readFile (./. + \"/a.lua\"); }\n",
+        ),
+        (
+            "dir-string-interp",
+            "{ generators, ... }: { a = builtins.readFile ./a.lua; }\n",
+            "{ other = builtins.readFile \"${./.}/a.lua\"; }\n",
+        ),
+        (
+            "dir-readdir",
+            "{ generators, ... }: { a = builtins.readFile ./a.lua; }\n",
+            "{ entries = builtins.readDir ./.; }\n",
+        ),
+    ];
+    for (name, mod_a, mod_b) in cases {
+        let dir = temp_tree(
+            name,
+            &[("a.lua", "return 1\n"), ("a.nix", mod_a), ("b.nix", mod_b)],
+        );
+        let out = run_in(&dir, &["import", "."]);
+        let text = stdout(&out);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{name}: {text}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            dir.join("a.lua").exists(),
+            "{name}: a.lua must not be deleted"
+        );
+        assert!(
+            text.contains("may be referenced dynamically"),
+            "{name}: expected dynamic-ref keep reason, got:\n{text}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    let dir = temp_tree(
+        "interp-prefix-existing-dir",
+        &[
+            ("sub/keep.txt", "x\n"),
+            ("sub-extra/a.lua", "return 1\n"),
+            (
+                "a.nix",
+                "{ generators, ... }: { a = builtins.readFile ./sub-extra/a.lua; }\n",
+            ),
+            (
+                "b.nix",
+                "map (n: builtins.readFile ./sub${n}/a.lua) [ \"-extra\" ]\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "."]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "interp-prefix-existing-dir: {text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.join("sub-extra/a.lua").exists(),
+        "sub-extra/a.lua must not be deleted when ./sub is an existing directory"
+    );
+    assert!(
+        text.contains("may be referenced dynamically"),
+        "expected dynamic-ref keep reason, got:\n{text}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_target_referenced_from_sibling_directory_outside_scanned_root() {
+    let dir = temp_tree(
+        "sibling-ref",
+        &[
+            ("flake.nix", "{ outputs = _: {}; }\n"),
+            ("modules/x.lua", "return 1\n"),
+            (
+                "modules/a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+            (
+                "hosts/b.nix",
+                "{ text = builtins.readFile ../modules/x.lua; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "modules"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.join("modules/x.lua").exists(),
+        "x.lua must not be deleted when hosts/b.nix references it"
+    );
+    assert!(
+        text.contains("kept") && text.contains("hosts/b.nix"),
+        "expected kept reason mentioning hosts/b.nix, got:\n{text}"
+    );
+
+    let out_sub = run_in(&dir.join("modules"), &["import", "."]);
+    let text_sub = stdout(&out_sub);
+    assert_eq!(
+        out_sub.status.code(),
+        Some(0),
+        "{text_sub}\n{}",
+        String::from_utf8_lossy(&out_sub.stderr)
+    );
+    assert!(
+        dir.join("modules/x.lua").exists(),
+        "x.lua must not be deleted when run from inside modules/"
+    );
+    assert!(
+        text_sub.contains("kept") && text_sub.contains("hosts/b.nix"),
+        "expected kept reason mentioning hosts/b.nix from subdir, got:\n{text_sub}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_targets_when_flake_copies_project_root() {
+    let cases = [
+        ("flake-src-dot", "{ outputs = _: { src = ./.; }; }\n"),
+        (
+            "flake-clean-source-dot",
+            "{ outputs = { lib, ... }: { clean = lib.cleanSource ./.; }; }\n",
+        ),
+        (
+            "flake-filter-source-dot",
+            "{ outputs = _: { clean = builtins.filterSource (_: _: true) ./.; }; }\n",
+        ),
+        (
+            "flake-fileset-dot",
+            "{ outputs = { lib, ... }: { clean = lib.fileset.unions [ ./. ]; }; }\n",
+        ),
+        (
+            "flake-sources-regex-dot",
+            "{ outputs = { lib, ... }: { clean = lib.sources.sourceByRegex ./. [ \".*\" ]; }; }\n",
+        ),
+    ];
+    for (name, flake) in cases {
+        let dir = temp_tree(
+            name,
+            &[
+                ("flake.nix", flake),
+                ("modules/x.lua", "return 1\n"),
+                (
+                    "modules/a.nix",
+                    "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+                ),
+            ],
+        );
+        let out = run_in(&dir, &["import", "--dry-run", "modules"]);
+        let text = stdout(&out);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{name}: {text}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            dir.join("modules/x.lua").exists(),
+            "{name}: modules/x.lua must be preserved"
+        );
+        assert!(
+            text.contains("may be referenced dynamically"),
+            "{name}: expected dynamic-dir keep reason, got:\n{text}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[test]
+fn import_allows_conversion_when_flake_has_non_copy_modules_dir() {
+    let dir = temp_tree(
+        "flake-modules-dir",
+        &[
+            (
+                "flake.nix",
+                "{ outputs = _: { modules = [ ./hosts/x ./modules ]; }; }\n",
+            ),
+            ("hosts/x/default.nix", "{}\n"),
+            ("modules/default.nix", "{}\n"),
+            ("modules/x.lua", "return 1\n"),
+            (
+                "modules/a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+            (
+                "modules/b.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "--dry-run", "modules"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !text.contains("may be referenced dynamically"),
+        "non-copy modules = [ ./hosts/x ] must not block conversions:\n{text}"
+    );
+    assert!(
+        text.contains("read by several modules"),
+        "expected import to advance past dynamic-dir checks, got:\n{text}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_target_under_xdg_config_source_dir() {
+    let dir = temp_tree(
+        "xdg-source-dir",
+        &[
+            ("nvim/init.lua", "return 1\n"),
+            (
+                "a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./nvim/init.lua; }\n",
+            ),
+            ("b.nix", "{ xdg.configFile.\"nvim\".source = ./nvim; }\n"),
+        ],
+    );
+    let out = run_in(&dir, &["import", "."]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.join("nvim/init.lua").exists(),
+        "nvim/init.lua must not be deleted when xdg.configFile.nvim.source = ./nvim"
+    );
+    assert!(
+        text.contains("may be referenced dynamically"),
+        "expected dynamic-dir keep reason, got:\n{text}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn import_reference_walk_tolerates_unreadable_dirs_and_non_utf8_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = temp_tree(
+        "ref-walk-tolerant",
+        &[
+            ("flake.nix", "{ outputs = _: {}; }\n"),
+            ("modules/x.lua", "return 1\n"),
+            (
+                "modules/a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+            (
+                "modules/b.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+        ],
+    );
+    let restricted = dir.join("restricted");
+    std::fs::create_dir(&restricted).unwrap();
+    std::fs::write(restricted.join("secret.nix"), "{}\n").unwrap();
+    std::fs::set_permissions(&restricted, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let actually_unreadable = std::fs::read_dir(&restricted).is_err();
+    let out_unreadable = run_in(&dir, &["import", "--dry-run", "modules"]);
+    std::fs::set_permissions(&restricted, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(dir.join("bad.nix"), b"\xff\xfe unrelated\n").unwrap();
+    let out_readable = run_in(&dir, &["import", "--dry-run", "modules"]);
+
+    if actually_unreadable {
+        let text = stdout(&out_unreadable);
+        assert_eq!(
+            out_unreadable.status.code(),
+            Some(0),
+            "{text}\n{}",
+            String::from_utf8_lossy(&out_unreadable.stderr)
+        );
+        assert!(
+            text.contains("reference scan incomplete"),
+            "expected incomplete reference scan to keep target safely, got:\n{text}"
+        );
+    }
+
+    let text_readable = stdout(&out_readable);
+    assert_eq!(
+        out_readable.status.code(),
+        Some(0),
+        "{text_readable}\n{}",
+        String::from_utf8_lossy(&out_readable.stderr)
+    );
+    assert!(
+        text_readable.contains("read by several modules"),
+        "expected unrelated non-UTF-8 file not to block import, got:\n{text_readable}"
+    );
+
+    std::fs::write(dir.join("bad.nix"), b"\xff\xfe ./modules/x.lua\n").unwrap();
+    let out2 = run_in(&dir, &["import", "--dry-run", "modules"]);
+    let text2 = stdout(&out2);
+    assert_eq!(
+        out2.status.code(),
+        Some(0),
+        "{text2}\n{}",
+        String::from_utf8_lossy(&out2.stderr)
+    );
+    assert!(
+        text2.contains("may be referenced by a file with syntax errors"),
+        "expected non-UTF-8 file mentioning x.lua to protect it, got:\n{text2}"
+    );
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_scans_strictixignore_files_for_references() {
+    let dir = temp_tree(
+        "strictixignore-ref",
+        &[
+            ("flake.nix", "{ outputs = _: {}; }\n"),
+            (".strictixignore", "hosts/\n"),
+            ("modules/x.lua", "return 1\n"),
+            (
+                "modules/a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+            ),
+            (
+                "hosts/legacy.nix",
+                "{ text = builtins.readFile ../modules/x.lua; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "modules"]);
+    let text = stdout(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{text}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        dir.join("modules/x.lua").exists(),
+        "x.lua must not be deleted when ignored hosts/legacy.nix references it"
+    );
+    assert!(
+        text.contains("kept") && text.contains("hosts/legacy.nix"),
+        "expected kept reason mentioning hosts/legacy.nix, got:\n{text}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn import_keeps_target_when_dir_is_bound_via_let_or_self() {
+    let dir = temp_tree(
+        "let-dir-binding",
+        &[
+            ("nvim/init.lua", "return 1\n"),
+            (
+                "a.nix",
+                "{ generators, ... }: { text = builtins.readFile ./nvim/init.lua; }\n",
+            ),
+            (
+                "b.nix",
+                "let nvimDir = ./nvim; in { xdg.configFile.\"nvim\".source = nvimDir; }\n",
+            ),
+        ],
+    );
+    let out = run_in(&dir, &["import", "."]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(dir.join("nvim/init.lua").exists());
+    assert!(text.contains("may be referenced dynamically"), "{text}");
+    std::fs::remove_dir_all(dir).unwrap();
+
+    for (name, flake) in [
+        (
+            "self-interp",
+            "{ outputs = { self, ... }: { text = builtins.readFile \"${self}/modules/x.lua\"; }; }\n",
+        ),
+        (
+            "self-src",
+            "{ outputs = { self, ... }: { src = self; }; }\n",
+        ),
+    ] {
+        let dir = temp_tree(
+            name,
+            &[
+                ("flake.nix", flake),
+                ("modules/x.lua", "return 1\n"),
+                (
+                    "modules/a.nix",
+                    "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+                ),
+            ],
+        );
+        let out = run_in(&dir, &["import", "--dry-run", "modules"]);
+        let text = stdout(&out);
+        assert_eq!(out.status.code(), Some(0), "{name}: {text}");
+        assert!(dir.join("modules/x.lua").exists());
+        assert!(text.contains("may be referenced dynamically"), "{name}: {text}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[test]
+fn import_self_detection_ignores_attribute_selects_and_shadowed_self() {
+    let flakes = [
+        (
+            "self-short-rev",
+            "{ outputs = { self, ... }: { version = \"1.0-${self.shortRev or \"dirty\"}\"; }; }\n",
+        ),
+        (
+            "self-package-select",
+            "{ outputs = { self, ... }: { checks.x.build = { src = self.packages.x.default; }; }; }\n",
+        ),
+        (
+            "self-fixpoint-param",
+            "{ outputs = _: { lib = self: { src = self; path = \"${self}/x\"; }; }; }\n",
+        ),
+        (
+            "self-has-attr",
+            "{ outputs = { self, ... }: { src = if self ? rev then 1 else 2; }; }\n",
+        ),
+    ];
+    for (name, flake) in flakes {
+        let dir = temp_tree(
+            name,
+            &[
+                ("flake.nix", flake),
+                ("modules/x.lua", "return 1\n"),
+                (
+                    "modules/a.nix",
+                    "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+                ),
+            ],
+        );
+        let out = run_in(&dir, &["import", "--dry-run", "modules"]);
+        let text = format!("{}{}", stdout(&out), String::from_utf8_lossy(&out.stderr));
+        assert!(
+            text.contains("x.lua") || text.contains("running nix eval"),
+            "{name}: {text}"
+        );
+        assert!(
+            !text.contains("may be referenced dynamically"),
+            "{name}: {text}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[test]
+fn import_self_detection_catches_source_values() {
+    let flakes = [
+        (
+            "self-out-path",
+            "{ outputs = { self, ... }: { t = builtins.readFile \"${self.outPath}/modules/x.lua\"; }; }\n",
+        ),
+        (
+            "inputs-self-plus",
+            "{ outputs = inputs: { t = builtins.readFile (inputs.self + \"/modules/x.lua\"); }; }\n",
+        ),
+        (
+            "self-clean-source",
+            "{ outputs = { self, lib, ... }: { s = lib.cleanSource self; }; }\n",
+        ),
+        (
+            "self-to-string",
+            "{ outputs = { self, ... }: { t = \"${toString self}/modules\"; }; }\n",
+        ),
+        (
+            "inputs-self-inside-self-lambda",
+            "{ outputs = inputs: { lib = self: { t = builtins.readFile (inputs.self + \"/modules/x.lua\"); }; }; }\n",
+        ),
+        (
+            "self-source-info",
+            "{ outputs = { self, ... }: { t = \"${self.sourceInfo}/modules\"; }; }\n",
+        ),
+        (
+            "self-src-list",
+            "{ outputs = { self, ... }: { srcs = [ self ]; }; }\n",
+        ),
+    ];
+    for (name, flake) in flakes {
+        let dir = temp_tree(
+            name,
+            &[
+                ("flake.nix", flake),
+                ("modules/x.lua", "return 1\n"),
+                (
+                    "modules/a.nix",
+                    "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+                ),
+            ],
+        );
+        let out = run_in(&dir, &["import", "--dry-run", "modules"]);
+        let text = stdout(&out);
+        assert!(dir.join("modules/x.lua").exists());
+        assert!(
+            text.contains("may be referenced dynamically"),
+            "{name}: {text}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[test]
+fn import_allows_directory_module_imports() {
+    for (name, parent) in [
+        ("dir-imports-list", "{ imports = [ ./sub ]; }\n"),
+        ("dir-imports-concat", "{ imports = [ ] ++ [ ./sub ]; }\n"),
+        ("dir-import-call", "{ x = import ./sub; }\n"),
+        (
+            "dir-call-package",
+            "{ pkgs, ... }: { x = pkgs.callPackage ./sub { }; }\n",
+        ),
+    ] {
+        let dir = temp_tree(
+            name,
+            &[
+                ("parent.nix", parent),
+                ("sub/x.lua", "return 1\n"),
+                (
+                    "sub/default.nix",
+                    "{ generators, ... }: { text = builtins.readFile ./x.lua; }\n",
+                ),
+            ],
+        );
+        let out = run_in(&dir, &["import", "--dry-run", "."]);
+        let text = format!("{}{}", stdout(&out), String::from_utf8_lossy(&out.stderr));
+        assert!(
+            text.contains("x.lua") || text.contains("running nix eval"),
+            "{name}: {text}"
+        );
+        assert!(
+            !text.contains("may be referenced dynamically"),
+            "{name}: {text}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
