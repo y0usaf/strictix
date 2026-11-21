@@ -1,16 +1,7 @@
-//! Where a file's data is machine-shaped rather than written by hand.
-//!
-//! finix's generators take a syntax tree: the argument of a
-//! `generators.<language>.render` call, or the value a `generators.<name>`
-//! printer takes. That tree is spelled from constructors, so the names,
-//! words and one-item lists it repeats are the generated text's shape and
-//! not a reader's code. No rule reports inside one.
-
 use strictix_syntax::{AttrName, Expr, TextRange};
 
 use crate::semantic::SemanticModel;
 
-/// The ranges of a file's generator trees.
 #[must_use]
 pub fn tree_ranges(model: &SemanticModel<'_>) -> Vec<TextRange> {
     let source = model.source();
@@ -41,7 +32,6 @@ pub fn tree_ranges(model: &SemanticModel<'_>) -> Vec<TextRange> {
     ranges
 }
 
-/// Whether `range` sits inside one of `ranges`.
 #[must_use]
 pub fn inside(ranges: &[TextRange], range: TextRange) -> bool {
     ranges

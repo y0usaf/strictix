@@ -1,10 +1,3 @@
-//! Conservative correctness and generated-code lints.
-//!
-//! These rules intentionally fire only when syntax or the semantic model can
-//! prove the finding. In particular, recursive attrset fields are externally
-//! observable, so `unused-rec-binding` means that a field does not participate
-//! in the recursive dependency graph, not that the field can be deleted.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -17,7 +10,6 @@ use strictix_syntax::{
     SyntaxNode, TextRange,
 };
 
-/// Flags a recursive attrset that has no intra-set references.
 pub struct UnnecessaryRec;
 
 impl Rule for UnnecessaryRec {
@@ -75,8 +67,6 @@ impl Rule for UnnecessaryRec {
     }
 }
 
-/// Flags fields in a mixed recursive attrset that do not participate in its
-/// intra-set dependency graph.
 pub struct UnusedRecBinding;
 
 impl Rule for UnusedRecBinding {
@@ -165,7 +155,6 @@ impl Rule for UnusedRecBinding {
     }
 }
 
-/// Flags an assertion whose condition is literally false.
 pub struct AssertFalse;
 
 impl Rule for AssertFalse {
@@ -204,7 +193,6 @@ impl Rule for AssertFalse {
     }
 }
 
-/// Flags division by a literal numeric zero.
 pub struct LiteralDivisionByZero;
 
 impl Rule for LiteralDivisionByZero {
@@ -251,8 +239,6 @@ impl Rule for LiteralDivisionByZero {
     }
 }
 
-/// Flags comparisons to a boolean literal when the other operand is
-/// syntactically guaranteed to produce a boolean.
 pub struct RedundantBooleanComparison;
 
 impl Rule for RedundantBooleanComparison {
@@ -310,12 +296,6 @@ impl Rule for RedundantBooleanComparison {
     }
 }
 
-/// Flags a repeated string/boolean/null literal in one list.
-///
-/// Numeric literals are deliberately exempt: lists of numbers are
-/// almost always coordinate or dimension vectors (`position = [ 0 0 ]`,
-/// margins, RGBA channels) where repetition is the point, not a
-/// copy-paste slip.
 pub struct DuplicateLiteralListItem;
 
 impl Rule for DuplicateLiteralListItem {
@@ -342,15 +322,10 @@ impl Rule for DuplicateLiteralListItem {
     }
 }
 
-/// Byte ranges of the generator syntax trees in this file: the argument of
-/// every `generators.<language>.render` call. A tree is built from a
-/// generator's constructors, so a symbol or word it repeats is the generated
-/// code's, repeated as often as that code uses it.
 pub(crate) fn tree_ranges(model: &SemanticModel<'_>) -> Vec<TextRange> {
     strictix_core::generated::tree_ranges(model)
 }
 
-/// Whether `range` sits inside one of `ranges`.
 pub(crate) fn in_ranges(ranges: &[TextRange], range: TextRange) -> bool {
     strictix_core::generated::inside(ranges, range)
 }
@@ -430,8 +405,6 @@ enum LiteralKey {
     String(String),
 }
 
-/// The comparable identity of a duplicable list literal. Numbers return
-/// `None` on purpose — see [DuplicateLiteralListItem].
 fn literal_key(expr: Expr<'_>, source: &str) -> Option<LiteralKey> {
     match unwrap_parens(expr) {
         Expr::Ident(token) if token.text(source) == "true" => Some(LiteralKey::Bool(true)),

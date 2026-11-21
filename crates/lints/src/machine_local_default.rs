@@ -1,11 +1,3 @@
-//! Flags option defaults that only resolve on the machine that wrote them.
-//!
-//! A `default` holding an absolute home path bakes the author's layout into
-//! the option: it evaluates everywhere, then fails at runtime on any other
-//! host, and it survives review because it looks like configuration. The
-//! fix is to derive the path from the module's own options (`config.user.homeDirectory`,
-//! an option the host sets) or to leave the option without a default.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -18,7 +10,6 @@ use strictix_syntax::{
 
 use crate::schema::unwrap_parens;
 
-/// Flags a machine-local absolute path used as an option default.
 pub struct MachineLocalDefault;
 
 impl Rule for MachineLocalDefault {
@@ -115,7 +106,6 @@ fn static_path(path: Option<Attrpath<'_>>, source: &str) -> Option<Vec<String>> 
         .collect()
 }
 
-/// Literal strings inside a default: the value itself or a one-level list.
 fn literals<'a>(value: Expr<'a>, source: &'a str) -> Vec<(String, TextRange)> {
     match value {
         Expr::String(string) => string_text(string, source).into_iter().collect(),
@@ -148,7 +138,6 @@ fn string_text<'a>(
     ))
 }
 
-/// Whether the literal is a home-relative absolute path and not, say, a store path.
 fn machine_local(text: &str) -> bool {
     let mut parts = text.split('/');
     matches!(parts.next(), Some("")) && matches!(parts.next(), Some("home" | "Users" | "root"))

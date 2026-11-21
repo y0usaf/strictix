@@ -1,14 +1,5 @@
-//! Lossless green tree: nodes, tokens, and text ranges.
-//!
-//! The parser produces an immutable, lossless concrete syntax tree
-//! (CST). Every token from the lexer — including whitespace and comments
-//! (trivia) — is preserved so that reconstructing all token texts in
-//! order reproduces the source byte-for-byte. This is what lets
-//! future fixes edit text without destroying formatting.
-
 use crate::kind::SyntaxKind;
 
-/// A half-open byte range `[start, end)` into the source text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TextRange {
     start: u32,
@@ -16,34 +7,28 @@ pub struct TextRange {
 }
 
 impl TextRange {
-    /// Create a range `[start, end)`. Panics (in debug) if `start > end`.
-    #[must_use]
+        #[must_use]
     pub fn new(start: u32, end: u32) -> Self {
         debug_assert!(start <= end, "invalid range {start}..{end}");
         Self { start, end }
     }
 
-    /// The inclusive start offset.
-    #[must_use]
+        #[must_use]
     pub const fn start(self) -> u32 {
         self.start
     }
 
-    /// The exclusive end offset.
-    #[must_use]
+        #[must_use]
     pub const fn end(self) -> u32 {
         self.end
     }
 
-    /// Whether `offset` falls inside `[start, end)`.
-    #[must_use]
+        #[must_use]
     pub const fn contains(self, offset: u32) -> bool {
         self.start <= offset && offset < self.end
     }
 }
 
-/// A single token in the CST. Trivia (whitespace, comments) are ordinary
-/// tokens preserved in the tree for lossless round-trips.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SyntaxToken {
     pub kind: SyntaxKind,
@@ -51,20 +36,17 @@ pub struct SyntaxToken {
 }
 
 impl SyntaxToken {
-    /// The kind of this token.
-    #[must_use]
+        #[must_use]
     pub const fn kind(self) -> SyntaxKind {
         self.kind
     }
 
-    /// The byte range this token covers.
-    #[must_use]
+        #[must_use]
     pub const fn range(self) -> TextRange {
         self.range
     }
 
-    /// The source text this token covers.
-    #[must_use]
+        #[must_use]
     pub fn text(self, source: &str) -> &str {
         let start = self.range.start as usize;
         &source[start..start + self.range.len() as usize]
@@ -77,7 +59,6 @@ impl TextRange {
     }
 }
 
-/// Either a child node or a token in a node's children list.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeOrToken {
     Node(SyntaxNode),
@@ -85,8 +66,7 @@ pub enum NodeOrToken {
 }
 
 impl NodeOrToken {
-    /// The kind of this child.
-    #[must_use]
+        #[must_use]
     pub fn kind(&self) -> SyntaxKind {
         match self {
             NodeOrToken::Node(n) => n.kind,
@@ -94,8 +74,7 @@ impl NodeOrToken {
         }
     }
 
-    /// The byte range covered by this child.
-    #[must_use]
+        #[must_use]
     pub fn range(&self) -> TextRange {
         match self {
             NodeOrToken::Node(n) => n.range,
@@ -104,7 +83,6 @@ impl NodeOrToken {
     }
 }
 
-/// A node in the lossless concrete syntax tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyntaxNode {
     kind: SyntaxKind,
@@ -113,24 +91,17 @@ pub struct SyntaxNode {
 }
 
 impl SyntaxNode {
-    /// This node's kind.
-    #[must_use]
+        #[must_use]
     pub const fn kind(&self) -> SyntaxKind {
         self.kind
     }
 
-    /// The byte range covered by this node and all its descendants.
-    #[must_use]
+        #[must_use]
     pub const fn range(&self) -> TextRange {
         self.range
     }
 
-    /// The byte range spanning this node's first and last non-trivia
-    /// token, excluding leading and trailing whitespace/comments.
-    /// Diagnostics and replacement fixes use this so they point at code,
-    /// not trivia. Falls back to the full range when the subtree has no
-    /// non-trivia token.
-    #[must_use]
+        #[must_use]
     pub fn content_range(&self) -> TextRange {
         let first = first_significant(self).map(|t| t.range.start());
         let last = last_significant(self).map(|t| t.range.end());
@@ -140,29 +111,25 @@ impl SyntaxNode {
         }
     }
 
-    /// The direct children of this node, in source order.
-    #[must_use]
+        #[must_use]
     pub fn children(&self) -> &[NodeOrToken] {
         &self.children
     }
-    /// The child nodes (excluding tokens) of this node, in source order.
-    pub fn child_nodes(&self) -> impl Iterator<Item = &SyntaxNode> {
+        pub fn child_nodes(&self) -> impl Iterator<Item = &SyntaxNode> {
         self.children.iter().filter_map(|c| match c {
             NodeOrToken::Node(n) => Some(n),
             NodeOrToken::Token(_) => None,
         })
     }
 
-    /// The child tokens (excluding nodes) of this node, in source order.
-    pub fn child_tokens(&self) -> impl Iterator<Item = &SyntaxToken> {
+        pub fn child_tokens(&self) -> impl Iterator<Item = &SyntaxToken> {
         self.children.iter().filter_map(|c| match c {
             NodeOrToken::Token(t) => Some(t),
             NodeOrToken::Node(_) => None,
         })
     }
 
-    /// The first child node of the given kind, if any.
-    #[must_use]
+        #[must_use]
     pub fn child_node(&self, kind: SyntaxKind) -> Option<&SyntaxNode> {
         self.child_nodes().find(|n| n.kind() == kind)
     }
@@ -221,22 +188,17 @@ impl SyntaxNode {
             }
         }
     }
-    /// All recovered malformed regions, in source order.
-    pub fn error_nodes(&self) -> impl Iterator<Item = &SyntaxNode> {
+        pub fn error_nodes(&self) -> impl Iterator<Item = &SyntaxNode> {
         self.descendants()
             .filter(|node| node.kind() == SyntaxKind::ErrorNode)
     }
-    /// The source text this node covers.
-    #[must_use]
+        #[must_use]
     pub fn text<'a>(&self, source: &'a str) -> &'a str {
         let start = self.range.start as usize;
         &source[start..self.range().len() as usize + start]
     }
 }
 
-/// Incremental builder that assembles a [`SyntaxNode`] tree from a
-/// stream of `start` / `token` / `finish` events. Node ranges are
-/// computed from their children when the node is closed.
 #[derive(Default)]
 pub struct TreeBuilder {
     stack: Vec<(SyntaxKind, usize)>,
@@ -289,8 +251,7 @@ impl TreeBuilder {
         }
     }
 
-    /// Close any remaining open nodes and return the root.
-    pub fn finish_all(mut self) -> SyntaxNode {
+        pub fn finish_all(mut self) -> SyntaxNode {
         while !self.stack.is_empty() {
             self.finish();
         }
@@ -298,7 +259,6 @@ impl TreeBuilder {
     }
 }
 
-/// The first non-trivia token in a node's subtree, depth-first.
 fn first_significant(node: &SyntaxNode) -> Option<SyntaxToken> {
     for child in node.children() {
         match child {
@@ -314,7 +274,6 @@ fn first_significant(node: &SyntaxNode) -> Option<SyntaxToken> {
     None
 }
 
-/// The last non-trivia token in a node's subtree, depth-first.
 fn last_significant(node: &SyntaxNode) -> Option<SyntaxToken> {
     for child in node.children().iter().rev() {
         match child {

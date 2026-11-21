@@ -1,12 +1,3 @@
-//! Expression-simplification lints: boolean `if` forms, double/comparison
-//! negation, and trivial `let`s that reduce to their own binding.
-//!
-//! Every fix here rewrites a whole expression node with text spliced from
-//! its own children, so the rules only fire when the rewrite is provably
-//! parse-safe at any slot the original node could occupy. When operand
-//! precedence cannot be proven from the node alone, the replacement keeps
-//! explicit parentheses rather than guessing at the parent context.
-
 use strictix_core::{
     diagnostic::{Diagnostic, Severity},
     fix::Fix,
@@ -19,7 +10,6 @@ use strictix_syntax::{
 
 use SyntaxKind as K;
 
-/// Flags `if` expressions reducible to a boolean expression.
 pub struct BooleanIf;
 
 impl Rule for BooleanIf {
@@ -129,7 +119,6 @@ impl Rule for BooleanIf {
     }
 }
 
-/// Flags negations that flip to a simpler operator.
 pub struct NegationSimplification;
 
 impl Rule for NegationSimplification {
@@ -235,7 +224,6 @@ impl Rule for NegationSimplification {
     }
 }
 
-/// Flags `let x = e; in x` — a let that reduces to its own value.
 pub struct TrivialLet;
 
 impl Rule for TrivialLet {
@@ -311,7 +299,6 @@ impl Rule for TrivialLet {
     }
 }
 
-/// Flags `!true` and `!false`, which have a constant result.
 pub struct ConstantBooleanNot;
 
 impl Rule for ConstantBooleanNot {
@@ -364,7 +351,6 @@ impl Rule for ConstantBooleanNot {
     }
 }
 
-/// Flags boolean binary operators whose two operands are constants.
 pub struct ConstantBooleanBinop;
 
 impl Rule for ConstantBooleanBinop {
@@ -423,7 +409,6 @@ impl Rule for ConstantBooleanBinop {
     }
 }
 
-/// Flags the identity lambda `x: x`.
 pub struct IdentityLambda;
 
 impl Rule for IdentityLambda {
@@ -469,7 +454,6 @@ impl Rule for IdentityLambda {
     }
 }
 
-/// Flags merges with an empty attribute set, which contributes no attributes.
 pub struct EmptyAttrsetMerge;
 
 impl Rule for EmptyAttrsetMerge {
@@ -555,10 +539,6 @@ fn splice_operand(expr: Expr<'_>, source: &str) -> String {
     }
 }
 
-/// Unwrap every paren layer around an expression.
-///
-/// Duplicated per house convention (suggested_rules has its own): rule
-/// files stay self-contained rather than sharing a helpers module.
 fn unwrap_parens(mut expr: Expr<'_>) -> Expr<'_> {
     while let Expr::Paren(paren) = expr {
         let Some(inner) = paren.expr() else { break };
@@ -567,10 +547,6 @@ fn unwrap_parens(mut expr: Expr<'_>) -> Expr<'_> {
     expr
 }
 
-/// The boolean literal an expression spells, seen through parens.
-///
-/// In Nix, true/false lex as Ident tokens; in expression position these
-/// texts are always the literals.
 fn bool_literal(expr: Expr<'_>, source: &str) -> Option<bool> {
     match unwrap_parens(expr) {
         Expr::Ident(token) if token.text(source) == "true" => Some(true),
@@ -579,12 +555,6 @@ fn bool_literal(expr: Expr<'_>, source: &str) -> Option<bool> {
     }
 }
 
-/// True when the expression is syntactically guaranteed to produce a
-/// boolean: comparisons, boolean binops, `!`, `?`, and bool literals.
-///
-/// This is what licenses the `c || e` rewrite — `||`/`&&` force both
-/// sides to booleans, so an if-branch of any other type must not move
-/// under them.
 fn is_definitely_boolean(expr: Expr<'_>, source: &str) -> bool {
     match unwrap_parens(expr) {
         Expr::Unary(_) | Expr::HasAttr(_) => true,
@@ -606,10 +576,6 @@ fn is_definitely_boolean(expr: Expr<'_>, source: &str) -> bool {
     }
 }
 
-/// The source text of an ident or int atom; `None` for anything else.
-///
-/// Same-kind atoms with identical text are the only branch/operand pair
-/// this module treats as "the same expression" — matching Tautology.
 fn atom_text<'a>(expr: Expr<'a>, source: &'a str) -> Option<&'a str> {
     match expr {
         Expr::Ident(t) | Expr::Int(t) => Some(t.text(source)),
@@ -617,11 +583,6 @@ fn atom_text<'a>(expr: Expr<'a>, source: &'a str) -> Option<&'a str> {
     }
 }
 
-/// The range of an expression with edge trivia trimmed.
-///
-/// Node ranges flush leading trivia into the node, so a node's raw text
-/// can drag whitespace or comments along when spliced elsewhere; token
-/// exprs are exact already.
 fn trimmed_range(expr: Expr<'_>) -> TextRange {
     match expr {
         Expr::Ident(t)
@@ -649,18 +610,11 @@ fn trimmed_range(expr: Expr<'_>) -> TextRange {
     }
 }
 
-/// The trivia-trimmed source text of an expression.
 fn trimmed_text<'s>(expr: Expr<'_>, source: &'s str) -> &'s str {
     let r = trimmed_range(expr);
     &source[r.start() as usize..r.end() as usize]
 }
 
-/// The expression's text, parenthesized unless it can stand alone as an
-/// operand of `!`, `&&`, or `||`.
-///
-/// Atoms, parens, selects, and applications all bind tighter than every
-/// boolean operator, so they splice bare; anything else (a comparison,
-/// an arrow, a lambda) gets parens to survive any surrounding operator.
 fn operand_text(expr: Expr<'_>, source: &str) -> String {
     let text = trimmed_text(expr, source);
     match expr {
@@ -677,11 +631,6 @@ fn operand_text(expr: Expr<'_>, source: &str) -> String {
     }
 }
 
-/// True when any ident token anywhere under `expr` spells `name`.
-///
-/// Deliberately over-approximate: `a.x` matches a search for `x` even
-/// though the select attr is not a reference. TrivialLet only uses this
-/// to stay silent, so a false positive just skips a finding.
 fn mentions_name(expr: Expr<'_>, source: &str, name: &str) -> bool {
     fn node_mentions(node: &SyntaxNode, source: &str, name: &str) -> bool {
         node.children().iter().any(|child| match child {

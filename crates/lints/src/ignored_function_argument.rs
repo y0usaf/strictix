@@ -1,6 +1,3 @@
-//! ignored-function-argument: an attribute passed to a `{ a, ... }:` function
-//! that neither names it nor binds the whole set with `@`, so nothing reads it.
-
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
@@ -21,7 +18,6 @@ use strictix_syntax::{
 
 pub struct IgnoredFunctionArgument;
 
-/// `range` widened to the whitespace before it, so removing it leaves no gap.
 fn with_leading_space(range: TextRange, source: &str) -> TextRange {
     let start = source[..range.start() as usize]
         .trim_end_matches([' ', '\t', '\n', '\r'])
@@ -164,8 +160,6 @@ impl Rule for IgnoredFunctionArgument {
     }
 }
 
-/// The names an open pattern (`{a, b, ...}:` with no `@` name) declares;
-/// `None` for any other parameter.
 fn open_pattern(lambda: LambdaExpr<'_>, source: &str) -> Option<HashSet<String>> {
     let LambdaParam::Formals(formals, None) = lambda.param() else {
         return None;
@@ -178,8 +172,6 @@ fn open_pattern(lambda: LambdaExpr<'_>, source: &str) -> Option<HashSet<String>>
     })
 }
 
-/// The open pattern of the file `import ./x.nix` reads, when it is a project
-/// file whose whole expression is such a function.
 struct OpenPatternCache(Vec<OnceLock<Option<HashSet<String>>>>);
 
 fn build_open_pattern_cache(project: &ProjectContext) -> OpenPatternCache {

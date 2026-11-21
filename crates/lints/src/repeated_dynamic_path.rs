@@ -1,6 +1,3 @@
-//! repeated-dynamic-path: one option path with a computed segment, such as
-//! `manzil.users.${config.user.name}`, spelled out in many modules.
-
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -20,7 +17,6 @@ use crate::duplicate_definitions::merged_modules;
 const CODE: &str = "repeated-dynamic-path";
 const MIN_MODULES: usize = 4;
 
-/// One module's first definition under a dynamic path.
 struct Site {
     file: usize,
     module: Option<String>,
@@ -31,9 +27,6 @@ fn normalized(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The interpolated attribute path of a segment, when it is one: `${a.b}`
-/// or `"${a.b}"` alone. A bare `${name}` is usually a lambda parameter, so
-/// two modules spelling it alike name nothing in common.
 fn dynamic(name: AttrName<'_>, source: &str) -> Option<String> {
     let interp = match name {
         AttrName::Interp(interp) => interp,
@@ -69,8 +62,6 @@ fn attrset_of(value: Expr<'_>) -> Option<AttrsetExpr<'_>> {
     }
 }
 
-/// Collect `path -> first range` for every binding path through `set`,
-/// prefixed by `prefix`, that reaches a dynamic segment.
 fn walk(
     set: AttrsetExpr<'_>,
     prefix: &[String],

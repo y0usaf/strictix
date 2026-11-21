@@ -1,5 +1,3 @@
-//! A Nix adaptation of cognitive complexity, measured per lambda.
-
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::rules::Rule;
@@ -42,16 +40,6 @@ fn argument_score(model: &SemanticModel<'_>, call: ApplyExpr<'_>, nesting: usize
         .map_or(0, |node| walk(model, node, nesting))
 }
 
-/// Score one lambda independently of nested lambdas (including curried arguments).
-///
-/// Start at zero. An `if` costs 1 + control-flow nesting; each `else` costs
-/// one. An `else if` costs one without another nesting penalty. Each run of
-/// `&&`, `||`, or `->` costs one; changing operators starts another run.
-/// Recognized `lib.mkIf` and `lib.optional*` calls cost 1 + nesting, and
-/// increase nesting within both arguments. Library aliases use the semantic model.
-/// Parentheses do not break runs. Other expressions only contribute the
-/// complexity of their children: declarations, assertions, attribute tests,
-/// and `or` defaults have no intrinsic cost. Recursion is not scored.
 #[must_use]
 pub fn cognitive_complexity(model: &SemanticModel<'_>, lambda: LambdaExpr<'_>) -> usize {
     lambda

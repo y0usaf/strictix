@@ -1,5 +1,3 @@
-//! Flags conditions that are certain to fail the Nix boolean check.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -8,7 +6,6 @@ use strictix_core::{
 };
 use strictix_syntax::{AssertExpr, AstNode, Expr, IfExpr, SyntaxKind as K, TextRange};
 
-/// Flags statically non-boolean `if` and `assert` conditions.
 pub struct NonBooleanCondition;
 
 impl Rule for NonBooleanCondition {

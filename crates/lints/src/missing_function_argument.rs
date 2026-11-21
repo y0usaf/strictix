@@ -1,10 +1,3 @@
-//! Flags calls to known formal-set functions whose literal argument omits a
-//! required attribute.
-//!
-//! This is intentionally a small, syntax-directed check.  Dynamic attribute
-//! names, inherits, and unknown callees are left alone because they may supply
-//! an attribute that is not visible statically.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -66,9 +59,6 @@ impl Rule for MissingFunctionArgument {
     }
 }
 
-/// Resolve only lambdas and lexical aliases to lambdas.  The binding check is
-/// what prevents an unrelated `with` or a shadowed name from being treated as
-/// the alias we found syntactically.
 fn resolve_formals<'a>(
     expr: Expr<'a>,
     model: &SemanticModel<'a>,
@@ -95,8 +85,6 @@ fn resolve_formals<'a>(
     }
 }
 
-/// Return known top-level keys and whether the set is closed.  Any inherit or
-/// non-static attribute path makes the result uncertain, so callers skip it.
 fn literal_keys<'a>(expr: Expr<'a>, source: &str) -> Option<(Vec<String>, bool)> {
     let expr = match expr {
         Expr::Paren(p) => p.expr()?,

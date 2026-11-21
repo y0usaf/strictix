@@ -1,4 +1,3 @@
-//! Static project context for cross-file import diagnostics.
 use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -13,7 +12,6 @@ pub struct ProjectFile {
     pub source: String,
 }
 
-/// Deterministic graph of supplied files. Only literal relative imports are represented.
 pub struct ProjectContext {
     files: BTreeSet<PathBuf>,
     imports: BTreeMap<PathBuf, Vec<(PathBuf, u32)>>,
@@ -116,9 +114,7 @@ impl ProjectContext {
         }
     }
 
-    /// Builder: files that exist for [Self::contains] and
-    /// [Self::contains_dir] without being part of the linted sources.
-    #[must_use]
+        #[must_use]
     pub fn with_present(mut self, paths: impl IntoIterator<Item = PathBuf>) -> Self {
         self.present = paths.into_iter().map(|path| normalize(&path)).collect();
         self
@@ -139,10 +135,7 @@ impl ProjectContext {
         Some((idx, &self.sources[idx]))
     }
 
-    /// Build a project-wide index of type `T` once and share it across
-    /// every file (and worker thread) of the run. `build` must not call
-    /// `memo` itself: the lock is held while it runs.
-    pub fn memo<T: Any + Send + Sync>(&self, build: impl FnOnce(&Self) -> T) -> Arc<T> {
+        pub fn memo<T: Any + Send + Sync>(&self, build: impl FnOnce(&Self) -> T) -> Arc<T> {
         let mut memo = self.memo.lock().unwrap_or_else(|e| e.into_inner());
         let entry = memo
             .entry(TypeId::of::<T>())
@@ -157,10 +150,7 @@ impl ProjectContext {
         self.files.contains(&path) || self.present.contains(&path)
     }
 
-    /// Whether some supplied file lies strictly under `path`, so the
-    /// directory exists for the project even when no disk entry does
-    /// (the files of a merged file live only in memory).
-    pub fn contains_dir(&self, path: &Path) -> bool {
+        pub fn contains_dir(&self, path: &Path) -> bool {
         let dir = normalize(path);
         [&self.files, &self.present].into_iter().any(|set| {
             set.range(dir.clone()..)
@@ -195,9 +185,6 @@ impl ProjectContext {
     }
 }
 
-/// Lexically resolve `.` and `..`, as Nix does for path literals: a merged
-/// file's split modules live only in memory, so the filesystem cannot walk
-/// their `..`. A leading `..` that climbs above a relative path is kept.
 pub fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {

@@ -1,4 +1,3 @@
-//! Conservative access to the syntax value of a resolved local binding.
 use strictix_core::semantic::{BindingKind, SemanticModel};
 use strictix_syntax::{
     AstNode, AttrItem, AttrName, Binding, Expr, LambdaExpr, LambdaParam, LetExpr, RecAttrsetExpr,
@@ -18,8 +17,6 @@ fn may_bind(item: AttrItem<'_>, name: &str, source: &str) -> bool {
     }
 }
 
-/// Whether an enclosing scope can shadow the named binding. A declaration's
-/// own scope is excluded when checking references to a known local binding.
 fn shadowed(
     token: &SyntaxToken,
     expected: Option<&SyntaxToken>,
@@ -67,7 +64,6 @@ fn shadowed(
     })
 }
 
-/// Verify resolution without overlooking forward or quoted local declarations.
 pub(crate) fn resolves_to(
     token: &SyntaxToken,
     expected: &SyntaxToken,
@@ -103,7 +99,6 @@ pub(crate) fn value<'a>(token: &SyntaxToken, model: &SemanticModel<'a>) -> Optio
     }
 }
 
-/// Check a global name without overlooking a forward local declaration.
 pub(crate) fn is_unshadowed(token: &SyntaxToken, model: &SemanticModel<'_>) -> bool {
     model
         .reference_at(token.range())

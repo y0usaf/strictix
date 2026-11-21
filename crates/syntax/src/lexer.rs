@@ -1,14 +1,5 @@
-//! Hand-written lexer for the Nix expression language.
-//!
-//! Produces a flat token stream with trivia (whitespace, comments)
-//! preserved, so concatenating all token texts reproduces the source
-//! exactly. String interpolation is handled with a mode stack: entering
-//! `${` pushes a normal-expression frame, and the matching `}` pops
-//! back into string mode.
-
 use crate::kind::SyntaxKind;
 
-/// A single lexed token, as a span into the source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Token {
     pub kind: SyntaxKind,
@@ -17,17 +8,13 @@ pub struct Token {
 }
 
 impl Token {
-    /// The source text this token covers.
-    #[must_use]
+        #[must_use]
     pub fn text<'a>(&self, source: &'a str) -> &'a str {
         let start = self.start as usize;
         &source[start..start + self.len as usize]
     }
 }
 
-/// Lex `source` into tokens. Always terminates; unterminated constructs
-/// yield an [`SyntaxKind::Error`] token. The final token is
-/// [`SyntaxKind::Eof`].
 #[must_use]
 pub fn lex(source: &str) -> Vec<Token> {
     let mut lexer = Lexer::new(source);
@@ -35,15 +22,11 @@ pub fn lex(source: &str) -> Vec<Token> {
     lexer.tokens
 }
 
-/// Lexer state: which syntactic context we are scanning in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
-    /// Between expressions. The bottom of the stack is always Normal.
-    Normal,
-    /// Inside a `"..."` string.
-    Str,
-    /// Inside an `''...''` indented string.
-    IndStr,
+        Normal,
+        Str,
+        IndStr,
 }
 
 struct SmallStack<T: Copy, const N: usize> {
@@ -215,8 +198,7 @@ impl<'a> Lexer<'a> {
         self.emit(kind, start);
     }
 
-    /// Emit any accumulated string content as one token.
-    fn flush_content(&mut self) {
+        fn flush_content(&mut self) {
         if self.pos > self.content_start {
             let start = self.content_start;
             self.content_start = self.pos;
@@ -472,9 +454,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Lex a path starting at the current position (`/`, `./`, `../`,
-    /// `~/` prefixes).
-    fn path(&mut self) {
+        fn path(&mut self) {
         let start = self.pos;
         if self.peek() == b'~' && self.peek_at(1) == b'/' {
             self.bump(2);
@@ -482,9 +462,7 @@ impl<'a> Lexer<'a> {
         self.path_tail(start);
     }
 
-    /// Continue a path from `start` (already consumed prefix), then
-    /// emit a single Path token covering `start..pos`.
-    fn path_tail(&mut self, start: usize) {
+        fn path_tail(&mut self, start: usize) {
         loop {
             while is_path_char(self.peek()) {
                 self.bump(1);
@@ -563,9 +541,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Handle a `'` inside an indented string: escapes, literal single
-    /// quotes, or the closing `''`. Returns `true` if the string ended.
-    fn ind_quote(&mut self) -> bool {
+        fn ind_quote(&mut self) -> bool {
         if self.peek_at(1) != b'\'' {
             self.bump(1);
             return false;

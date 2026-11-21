@@ -1,12 +1,3 @@
-//! Call-form simplification lints: builtins with operator equivalents,
-//! deprecated predicates, and `lib.optional*` opportunities.
-//!
-//! All five rules are FILE rules even though each matches a single
-//! node: they must prove that the callee really is the global builtin
-//! (or nixpkgs `lib`) it looks like, and only the [SemanticModel] can
-//! rule out a local shadow or a `with`-provided lookalike. When the
-//! model cannot prove the callee's identity, the rule stays silent.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -21,18 +12,10 @@ use strictix_syntax::{
 
 use SyntaxKind as K;
 
-/// Nix keywords. Real Nix rejects these as *bare* attrpath elements
-/// (`x ? if` is a parse error upstream even though our tolerant parser
-/// accepts keyword attr names), so a key colliding with one stays
-/// quoted in generated fixes.
 const KEYWORDS: &[&str] = &[
     "assert", "else", "if", "in", "inherit", "let", "or", "rec", "then", "with",
 ];
 
-/// Whether `text` can stand bare as an attrpath element: a valid Nix
-/// identifier (`[a-zA-Z_][a-zA-Z0-9_'-]*`) that is not a keyword.
-/// Anything else — empty, escaped (escapes contain `\`), spaced,
-/// keyword — keeps its original quotes.
 fn is_bare_key(text: &str) -> bool {
     let mut chars = text.chars();
     let Some(first) = chars.next() else {
@@ -47,9 +30,6 @@ fn is_bare_key(text: &str) -> bool {
     !KEYWORDS.contains(&text)
 }
 
-/// Depth-first walk with an ancestor stack, so a rule can inspect the
-/// slot its match sits in. Local copy of the style_rules walker —
-/// small-helper duplication across rule files is the house convention.
 fn walk<'a>(
     node: &'a SyntaxNode,
     ancestors: &mut Vec<&'a SyntaxNode>,
@@ -63,10 +43,6 @@ fn walk<'a>(
     ancestors.pop();
 }
 
-/// The trivia-trimmed range of an expression. The parser flushes
-/// leading trivia into node ranges, so splicing `expr.range()` text
-/// would drag whitespace or comments along; token atoms carry no
-/// trivia and node wrappers expose `content_range`.
 fn trimmed_range(expr: Expr<'_>) -> TextRange {
     match expr {
         Expr::Ident(t)
@@ -94,16 +70,11 @@ fn trimmed_range(expr: Expr<'_>) -> TextRange {
     }
 }
 
-/// The trivia-trimmed source text of an expression.
 fn trimmed_text<'s>(expr: Expr<'_>, source: &'s str) -> &'s str {
     let r = trimmed_range(expr);
     &source[r.start() as usize..r.end() as usize]
 }
 
-/// Whether an expression's text is self-delimiting: it can be spliced
-/// next to other tokens without parens changing how it groups. A
-/// select with an `or` default is excluded — the default clause can
-/// capture a following token.
 fn is_self_delimiting(expr: Expr<'_>) -> bool {
     match expr {
         Expr::Ident(_)
@@ -123,9 +94,6 @@ fn is_self_delimiting(expr: Expr<'_>) -> bool {
     }
 }
 
-/// `expr` rendered for an operand slot of `?` or `==`: both bind
-/// looser than application, so an apply may stand bare; every other
-/// compound expression is parenthesized.
 fn operand_text(expr: Expr<'_>, source: &str) -> String {
     let text = trimmed_text(expr, source);
     if is_self_delimiting(expr) || matches!(expr, Expr::Apply(_)) {
@@ -135,9 +103,6 @@ fn operand_text(expr: Expr<'_>, source: &str) -> String {
     }
 }
 
-/// `expr` rendered for an application-argument slot: application binds
-/// tighter than everything, so only self-delimiting expressions stand
-/// bare — notably another apply must be parenthesized.
 fn argument_text(expr: Expr<'_>, source: &str) -> String {
     let text = trimmed_text(expr, source);
     if is_self_delimiting(expr) {
@@ -147,11 +112,6 @@ fn argument_text(expr: Expr<'_>, source: &str) -> String {
     }
 }
 
-/// Whether a replacement expression must be parenthesized because the
-/// replaced node sits in a slot binding tighter than the replacement's
-/// own operator (`?`, `==`, or application). Extra parens are
-/// semantically inert, so this errs on wrapping under any binary
-/// operator rather than modelling exact precedence.
 fn parent_requires_parens(ancestors: &[&SyntaxNode]) -> bool {
     ancestors.last().is_some_and(|p| {
         matches!(
@@ -161,13 +121,6 @@ fn parent_requires_parens(ancestors: &[&SyntaxNode]) -> bool {
     })
 }
 
-/// Whether `callee` provably denotes the global builtin `name`.
-///
-/// Bare form: the ident resolves to nothing lexically AND no enclosing
-/// `with` could supply it — statically we cannot know what a with's
-/// attrset provides, so `via_with` counts as a shadow. Select form: a
-/// single-hop `builtins.<name>` on the unshadowed `builtins` constant
-/// with no `or` default (same shape as UnknownBuiltin's check).
 fn is_global_callee(model: &SemanticModel<'_>, callee: Expr<'_>, name: &str) -> bool {
     let source = model.source();
     match callee {
@@ -205,10 +158,6 @@ fn is_global_callee(model: &SemanticModel<'_>, callee: Expr<'_>, name: &str) -> 
     }
 }
 
-/// Matches `node` as exactly the two-argument call `name first second`
-/// of the global builtin `name` (bare or `builtins.`-qualified).
-/// Partial applications never match — they have no nested apply — and
-/// parser-recovery applies missing an operand fail the range guards.
 fn two_arg_call<'a>(
     model: &SemanticModel<'a>,
     node: &'a SyntaxNode,
@@ -233,8 +182,6 @@ fn two_arg_call<'a>(
     Some((first, second))
 }
 
-/// Matches `node` as exactly the one-argument call `name arg` of the
-/// global builtin `name` (bare or `builtins.`-qualified).
 fn one_arg_call<'a>(
     model: &SemanticModel<'a>,
     node: &'a SyntaxNode,
@@ -252,11 +199,6 @@ fn one_arg_call<'a>(
     Some(arg)
 }
 
-/// The raw inner text of a plain (non-interpolated) string literal —
-/// `None` when any part interpolates, because the key is then not
-/// statically known. Escapes are left as written: an escape sequence
-/// contains `\`, which fails [is_bare_key], so escaped keys always
-/// stay quoted verbatim.
 fn plain_string_inner<'s>(string: StringExpr<'_>, source: &'s str) -> Option<&'s str> {
     if string.parts().any(|p| matches!(p, StringPart::Interp(_))) {
         return None;
@@ -266,9 +208,6 @@ fn plain_string_inner<'s>(string: StringExpr<'_>, source: &'s str) -> Option<&'s
     text.strip_prefix('"')?.strip_suffix('"')
 }
 
-/// Strip one paren layer from an expression. The manual-optional
-/// shapes are often written with parenthesized branches; one layer is
-/// enough to prove the shape without chasing arbitrary nesting.
 fn unwrap_paren(expr: Expr<'_>) -> Expr<'_> {
     match expr {
         Expr::Paren(p) => p.expr().unwrap_or(expr),
@@ -276,7 +215,6 @@ fn unwrap_paren(expr: Expr<'_>) -> Expr<'_> {
     }
 }
 
-/// Flags `builtins.hasAttr "a" x` — the `?` operator form is simpler.
 pub struct ManualHasattr;
 
 impl Rule for ManualHasattr {
@@ -338,7 +276,6 @@ impl Rule for ManualHasattr {
     }
 }
 
-/// Flags `builtins.getAttr "a" x` — the select form is simpler.
 pub struct ManualGetattr;
 
 impl Rule for ManualGetattr {
@@ -395,7 +332,6 @@ impl Rule for ManualGetattr {
     }
 }
 
-/// Flags the deprecated `isNull x` — `x == null` is the modern form.
 pub struct DeprecatedIsNull;
 
 impl Rule for DeprecatedIsNull {
@@ -438,8 +374,6 @@ impl Rule for DeprecatedIsNull {
     }
 }
 
-/// Flags `if c then [ x ] else [ ]`-shaped conditionals where a
-/// `lib.optional*` helper is in scope.
 pub struct ManualOptional;
 
 impl Rule for ManualOptional {
@@ -529,15 +463,6 @@ impl Rule for ManualOptional {
     }
 }
 
-/// The `optional` token range when `callee` provably denotes nixpkgs
-/// `lib.optional`.
-///
-/// Select form: single-hop `lib.optional` whose `lib` base resolves to
-/// a formal/lambda parameter (the module-argument idiom) or to nothing
-/// lexically. Bare form: an `optional` ident that resolves to nothing
-/// lexically but is covered by a `with` — plausibly `with lib;`. A
-/// lexically bound bare `optional` is the user's own function, and an
-/// unbound one with no `with` in play is undefined-variable's finding.
 fn optional_callee_token(model: &SemanticModel<'_>, callee: Expr<'_>) -> Option<TextRange> {
     let source = model.source();
     match callee {
@@ -577,8 +502,6 @@ fn optional_callee_token(model: &SemanticModel<'_>, callee: Expr<'_>) -> Option<
     }
 }
 
-/// Flags `lib.optional cond [ ... ]` — a literal list second argument
-/// yields a nested list.
 pub struct OptionalListArgument;
 
 impl Rule for OptionalListArgument {
@@ -644,9 +567,6 @@ impl Rule for OptionalListArgument {
     }
 }
 
-/// The generated value of a `listToAttrs` entry lambda `x: { name = x;
-/// value = e; }` or `x: nameValuePair x e`: `(param, e)` when the entry
-/// name is exactly the lambda parameter, else `None`.
 fn gen_attrs_entry<'a>(model: &SemanticModel<'a>, func: Expr<'a>) -> Option<(&'a str, Expr<'a>)> {
     let source = model.source();
     let Expr::Lambda(lambda) = unwrap_paren(func) else {
@@ -698,8 +618,6 @@ fn gen_attrs_entry<'a>(model: &SemanticModel<'a>, func: Expr<'a>) -> Option<(&'a
     }
 }
 
-/// Flags `listToAttrs (map (x: { name = x; value = e; }) xs)` — and the
-/// `nameValuePair x e` spelling — which is `lib.genAttrs xs (x: e)`.
 pub struct ManualGenAttrs;
 
 impl Rule for ManualGenAttrs {

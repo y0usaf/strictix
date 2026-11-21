@@ -1,5 +1,3 @@
-//! Flags a lambda formal set that declares the same name twice.
-
 use strictix_core::{
     diagnostic::{Diagnostic, Severity},
     rules::Rule,
@@ -7,14 +5,6 @@ use strictix_core::{
 use strictix_syntax::SyntaxKind as K;
 use strictix_syntax::{AstNode, Formals, SyntaxKind, SyntaxNode};
 
-/// Flags a formal parameter declared more than once in one lambda
-/// pattern.
-///
-/// `{ a, a }: a` redefines `a`; Nix rejects this at parse time with
-/// "duplicate formal function argument", so the second occurrence is a
-/// hard error. Only the declared *names* are compared — a default value
-/// like `{ a, b ? a }` is not a duplicate of `a`, because it binds `b`
-/// and merely *refers to* `a`.
 pub struct DuplicateFormal;
 
 impl Rule for DuplicateFormal {
@@ -38,12 +28,7 @@ impl Rule for DuplicateFormal {
         Some(K::Formals)
     }
 
-    /// Walk the declared names of one `{ ... }` formals node. Each time a
-    /// name repeats an earlier one, drop a diagnostic on that second (or
-    /// later) occurrence's name token. Defaults are never consulted — a
-    /// formal's default expression is ordinary syntax and cannot collide
-    /// with a declared name.
-    fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
+        fn check_node(&self, node: &SyntaxNode, source: &str, diags: &mut Vec<Diagnostic>) {
         let Some(formals) = Formals::cast(node) else {
             return;
         };

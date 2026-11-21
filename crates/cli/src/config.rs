@@ -1,52 +1,7 @@
-//! TOML lint configuration, parsed by hand (stdlib only).
-//!
-//! strictix dropped its last third-party dependency: the on-disk config
-//! is a tiny, fixed subset of TOML, so a hand-rolled parser is smaller
-//! to understand than the `toml` crate. The shape is:
-//!
-//! ```toml
-//! [lint]
-//! disabled = ["tautology"]
-//! schema = "options.json"
-//! generated = ["modules/data/lock.json"]
-//!
-//! [schemas]
-//! "modules/phone" = "phone-options.json"
-//! "modules/flake" = ""
-//! ```
-//!
-//! Supported: `#` comments (full line), blank lines, the `[lint]`
-//! section, `disabled`, `enabled` and `generated` (arrays of strings), `schema` (string),
-//! and the `[schemas]` section of `"path prefix" = "options.json"` pairs
-//! (`""` turns the schema rules off under that prefix), and
-//! `[lint.<rule-code>]` sections of per-rule settings
-//! (a string value is unquoted, an array of strings is a list setting, any other
-//! value is kept as written). Unknown keys in
-//! `[lint]` and unknown sections are ignored; missing keys are fine.
-//!
-//! ponytail: no trailing comments, no multiline arrays, no other TOML
-//! features — the config never uses them; add them only if a real
-//! config needs them.
-
 use std::path::{Path, PathBuf};
 
 use strictix_core::config::LintConfig;
 
-/// Load the TOML config and merge in the command-line overrides.
-///
-/// `config_path` is the file to read (`--config`, or the default
-/// `./strictix.toml` when it exists); `None` means no config file.
-/// `flags` are the repeatable `--disable` codes; `schema_flag` is the
-/// `--schema` path when given.
-///
-/// Merging rules: disabled = TOML `disabled` followed by the
-/// `--disable` flags, deduplicated keeping first occurrence; schema =
-/// `--schema` if given, else the TOML `schema`.
-///
-/// # Errors
-///
-/// - The config file cannot be read.
-/// - The config file is not valid (for the supported subset).
 pub fn load_config(
     config_path: Option<&Path>,
     flags: &[String],
@@ -73,7 +28,6 @@ pub fn load_config(
     Ok(config)
 }
 
-/// Parse the strictix.toml subset.
 fn parse_config(text: &str) -> Result<LintConfig, String> {
     let mut config = LintConfig::default();
     let mut section = String::new();
@@ -163,7 +117,6 @@ fn parse_config(text: &str) -> Result<LintConfig, String> {
     Ok(config)
 }
 
-/// Parse a TOML array of strings: `["a", "b"]`.
 fn parse_string_array(value: &str) -> Result<Vec<String>, String> {
     let value = value.trim();
     if !value.starts_with('[') || !value.ends_with(']') {
@@ -204,7 +157,6 @@ fn parse_string_array(value: &str) -> Result<Vec<String>, String> {
     Ok(items)
 }
 
-/// Parse a TOML basic string: `"..."` with the usual escapes.
 fn parse_toml_string(value: &str) -> Result<String, String> {
     let value = value.trim();
     if !value.starts_with('"') || !value.ends_with('"') || value.len() < 2 {

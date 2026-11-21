@@ -1,44 +1,22 @@
-//! Per-run lint configuration.
-//!
-//! A plain data struct: no serde here (the CLI hand-parses its own TOML
-//! subset and converts it into this type). The schema field backs the
-//! M8 `unknown-option` rule; `None` means that
-//! rule is off for this run.
-
 use std::path::{Path, PathBuf};
 
-/// Configuration for one lint run: which rule codes are skipped and
-/// whether the options schema rule is active.
 #[derive(Debug, Clone, Default)]
 pub struct LintConfig {
-    /// Opt-in rule codes explicitly enabled. `disabled` takes precedence.
-    pub enabled: Vec<String>,
-    /// Rule codes to skip. A rule whose code appears here never fires.
-    pub disabled: Vec<String>,
-    /// options.json path (M8); `None` = schema rule off.
-    pub schema: Option<PathBuf>,
-    /// Per-path schema overrides as `(path prefix, schema)`; a `None`
-    /// schema turns the schema rules off under that prefix. The longest
-    /// matching prefix wins over [Self::schema].
-    pub schemas: Vec<(PathBuf, Option<PathBuf>)>,
-    /// Path prefixes of generated data files, exempt from
-    /// `hand-maintained-data-file`.
-    pub generated: Vec<PathBuf>,
+        pub enabled: Vec<String>,
+        pub disabled: Vec<String>,
+        pub schema: Option<PathBuf>,
+        pub schemas: Vec<(PathBuf, Option<PathBuf>)>,
+        pub generated: Vec<PathBuf>,
     pub settings: Vec<(String, String, String)>,
 }
 
 impl LintConfig {
-    /// Whether the rule with `code` should run: true unless `disabled`
-    /// contains `code`.
-    #[must_use]
+        #[must_use]
     pub fn is_enabled(&self, code: &str) -> bool {
         !self.disabled.iter().any(|d| d == code)
     }
 
-    /// The options.json that applies to `file`: the longest matching
-    /// [Self::schemas] prefix, else [Self::schema]. A leading `./` on
-    /// either side is ignored.
-    #[must_use]
+        #[must_use]
     pub fn schema_for(&self, file: Option<&Path>) -> Option<&Path> {
         let bare = |p: &'_ Path| p.strip_prefix(".").unwrap_or(p).to_path_buf();
         file.map(bare)
@@ -51,9 +29,7 @@ impl LintConfig {
             .map_or(self.schema.as_deref(), |(_, schema)| schema.as_deref())
     }
 
-    /// Whether `file` lies under a [Self::generated] prefix. A leading
-    /// `./` on either side is ignored.
-    #[must_use]
+        #[must_use]
     pub fn is_generated(&self, file: &Path) -> bool {
         let bare = |p: &'_ Path| p.strip_prefix(".").unwrap_or(p).to_path_buf();
         let file = bare(file);

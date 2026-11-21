@@ -1,18 +1,3 @@
-//! Diagnostic rendering: the shared one-line format, the human format
-//! with source excerpts, and the machine-readable JSON document.
-//!
-//! The one-line format is the deterministic contract shared with
-//! snapshot tests in core and lints:
-//!
-//! ```text
-//! [unused-let-binding] warning 10..23 binding 'x' is never used
-//! ```
-//!
-//! The human format adds the file path, 1-based byte line/column, the
-//! offending source line with a caret under the diagnostic's range, and
-//! an optional help line. The JSON format mirrors the same fields as a
-//! JsonValue document, one entry per file plus a summary.
-
 use std::fmt::Display;
 use std::io::IsTerminal;
 
@@ -20,7 +5,6 @@ use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::json::write_json_str;
 use strictix_syntax::TextRange;
 
-/// Standard ANSI styles inherit the terminal's configured color palette.
 struct Theme {
     error: &'static str,
     warning: &'static str,
@@ -43,7 +27,6 @@ const TERMINAL: Theme = Theme {
     clean: "32",
 };
 
-/// Enable terminal colors only for interactive output, unless NO_COLOR is set.
 #[must_use]
 pub fn color_enabled() -> bool {
     std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
@@ -66,8 +49,6 @@ fn paint<T: Display>(enabled: bool, code: &str, value: T) -> String {
     }
 }
 
-/// Render one diagnostic in the human format (path, line/col, message,
-/// source excerpt with caret, help) with the source it was found in.
 #[must_use]
 pub fn human(diag: &Diagnostic, path: &str, source: &str, color: bool) -> String {
     let (line, col) = line_col(source, diag.range.start());
@@ -90,7 +71,6 @@ pub fn human(diag: &Diagnostic, path: &str, source: &str, color: bool) -> String
     out
 }
 
-/// The 1-based (line, byte column) of a byte offset in source.
 fn line_col(source: &str, offset: u32) -> (u32, u32) {
     let offset = (offset as usize).min(source.len());
     let mut line = 1u32;
@@ -107,9 +87,6 @@ fn line_col(source: &str, offset: u32) -> (u32, u32) {
     (line, (offset - line_start) as u32 + 1)
 }
 
-/// The source line containing `range.start` and a caret line marking
-/// the range's width, clamped to the line. Returns `None` when the
-/// offset sits past the end of the source.
 fn source_excerpt(source: &str, range: TextRange) -> Option<(&str, String)> {
     let start = range.start() as usize;
     if start > source.len() || !source.is_char_boundary(start) {
@@ -214,8 +191,6 @@ pub fn write_json_doc(
     )
 }
 
-/// The human summary line: `N file(s) linted, M diagnostic(s) found`,
-/// with a clean run reading `0 diagnostics found`.
 #[must_use]
 pub fn summary_line(files: usize, diagnostics: usize, color: bool) -> String {
     let diag_part = if diagnostics == 0 {
@@ -230,10 +205,6 @@ pub fn summary_line(files: usize, diagnostics: usize, color: bool) -> String {
     format!("{files} file(s) linted, {diag_part}")
 }
 
-/// A minimal unified-style diff between two sources, for showing what a
-/// fix would change. Lines are split; a shared prefix/suffix are elided
-/// so only the neighborhood of the change is shown. Pure line diff (no
-/// inter-line hunks) — enough to preview a text-splice fix.
 #[must_use]
 pub fn diff(before: &str, after: &str, color: bool) -> String {
     let a: Vec<&str> = before.split('\n').collect();

@@ -1,9 +1,3 @@
-//! Detect statically provable missing attributes on local literal attrsets.
-//!
-//! This deliberately only follows lexical bindings whose value is a literal
-//! attrset.  Imported values, `with` scopes, inherited names, and dynamic
-//! attrpaths are unknown and therefore do not produce findings.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -45,8 +39,6 @@ fn path<'a>(p: Attrpath<'a>, source: &'a str) -> Option<Vec<String>> {
     p.elements().map(|e| name(e, source)).collect()
 }
 
-/// Search one literal attrset for a path. `Unknown` means a dynamic or
-/// inherited entry could provide the requested name.
 fn lookup<'a>(
     set: strictix_syntax::AttrsetExpr<'a>,
     wanted: &[String],

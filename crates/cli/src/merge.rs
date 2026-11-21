@@ -726,9 +726,6 @@ const KEYWORDS: &[&str] = &[
     "if", "then", "else", "assert", "with", "let", "in", "rec", "inherit", "or",
 ];
 
-/// The path components a binding name is built from: the file's path without
-/// `.nix` and a trailing `/default`, each component's non-alphanumeric
-/// characters written as `_`.
 fn name_parts(rel: &str) -> Vec<String> {
     let stem = rel.strip_suffix(".nix").unwrap_or(rel);
     let stem = stem.strip_suffix("/default").unwrap_or(stem);
@@ -741,9 +738,6 @@ fn name_parts(rel: &str) -> Vec<String> {
         .collect()
 }
 
-/// The name of the last `depth` components (all of them when `depth` is
-/// larger), or None when that is no identifier: empty, starting with a digit
-/// or a keyword. With every component it is made one, as `_2026` or `in_`.
 fn suffix_name(parts: &[String], depth: usize) -> Option<String> {
     let all = depth >= parts.len();
     let mut name = parts[parts.len() - depth.min(parts.len())..].join("_");
@@ -760,11 +754,6 @@ fn suffix_name(parts: &[String], depth: usize) -> Option<String> {
     Some(name)
 }
 
-/// Each file's binding name: the fewest trailing path components that make an
-/// identifier no other file's name and no identifier of the merged sources
-/// shares, so a binding neither collides nor shadows or is shadowed by a name
-/// the code uses (`lisp_bar` for `modules/desktop/tomoe/lisp/bar.lisp`,
-/// `tomoe_bar` when another `bar` or the identifier `bar` exists).
 fn short_names(files: &[&String], taken: &HashSet<&String>) -> Vec<String> {
     let parts: Vec<Vec<String>> = files.iter().map(|file| name_parts(file)).collect();
     let mut depth = vec![1; files.len()];

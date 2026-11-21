@@ -1,12 +1,3 @@
-//! String-interpolation lints: interpolants that can never coerce, and
-//! interpolations that add nothing.
-//!
-//! Both rules walk only the parts of `"..."` and `''...''` string
-//! literals. Attrname interpolations (`a.${x}`) and path interpolations
-//! are different constructs with different coercion rules and are never
-//! string parts, so restricting the walk to string nodes excludes them
-//! structurally.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -19,11 +10,6 @@ use strictix_syntax::{
     TextRange,
 };
 
-/// Visit every interpolation part of every string literal under
-/// `root`, with a flag for whether the enclosing string is indented
-/// (`''...''`). Both rules need the same traversal; going through the
-/// typed `parts()` accessor keeps attrpath/path interpolations out by
-/// construction, and the callback shape avoids collecting per node.
 fn for_each_string_interp<'a>(
     root: &'a strictix_syntax::SyntaxNode,
     mut f: impl FnMut(InterpExpr<'a>, bool),
@@ -49,10 +35,6 @@ fn for_each_string_interp<'a>(
     }
 }
 
-/// The exact `${`...`}` span of an interpolation, delimiters included,
-/// computed from the delimiter tokens themselves. The parser can flush
-/// leading trivia into a node's range, so a fix must never splice over
-/// `interp.syntax().range()` directly.
 fn interp_span(interp: InterpExpr<'_>) -> Option<TextRange> {
     let children = interp.syntax().children();
     let start = children
@@ -65,8 +47,6 @@ fn interp_span(interp: InterpExpr<'_>) -> Option<TextRange> {
     Some(TextRange::new(start.range().start(), end.range().end()))
 }
 
-/// Strip paren layers: `${(5)}` is exactly as doomed as `${5}`, and a
-/// paren wrapper proves nothing about coercibility either way.
 fn unwrap_parens(mut expr: Expr<'_>) -> Expr<'_> {
     while let Expr::Paren(paren) = expr {
         match paren.expr() {
@@ -77,11 +57,6 @@ fn unwrap_parens(mut expr: Expr<'_>) -> Expr<'_> {
     expr
 }
 
-/// Whether an attrset literal *may* coerce to a string: it visibly
-/// binds `outPath` or `__toString` (interpolation forces `outPath` and
-/// falls back to calling `__toString`), or it carries a dynamic attr
-/// name that could produce either at eval time. Conservative: any doubt
-/// counts as coercible, so the rule stays silent.
 fn attrset_may_coerce(set: AttrsetExpr<'_>, source: &str) -> bool {
     if set
         .syntax()
@@ -132,8 +107,6 @@ fn attrset_may_coerce(set: AttrsetExpr<'_>, source: &str) -> bool {
     false
 }
 
-/// Unescape a plain `"..."` string into its value. Only called on
-/// strings known to hold no interpolation.
 fn decode_string(string: strictix_syntax::StringExpr<'_>, source: &str) -> String {
     let mut out = String::new();
     for part in string.parts() {
@@ -144,7 +117,6 @@ fn decode_string(string: strictix_syntax::StringExpr<'_>, source: &str) -> Strin
     out
 }
 
-/// Decode the standard `"..."` escapes from raw content text.
 fn decode_escapes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();
@@ -171,8 +143,6 @@ fn decode_escapes(text: &str) -> String {
     out
 }
 
-/// Flags `"${...}"` whose interpolant is a literal that can never
-/// coerce to a string.
 pub struct CoercedInterpolation;
 
 impl Rule for CoercedInterpolation {
@@ -290,7 +260,6 @@ impl Rule for CoercedInterpolation {
     }
 }
 
-/// Flags interpolation of a plain string literal — `"${"foo"}"` is `"foo"`.
 pub struct RedundantInterpolation;
 
 impl Rule for RedundantInterpolation {

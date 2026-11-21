@@ -1,5 +1,3 @@
-//! Detects repeated names in inherit statements within one binding container.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -8,9 +6,6 @@ use strictix_core::{
 };
 use strictix_syntax::{AstNode, AttrItem, AttrsetExpr, LetExpr, SyntaxKind as K};
 
-/// Flags an inherited attribute more than once in one attrset or let block.
-/// `duplicate-attribute` owns collisions between inherit and ordinary
-/// bindings; this rule owns inherit-versus-inherit collisions.
 pub struct DuplicateInherit;
 
 impl Rule for DuplicateInherit {

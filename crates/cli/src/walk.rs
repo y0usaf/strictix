@@ -1,47 +1,19 @@
-//! Directory walking with gitignore-style exclusion.
-//!
-//! Collects every `.nix` file under the given paths, recursively, with
-//! two layers of exclusion: a hard-coded skip list (VCS/build/result
-//! directories) and an optional ignore file (default
-//! `./.strictixignore`, overridable with `--ignore-file`).
-//!
-//! Ignore patterns follow gitignore's simple rules as far as strictix
-//! needs them: a pattern without `/` matches any path component at any
-//! depth ("build" prunes every directory named build), a pattern with
-//! `/` matches the relative path from the walk root exactly
-//! ("foo/bar" prunes ./foo/bar), a trailing `/` restricts a pattern to
-//! directories, and `*` is a wildcard inside one component (no
-//! `**`). Ignore rules apply to directories (pruned before
-//! descending) and to files alike. Comments and blank lines are
-//! skipped.
-
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The component names that are always skipped during a walk,
-/// regardless of the ignore file: VCS metadata, build output, and Nix
-/// build results.
 fn is_default_skipped(name: &str) -> bool {
     name == ".git" || name == "target" || name == "result" || name.starts_with("result-")
 }
 
-/// One parsed ignore pattern.
 struct Pattern {
-    /// The pattern split on `/` (a pattern without `/` has one
-    /// component and matches any component at any depth).
-    components: Vec<String>,
-    /// A trailing `/` restricts the pattern to directories.
-    dir_only: bool,
-    /// Whether the pattern contained a `/` (then it matches the
-    /// whole relative path, not single components).
-    anchored: bool,
+        components: Vec<String>,
+        dir_only: bool,
+        anchored: bool,
 }
 
 impl Pattern {
-    /// Whether a pattern matches a path with the given relative
-    /// components (which may be a directory or a file).
-    fn matches(&self, rel: &[String], is_dir: bool) -> bool {
+        fn matches(&self, rel: &[String], is_dir: bool) -> bool {
         if self.dir_only && !is_dir {
             return false;
         }
@@ -57,7 +29,6 @@ impl Pattern {
     }
 }
 
-/// All ignore patterns in effect for one walk.
 struct IgnoreSet {
     patterns: Vec<Pattern>,
 }
@@ -69,10 +40,7 @@ impl IgnoreSet {
         }
     }
 
-    /// Parse an ignore file: one pattern per line, `#` comments and
-    /// blank lines skipped. A trailing `/` marks a directory-only
-    /// pattern; any other `/` anchors the pattern to the walk root.
-    fn parse(text: &str) -> Self {
+        fn parse(text: &str) -> Self {
         let mut patterns = Vec::new();
         for line in text.lines() {
             let line = line.trim();
@@ -104,25 +72,18 @@ impl IgnoreSet {
         Self { patterns }
     }
 
-    /// Whether any pattern covers the path with the given relative
-    /// components.
-    fn matches(&self, rel: &[String], is_dir: bool) -> bool {
+        fn matches(&self, rel: &[String], is_dir: bool) -> bool {
         self.patterns.iter().any(|p| p.matches(rel, is_dir))
     }
 }
 
-/// The exclusions of one walk, reusable for paths the walk never saw
-/// on disk (the files a merged file holds in memory).
 pub struct Filter {
     ignore: IgnoreSet,
     roots: Vec<PathBuf>,
 }
 
 impl Filter {
-    /// Whether the walk would have skipped `file`: under the first
-    /// walked directory containing it, any ancestor directory or the
-    /// file itself is default-skipped or matches an ignore pattern.
-    pub fn skips(&self, file: &Path) -> bool {
+        pub fn skips(&self, file: &Path) -> bool {
         let Some(rel) = self
             .roots
             .iter()
@@ -144,20 +105,6 @@ impl Filter {
     }
 }
 
-/// Collect every `.nix` file under `paths`, sorted, and every other file
-/// the walk reaches, sorted, for the rules that read paths.
-///
-/// Directories are walked recursively. `ignore_file` is the parsed
-/// ignore file when one was found (an explicitly requested file that
-/// cannot be read is an error; a missing default is not). Explicitly
-/// given paths are always honored: the skip list and ignore patterns
-/// apply to entries discovered during the walk, not to the roots the
-/// user asked for. A nonexistent path is an error.
-///
-/// # Errors
-///
-/// - A path that does not exist.
-/// - An explicitly requested ignore file that cannot be read.
 pub fn collect_files_filtered(
     paths: &[PathBuf],
     ignore_file: Option<&Path>,
@@ -373,10 +320,6 @@ fn walk_dir(
     Ok(())
 }
 
-/// Match one path component against a component pattern where `*`
-/// matches any run of characters (including the empty run). Literal
-/// characters match themselves; there is no `**` and no character
-/// class support.
 fn glob_match(pattern: &str, text: &str) -> bool {
     let p = pattern.as_bytes();
     let t = text.as_bytes();

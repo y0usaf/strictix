@@ -1,31 +1,3 @@
-//! Duplicate attribute path detection for one binding container.
-//!
-//! Nix rejects defining the same attribute path twice inside one
-//! binding container (an attrset, a rec attrset, or the binding section
-//! of a let) with `attribute '...' already defined`. The recovering
-//! parser here accepts that silently, so we surface it.
-//!
-//! Confirmed against `nix eval --expr '{ a = 1; a = 2; }'` (errors
-//! `attribute 'a' already defined`), and the prefix cases:
-//!
-//! ```text
-//! nix eval --expr '{ a = 1; a.b = 2; }'     -> error: attribute 'a' already defined
-//! nix eval --expr '{ a = { }; a.c = 1; }'   -> { a = { c = 1; }; }   (merges)
-//! ```
-//!
-//! So an identical static path (>1 bound) is always an error, but an
-//! attrset literal leaf that a child descends under just *merges* in
-//! Nix and is legal. The prefix rule therefore only fires when the leaf
-//! (shortest) binding's value is NOT a bare attrset literal.
-//!
-//! Scope is a single container: `let a = 1; in { a = 2; }` is fine
-//! because the two `a`'s live in different containers. No auto-fix:
-//! deleting the wrong duplicate changes intent. A quoted `"a"` and an
-//! ident `a` normalize to the same key (Nix treats them as the same
-//! attribute), and `${...}` / interpolated path elements make the whole
-//! binding dynamic, which is excluded because a collision cannot be
-//! proven.
-
 use std::borrow::Cow;
 use std::collections::HashMap;
 use strictix_core::{
@@ -156,7 +128,6 @@ fn join_cow_path(path: &[Cow<'_, str>]) -> String {
     out
 }
 
-/// Flags an attribute path defined twice inside one binding container.
 pub struct DuplicateAttribute;
 
 impl Rule for DuplicateAttribute {
@@ -196,7 +167,6 @@ impl Rule for DuplicateAttribute {
     }
 }
 
-/// Check every static path bound by one container for duplicates.
 fn check_container<'a>(
     items: impl Iterator<Item = AttrItem<'a>>,
     source: &'a str,
@@ -321,9 +291,6 @@ fn record<'a>(
     }
 }
 
-/// Unescape a plain `"..."` string into its attribute-name value. Only
-/// called on strings known to hold no interpolation; escapes use Nix's
-/// single-quote string rules.
 fn decode_string(string: strictix_syntax::StringExpr<'_>, source: &str) -> String {
     let mut out = String::new();
     for part in string.parts() {
@@ -334,7 +301,6 @@ fn decode_string(string: strictix_syntax::StringExpr<'_>, source: &str) -> Strin
     out
 }
 
-/// Decode the standard `"..."` escapes from raw content text.
 fn decode_escapes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();

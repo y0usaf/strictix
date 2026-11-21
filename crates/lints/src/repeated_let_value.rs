@@ -1,5 +1,3 @@
-//! repeated-let-value: one computed value bound by a `let` in many modules.
-
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -30,9 +28,6 @@ fn normalized(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Whether a value computes something: an alias (`config.user.name`), a
-/// literal, a plain string and `import ./x.nix ARGS` only name or read a
-/// value defined once already.
 fn computed(value: Expr<'_>, source: &str) -> bool {
     match value {
         Expr::Ident(_)
@@ -50,8 +45,6 @@ fn computed(value: Expr<'_>, source: &str) -> bool {
     }
 }
 
-/// Whether a call applies a file read with `import PATH`: the shared
-/// definition is that file, and each module only reads it.
 fn imports(apply: ApplyExpr<'_>, source: &str) -> bool {
     let mut call = apply;
     loop {

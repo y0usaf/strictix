@@ -1,27 +1,11 @@
-//! Hand-written recursive-descent parser producing a lossless CST.
-//!
-//! The parser is intentionally simple: one method per production, no
-//! tables beyond the operator-precedence one, and error recovery from
-//! day one. When the input cannot be parsed, an [`ErrorNode`] is
-//! produced and the parser resynchronizes at `;`, `}`, `]`, `)`, `in`,
-//! or end of input — the parser never panics and never aborts.
-//!
-//! Tokens are consumed through [`Parser::bump`], which emits both the
-//! significant token and any trivia (whitespace/comments) so the tree
-//! tiles the source exactly.
-
 use crate::green::{SyntaxNode, TextRange, TreeBuilder};
 use crate::kind::SyntaxKind;
 use crate::lexer::{lex, Token};
 
 use SyntaxKind as K;
 
-/// Binding power of unary `!`. It binds tighter than `//` but looser
-/// than `?` (verified against Nix evaluation).
 const UNARY_BP: u8 = 10;
 
-/// Parse `source` into a lossless CST. Never panics; malformed input
-/// yields a tree containing [`SyntaxKind::ErrorNode`] regions.
 #[must_use]
 pub fn parse(source: &str) -> SyntaxNode {
     let events = {
@@ -55,9 +39,6 @@ enum Event {
     Token(SyntaxKind, TextRange),
 }
 
-/// Binding power (higher binds tighter) for each infix operator, plus
-/// whether it is right-associative. Order was verified against Nix
-/// evaluation; see tests.
 fn bin_op_bp(kind: SyntaxKind) -> Option<(u8, bool)> {
     Some(match kind {
         K::Arrow => (1, true),
@@ -74,7 +55,6 @@ fn bin_op_bp(kind: SyntaxKind) -> Option<(u8, bool)> {
     })
 }
 
-/// Whether `kind` can begin an expression.
 fn can_start_expr(kind: SyntaxKind) -> bool {
     matches!(
         kind,
@@ -193,9 +173,7 @@ impl<'a> Parser<'a> {
             .push(Event::Token(token.kind, TextRange::new(start, end)));
     }
 
-    /// Consume the current token if it has `kind`; otherwise emit an
-    /// error node and resynchronize.
-    fn expect(&mut self, kind: SyntaxKind) {
+        fn expect(&mut self, kind: SyntaxKind) {
         if self.current() == kind {
             self.bump();
         } else {
@@ -255,8 +233,7 @@ impl<'a> Parser<'a> {
     }
 
 
-    /// Whether the current token is a safe place to resume parsing.
-    fn is_sync(&self) -> bool {
+        fn is_sync(&self) -> bool {
         matches!(
             self.current(),
             K::Semicolon
@@ -270,10 +247,7 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// Wrap the unexpected tokens (up to but *not including* the next
-    /// sync point) in an error node. The caller resumes at the sync
-    /// token, which usually belongs to the enclosing construct.
-    fn error_recover(&mut self) {
+        fn error_recover(&mut self) {
         self.start(K::ErrorNode);
         while !self.at_eof() && !self.is_sync() {
             self.bump();
@@ -281,11 +255,7 @@ impl<'a> Parser<'a> {
         self.finish();
     }
 
-    /// Handle an unexpected token inside a repetition loop. Garbage is
-    /// consumed by [`Self::error_recover`]; a stray sync token (one the
-    /// loop does not handle) is wrapped in a small error node so the
-    /// loop always makes progress.
-    fn loop_error(&mut self) {
+        fn loop_error(&mut self) {
         if self.at_eof() {
             return;
         }
@@ -327,9 +297,7 @@ impl<'a> Parser<'a> {
         self.parse_expr_bp(0);
     }
 
-    /// Precedence-climbing expression parser. min_bp is the lowest
-    /// binding power the caller will accept.
-    fn parse_expr_bp(&mut self, min_bp: u8) {
+        fn parse_expr_bp(&mut self, min_bp: u8) {
         let checkpoint = self.checkpoint();
         if matches!(self.current(), K::Bang | K::Minus) && UNARY_BP >= min_bp {
             self.start(K::UnaryExpr);
@@ -359,11 +327,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// An application chain: `f a.b c` = `((f (a.b)) c)`, left-assoc.
-    /// A lambda is a complete expression (its body parses its own app).
-    /// The checkpoint is the expression-level event index (the left edge
-    /// of the whole chain); each select records its own operand start.
-    fn parse_app(&mut self, checkpoint: usize) {
+        fn parse_app(&mut self, checkpoint: usize) {
         match self.current() {
             K::Ident if self.peek_next() == K::Colon => self.parse_lambda_ident(),
             K::Ident if self.peek_next() == K::At => self.parse_lambda_named_formals(),
@@ -381,15 +345,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// A primary with postfix selection: `a.b.c`, `a.b or default`.
-    /// Selection binds tighter than application (verified against Nix):
-    /// `f a.b` is `f (a.b)`, and `a.b c` is `(a.b) c`. List items
-    /// and application arguments are selects, not applications — Nix
-    /// rejects `[ 1 + 2 ]` and `[ f x ]` is two elements.
-    ///
-    /// The select node is opened *around* the already-parsed primary via
-    /// start_at, so the base ends up as a child, not a sibling.
-    fn parse_select(&mut self) {
+        fn parse_select(&mut self) {
         let operand_checkpoint = self.checkpoint();
         self.parse_primary();
         while self.current() == K::Dot {
@@ -438,8 +394,7 @@ impl<'a> Parser<'a> {
         self.finish();
     }
 
-    /// Parse `{ a, b ? 1, ... }` as lambda formal parameters.
-    fn parse_formals_brace(&mut self) {
+        fn parse_formals_brace(&mut self) {
         self.start(K::Formals);
         self.bump();
         loop {
@@ -650,13 +605,7 @@ impl<'a> Parser<'a> {
         self.finish();
     }
 
-    /// Decide whether the brace block starting at the current position
-    /// is an attrset (bindings with `=`) or lambda formals.
-    ///
-    /// A block is an attrset if it contains `=`, `;`, or `inherit` at
-    /// its own top level; it is formals if it contains `,` or `...`.
-    /// An empty block is an attrset unless followed by `:` or `@`.
-    fn brace_is_attrset(&self) -> bool {
+        fn brace_is_attrset(&self) -> bool {
         let mut depth = 0usize;
         let mut i = self.pos;
         while let Some(token) = self.tokens.get(i) {

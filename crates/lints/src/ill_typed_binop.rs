@@ -1,31 +1,3 @@
-//! A node rule that flags binary operators applied to statically
-//! ill-typed literal operands.
-//!
-//! Nix has no operator overloading and no truthiness. A *literal*
-//! operand of an incompatible type is therefore a certain evaluation
-//! error — but because the evaluator is lazy, such an error hides until
-//! the value is forced, so it can ship unnoticed. This rule catches the
-//! literal cases that are certain.
-//!
-//! "Literal operand" is defined as statically an Int, Float, Str /
-//! plain String, IndString, Path, Uri, List, Attset, or RecAttrset,
-//! plus the constant idents `true`/`false` (Bool) and `null`. Any
-//! other expression — an ordinary Ident, an application, a select, a
-//! `let`, or a Paren beyond the one unwrap layer — is not provably
-//! ill-typed, so the rule never fires on it. One paren layer is
-//! unwrapped per operand before classifying.
-//!
-//! Relational operators (`==`, `!=`, `<`, `>`, `<=`, `>=`) and lambdas
-//! (`->`) are skipped entirely (relational comparison is total, and a
-//! lambda operand isn't a bug): FP risk outweighs the catch.
-//!
-//! Paths are a special case. Nix's `+` defines path+string / path+path
-//! segment-append semantics and every arithmetic/string operator accepts
-//! a path operand, so any headline with a Path literal is skipped (the
-//! "path carve-out"). The `//` merge never fires when an attrset/rec
-//! attrset is involved (that is its entire purpose), and `++` is clean
-//! when both sides are lists.
-
 use strictix_core::{
     diagnostic::{Diagnostic, Severity},
     fix::Fix,
@@ -33,10 +5,6 @@ use strictix_core::{
 };
 use strictix_syntax::{AstNode, BinExpr, Expr, SyntaxKind, SyntaxNode};
 
-/// Flags a binary operator applied to statically ill-typed literal
-/// operands. Severity is [Severity::Error]. One auto-fix, and only for
-/// the truly-certain case: `+` with two plain, interpolation-free
-/// `"..."` string literals, which can be spliced into one literal.
 pub struct IllTypedBinop;
 
 impl Rule for IllTypedBinop {
@@ -98,8 +66,6 @@ impl Rule for IllTypedBinop {
     }
 }
 
-/// The operators this rule knows how to classify; `None` for the
-/// always-skipped relational/lambda operators.
 fn operator(kind: SyntaxKind) -> Option<Operator> {
     use strictix_syntax::SyntaxKind::*;
     Some(match kind {
@@ -128,8 +94,7 @@ enum Operator {
 }
 
 impl Operator {
-    /// The source symbol, for the diagnostic message.
-    fn symbol(self) -> &'static str {
+        fn symbol(self) -> &'static str {
         match self {
             Operator::Plus => "+",
             Operator::Minus => "-",
@@ -143,7 +108,6 @@ impl Operator {
     }
 }
 
-/// The statically-known type class of a literal operand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Lit {
     Int,
@@ -155,17 +119,10 @@ enum Lit {
     List,
     Attrset,
     RecAttrset,
-    /// The constant idents `true`/`false`.
-    Bool,
-    /// The constant ident `null`.
-    Null,
+        Bool,
+        Null,
 }
 
-/// Classify a literal operand into a [Lit], unwrapping exactly one paren
-/// layer first. The constant idents `true`/`false`/`null` classify as
-/// Bool/Null — rebinding them is its own lint (rebound-constant), so the
-/// constant reading is the only sane one. Anything that is not a
-/// statically-known literal is `None`, and `None` never fires.
 fn operand_type(expr: Expr<'_>, source: &str) -> Option<Lit> {
     let inner = match expr {
         Expr::Paren(paren) => paren.expr().unwrap_or(expr),
@@ -190,8 +147,6 @@ fn operand_type(expr: Expr<'_>, source: &str) -> Option<Lit> {
     })
 }
 
-/// Whether the operator must fire given the two literal types. `None`
-/// on either side never fires.
 fn should_fire(op: Operator, l: Option<Lit>, r: Option<Lit>) -> bool {
     if op == Operator::Merge {
         if l.is_some_and(is_attr_like) || r.is_some_and(is_attr_like) {
@@ -230,44 +185,28 @@ fn is_string(l: Lit) -> bool {
     matches!(l, Lit::Str | Lit::IndStr)
 }
 
-/// Attrset-like: lists, attrsets, rec attrsets are all values `+`
-/// rejects, and all values the `//` merge accepts.
 fn is_attr_like(l: Lit) -> bool {
     matches!(l, Lit::List | Lit::Attrset | Lit::RecAttrset)
 }
 
-/// A literal `++` cannot concatenate: everything except a list.
 fn is_concat_bad(l: Lit) -> bool {
     !matches!(l, Lit::List | Lit::Uri)
 }
 
-/// A literal `//` rejects when the other side is not an attrset:
-/// everything except attrset-likes (and Uri, which unquoted-uri owns).
 fn is_merge_bad(l: Lit) -> bool {
     !matches!(l, Lit::Attrset | Lit::RecAttrset | Lit::Uri)
 }
 
-/// A non-boolean literal `&&`/`||` reject exactly (everything except
-/// Bool; an ordinary Ident never classifies at all).
 fn is_boolean_bad(l: Lit) -> bool {
     l != Lit::Bool
 }
 
-/// Build the single auto-fix: `+` on two plain, interpolation-free
-/// string literals collapses to their concatenation. The BinExpr node's
-/// content range (through the closing quote of the RHS) is replaced with
-/// one quoted literal. Any interpolation part, or a non-plain-string
-/// side, means no fix.
 fn concat_fix(lhs: Expr<'_>, rhs: Expr<'_>, source: &str, node: &SyntaxNode) -> Option<Fix> {
     let mut value = plain_string(lhs, source)?;
     value.push_str(&plain_string(rhs, source)?);
     Some(Fix::new("concatenate string literals").edit(node.content_range(), quote_string(&value)))
 }
 
-/// The runtime value of a plain `"..."` (non-interpolated) string
-/// literal, or None for indentation strings, interpolated strings, and
-/// non-strings. One paren layer is unwrapped so `("a") + "b"` still
-/// fixes.
 fn plain_string(expr: Expr<'_>, source: &str) -> Option<String> {
     use strictix_syntax::StringPart;
     let inner = match expr {
@@ -289,7 +228,6 @@ fn plain_string(expr: Expr<'_>, source: &str) -> Option<String> {
     Some(out)
 }
 
-/// Decode Nix single-`"..."` string escapes from the raw content text.
 fn decode_escapes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();
@@ -316,9 +254,6 @@ fn decode_escapes(text: &str) -> String {
     out
 }
 
-/// Re-quote a runtime string value as a Nix `"..."` literal, escaping
-/// the characters that would otherwise break the literal or turn into
-/// an interpolation.
 fn quote_string(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     out.push('"');

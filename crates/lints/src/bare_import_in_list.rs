@@ -1,18 +1,3 @@
-//! File rule: bare `import` used as a list element.
-//!
-//! Inside `[ ... ]`, whitespace-separated "simple" expressions are
-//! separate elements; application binds only within a single expression.
-//! So `[ import ./a.nix ]` is a TWO-element list: the bare `import`
-//! function, then the path `./a.nix` — NOT an import of `./a.nix`. The
-//! bare `import` floats into the value and, when forced, becomes the
-//! evaluator error `expected a path but got a function`, or the renamed
-//! import list is silently wrong. The user almost surely meant
-//! `[ (import ./a.nix) ]`.
-//!
-//! Function-scope `import` is Nix's builtin; a user can shadow it with a
-//! `let import = ...`, which is why this is a file rule: it consults the
-//! [SemanticModel] to skip a shadowed (local) `import`.
-
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
@@ -20,18 +5,9 @@ use strictix_core::rules::Rule;
 use strictix_core::semantic::SemanticModel;
 use strictix_syntax::{AstNode, Expr, ListExpr, StringPart, SyntaxKind, TextRange};
 
-/// The diagnostic message: a bare `import` in a list binds only the next
-/// whitespace-separated element, so it must be wrapped in parens.
 const MESSAGE: &str =
     "'import' in a list applies only to the next item; wrap the imported expression in parens: (import …)";
 
-/// Whether the expression immediately following a bare `import` is one we
-/// can safely parenthesize as the imported argument.
-///
-/// A `./path` or a plain (non-interpolating) string is a self-contained
-/// expression whose source text we can lift verbatim into
-/// `(import …)`. Interpolated strings and every compound expression are
-/// NOT safe to splice blindly, so those get no fix.
 fn fixable_following(following: Expr<'_>) -> bool {
     match following {
         Expr::Path(_) => true,
@@ -40,12 +16,6 @@ fn fixable_following(following: Expr<'_>) -> bool {
     }
 }
 
-/// Flags a bare builtin `import` used as a list element.
-///
-/// This is a FILE rule because the shadow guard needs the semantic
-/// model: `import` is only this rule's business when it resolves to
-/// nothing (the global builtin), not when a local `let import = ...`
-/// has shadowed it.
 pub struct BareImportInList;
 
 impl Rule for BareImportInList {

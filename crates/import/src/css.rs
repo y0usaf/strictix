@@ -1,12 +1,3 @@
-//! The finix CSS generator's data shape, parsed from the CSS it prints.
-//!
-//! `generators.cssSource` prints a list of nodes separated by one blank
-//! line: a rule (`select` with its ordered `[property value]` pairs), a
-//! block at-rule (`at` with `rules`), or a statement at-rule (`at`). This
-//! module reads that printed form back into the value, and refuses any
-//! file the printer would not reproduce byte for byte.
-
-/// One node of a stylesheet.
 enum Node {
     Rule {
         select: String,
@@ -45,7 +36,6 @@ fn render_nodes(nodes: &[Node]) -> String {
         .join("\n\n")
 }
 
-/// The printer puts its inner nodes two columns in, blank lines excepted.
 fn indent(text: &str) -> String {
     text.split('\n')
         .map(|line| {
@@ -100,9 +90,7 @@ impl Parser<'_> {
         )
     }
 
-    /// The nodes at one level: each starts at `margin` columns, and the
-    /// level ends at `closing` (nothing, for the top of the file).
-    fn nodes(&mut self, margin: &str, closing: Option<&str>) -> Result<Vec<Node>, String> {
+        fn nodes(&mut self, margin: &str, closing: Option<&str>) -> Result<Vec<Node>, String> {
         let own = format!("{margin}}}");
         let mut nodes = Vec::new();
         while let Some(line) = self.lines.get(self.at).copied() {
@@ -152,9 +140,7 @@ impl Parser<'_> {
         Ok(nodes)
     }
 
-    /// A rule's declarations, each `property: value;` two columns into the
-    /// rule, then the rule's own closing brace.
-    fn declarations(
+        fn declarations(
         &mut self,
         margin: &str,
         closing: &str,

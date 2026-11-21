@@ -1,12 +1,3 @@
-//! Reference and builtin rules: `undefined-variable` and `unknown-builtin`.
-//!
-//! Both are file rules that read the lazy [SemanticModel] once. They
-//! target the classic failure modes of AI-generated Nix: referencing a
-//! name that binds to nothing (often a `$HOME`/`$PATH` shell variable
-//! that the model meant literally), and reaching for a wrong member on
-//! the `builtins` constant (conflating lib helpers with their builtin
-//! counterparts, e.g. `builtins.filterAttrs`).
-
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
@@ -16,10 +7,6 @@ use strictix_syntax::{
     AstNode, AttrName, Expr, IndStringExpr, SelectExpr, StringPart, SyntaxKind, TextRange,
 };
 
-/// Names Nix exposes as global (bare) values: keywords, builtin
-/// functions, and the polymorphic `builtins` set. A reference to one of
-/// these never means "undefined variable" — the evaluator resolves them
-/// implicitly, so the linter must skip them.
 const NIX_GLOBALS: &[&str] = &[
     "true",
     "false",
@@ -46,9 +33,6 @@ const NIX_GLOBALS: &[&str] = &[
     "builtins",
 ];
 
-/// The exhaustive set of real Nix 2.x `builtins` members. Only these
-/// names are allowed after a single `builtins.` hop; anything else is a
-/// mistake (usually AI invented a lib helper as a builtin).
 const VALID_BUILTINS: &[&str] = &[
     "abort",
     "add",
@@ -170,22 +154,10 @@ const VALID_BUILTINS: &[&str] = &[
     "zipAttrsWith",
 ];
 
-/// Whether `name` is the Nix `builtins` constant or one of the values
-/// it exposes in scope implicitly — a reference never flags these.
 pub(crate) fn is_global(name: &str) -> bool {
     NIX_GLOBALS.contains(&name)
 }
 
-/// The full `${name}` interpolation range when `ref_range` (the ident
-/// token) is the entire interpolated expression of an *indented* string
-/// literal. Indented strings are the shell-script wrapper where an
-/// unbound `$HOME`-style name is almost always meant literally; a
-/// double-quoted string has no escape-a-literal idiom we can safely
-/// invent, so no fix there.
-///
-/// Returns the whole `${...}` span (delimiters included) so the fix can
-/// rewrite it to `''${...}` — the Nix escape that emits a literal
-/// `${name}` instead of interpolating it.
 fn indented_string_fix_range(model: &SemanticModel<'_>, ref_range: TextRange) -> Option<TextRange> {
     if !model.source().contains("''") {
         return None;
@@ -215,14 +187,6 @@ fn indented_string_fix_range(model: &SemanticModel<'_>, ref_range: TextRange) ->
     found
 }
 
-/// Flags a reference that resolves to nothing in scope.
-///
-/// The classic AI-slop failure: a shell `$HOME`/`$PATH` written as a
-/// Nix interpolation (`''${HOME}''`) meant as shell text, which the Nix
-/// evaluator rejects with `undefined variable 'HOME'`. Also catches
-/// general dead/id references. A name is "in scope" when it resolves to
-/// a binding, is covered by an enclosing `with`, or is part of the Nix
-/// globals set.
 pub struct UndefinedVariable;
 
 impl Rule for UndefinedVariable {
@@ -273,14 +237,6 @@ impl Rule for UndefinedVariable {
     }
 }
 
-/// Flags `builtins.<name>` where `<name>` is not a real Nix builtin.
-///
-/// AI often reaches into `builtins` for a lib helper
-/// (`builtins.filterAttrs` for `builtins.filter`) or an invented name.
-/// Fires only on a single-hop select (`builtins.X`) on the global
-/// `builtins` constant — never a shadowed `builtins`, never an
-/// attribute path past the first hop (`` `builtins.map.<something>`),
-/// and never a `builtins ? attr` feature-probe.
 pub struct UnknownBuiltin;
 
 impl Rule for UnknownBuiltin {

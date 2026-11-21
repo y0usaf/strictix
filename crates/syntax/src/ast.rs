@@ -1,37 +1,20 @@
-//! Typed AST layer over the lossless CST.
-//!
-//! The CST is untyped: every node is a SyntaxNode with a SyntaxKind and
-//! a flat child list. This layer adds one typed wrapper per node kind,
-//! with accessors that know the shape: a Binding has an attrpath and a
-//! value, a BinExpr has a left operand, an operator, and a right
-//! operand. Rules (M5+) consume this layer, never the raw tree.
-//!
-//! Wrappers are zero-copy views over the CST: casting is a kind check,
-//! accessors filter children. No allocation, no separate tree.
-
 use crate::green::{NodeOrToken, SyntaxNode, SyntaxToken, TextRange};
 use crate::kind::SyntaxKind;
 
 use SyntaxKind as K;
 
-/// A typed view over a SyntaxNode of one specific kind.
 pub trait AstNode<'a>: Copy {
-    /// The node kind this wrapper accepts.
-    fn kind() -> SyntaxKind;
+        fn kind() -> SyntaxKind;
 
-    /// Wrap a node if its kind matches; None otherwise.
-    fn cast(node: &'a SyntaxNode) -> Option<Self>;
+        fn cast(node: &'a SyntaxNode) -> Option<Self>;
 
-    /// The underlying node.
-    fn syntax(&self) -> &'a SyntaxNode;
+        fn syntax(&self) -> &'a SyntaxNode;
 
-    /// The byte range of the underlying node.
-    fn range(&self) -> TextRange {
+        fn range(&self) -> TextRange {
         self.syntax().range()
     }
 }
 
-/// One wrapper per node kind: struct + AstNode impl.
 macro_rules! ast_node {
     ($(#[$doc:meta])* $name:ident, $kind:ident) => {
         $(#[$doc])*
@@ -77,11 +60,6 @@ ast_node!(IndStringExpr, IndStringExpr);
 ast_node!(InterpExpr, InterpExpr);
 ast_node!(ParenExpr, ParenExpr);
 
-/// A Nix expression: an atom token or a compound node.
-///
-/// Atoms (idents, literals, paths, uris) are tokens in the CST, not
-/// nodes, so the enum has one variant per atom kind plus one per
-/// expression node kind. This is what rules match on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Expr<'a> {
     Ident(&'a SyntaxToken),
@@ -109,9 +87,7 @@ pub enum Expr<'a> {
 }
 
 impl<'a> Expr<'a> {
-    /// Cast a node to an expression; None for structural nodes
-    /// (Attrpath, Formals, ...) and error nodes.
-    #[must_use]
+        #[must_use]
     pub fn cast(node: &'a SyntaxNode) -> Option<Self> {
         Some(match node.kind() {
             K::LetExpr => Self::Let(LetExpr::cast(node)?),
@@ -134,8 +110,7 @@ impl<'a> Expr<'a> {
         })
     }
 
-    /// Cast an atom token to an expression.
-    #[must_use]
+        #[must_use]
     pub fn cast_token(token: &'a SyntaxToken) -> Option<Self> {
         Some(match token.kind() {
             K::Ident => Self::Ident(token),
@@ -148,8 +123,7 @@ impl<'a> Expr<'a> {
         })
     }
 
-    /// The byte range of this expression.
-    #[must_use]
+        #[must_use]
     pub fn range(&self) -> TextRange {
         match self {
             Self::Ident(t)
@@ -177,12 +151,7 @@ impl<'a> Expr<'a> {
         }
     }
 
-    /// The byte range of this expression with leading trivia trimmed.
-    ///
-    /// The parser flushes leading whitespace and comments into node
-    /// ranges; atoms are exact tokens already. Diagnostics and message
-    /// snippets want the trimmed span.
-    #[must_use]
+        #[must_use]
     pub fn content_range(&self) -> TextRange {
         match self {
             Self::Ident(t)
@@ -210,22 +179,19 @@ impl<'a> Expr<'a> {
         }
     }
 
-    /// The source text of this expression with leading trivia trimmed.
-    #[must_use]
+        #[must_use]
     pub fn content_text<'s>(&self, source: &'s str) -> &'s str {
         let r = self.content_range();
         &source[r.start() as usize..r.end() as usize]
     }
 
-    /// The source text of this expression.
-    #[must_use]
+        #[must_use]
     pub fn text<'s>(&self, source: &'s str) -> &'s str {
         let r = self.range();
         &source[r.start() as usize..r.end() as usize]
     }
 }
 
-/// Cast a child (node or token) to an expression.
 fn expr_of<'a>(child: &'a NodeOrToken) -> Option<Expr<'a>> {
     match child {
         NodeOrToken::Node(n) => Expr::cast(n),
@@ -233,24 +199,20 @@ fn expr_of<'a>(child: &'a NodeOrToken) -> Option<Expr<'a>> {
     }
 }
 
-/// The first expression child, if any.
 fn first_expr<'a>(node: &'a SyntaxNode) -> Option<Expr<'a>> {
     node.children().iter().find_map(expr_of)
 }
 
-/// The last expression child, if any.
 fn last_expr<'a>(node: &'a SyntaxNode) -> Option<Expr<'a>> {
     node.children().iter().rev().find_map(expr_of)
 }
 
-/// One entry in a binding block: a binding or an inherit statement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttrItem<'a> {
     Binding(Binding<'a>),
     Inherit(InheritStmt<'a>),
 }
 
-/// The entries of a binding block, in source order.
 fn block_items<'a>(node: &'a SyntaxNode) -> impl Iterator<Item = AttrItem<'a>> + 'a {
     node.child_nodes().filter_map(|n| match n.kind() {
         K::Binding => Some(AttrItem::Binding(Binding(n))),
@@ -260,69 +222,57 @@ fn block_items<'a>(node: &'a SyntaxNode) -> impl Iterator<Item = AttrItem<'a>> +
 }
 
 impl<'a> Root<'a> {
-    /// The top-level expression, if any.
-    #[must_use]
+        #[must_use]
     pub fn expr(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }
 }
 
 impl<'a> LetExpr<'a> {
-    /// The binding section between let and in.
-    #[must_use]
+        #[must_use]
     pub fn bindings(&self) -> Option<LetBindings<'a>> {
         self.syntax().child_node(K::LetBindings).map(LetBindings)
     }
 
-    /// The expression after in.
-    #[must_use]
+        #[must_use]
     pub fn body(&self) -> Option<Expr<'a>> {
         last_expr(self.syntax())
     }
 }
 
 impl<'a> LetBindings<'a> {
-    /// The entries of this binding block, in source order.
-    pub fn items(&self) -> impl Iterator<Item = AttrItem<'a>> + 'a {
+        pub fn items(&self) -> impl Iterator<Item = AttrItem<'a>> + 'a {
         block_items(self.syntax())
     }
 }
 
 impl<'a> AttrsetExpr<'a> {
-    /// The entries of this attrset, in source order.
-    pub fn items(&self) -> impl Iterator<Item = AttrItem<'a>> + 'a {
+        pub fn items(&self) -> impl Iterator<Item = AttrItem<'a>> + 'a {
         block_items(self.syntax())
     }
 }
 
 impl<'a> Binding<'a> {
-    /// The bound attribute path.
-    #[must_use]
+        #[must_use]
     pub fn attrpath(&self) -> Option<Attrpath<'a>> {
         self.syntax().child_node(K::Attrpath).map(Attrpath)
     }
 
-    /// The bound value expression.
-    #[must_use]
+        #[must_use]
     pub fn value(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }
 }
 
-/// One element of an attribute path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttrName<'a> {
-    /// A plain name token: a in a.b, or a keyword/number.
-    Ident(&'a SyntaxToken),
-    /// A quoted segment: the string in etc."x/y".text.
-    Str(StringExpr<'a>),
-    /// An unquoted dynamic segment: the expr in a.${b}.c.
-    Interp(InterpExpr<'a>),
+        Ident(&'a SyntaxToken),
+        Str(StringExpr<'a>),
+        Interp(InterpExpr<'a>),
 }
 
 impl<'a> Attrpath<'a> {
-    /// The path elements in order, dots excluded.
-    pub fn elements(&self) -> impl Iterator<Item = AttrName<'a>> + 'a {
+        pub fn elements(&self) -> impl Iterator<Item = AttrName<'a>> + 'a {
         self.syntax().children().iter().filter_map(|c| match c {
             NodeOrToken::Token(t) if t.kind().is_attr_name() => Some(AttrName::Ident(t)),
             NodeOrToken::Node(n) if n.kind() == K::StringExpr => Some(AttrName::Str(StringExpr(n))),
@@ -335,16 +285,14 @@ impl<'a> Attrpath<'a> {
 }
 
 impl<'a> InheritStmt<'a> {
-    /// The (from) expression, if present.
-    #[must_use]
+        #[must_use]
     pub fn source(&self) -> Option<Expr<'a>> {
         let node = self.syntax();
         let lp = node.children().iter().position(|c| c.kind() == K::LParen)?;
         node.children()[lp + 1..].iter().find_map(expr_of)
     }
 
-    /// The inherited names, source expression excluded.
-    pub fn names(&self) -> impl Iterator<Item = &'a SyntaxToken> + 'a {
+        pub fn names(&self) -> impl Iterator<Item = &'a SyntaxToken> + 'a {
         let node = self.syntax();
         let start = if let Some(rp) = node.children().iter().position(|c| c.kind() == K::RParen) {
             rp + 1
@@ -362,48 +310,41 @@ impl<'a> InheritStmt<'a> {
 }
 
 impl<'a> WithExpr<'a> {
-    /// The scope expression.
-    #[must_use]
+        #[must_use]
     pub fn scope(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }
 
-    /// The body after the semicolon.
-    #[must_use]
+        #[must_use]
     pub fn body(&self) -> Option<Expr<'a>> {
         last_expr(self.syntax())
     }
 }
 
 impl<'a> AssertExpr<'a> {
-    /// The asserted condition.
-    #[must_use]
+        #[must_use]
     pub fn cond(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }
 
-    /// The body after the semicolon.
-    #[must_use]
+        #[must_use]
     pub fn body(&self) -> Option<Expr<'a>> {
         last_expr(self.syntax())
     }
 }
 
 impl<'a> IfExpr<'a> {
-    /// The condition.
-    #[must_use]
+        #[must_use]
     pub fn cond(&self) -> Option<Expr<'a>> {
         self.exprs().nth(0)
     }
 
-    /// The then branch.
-    #[must_use]
+        #[must_use]
     pub fn then_branch(&self) -> Option<Expr<'a>> {
         self.exprs().nth(1)
     }
 
-    /// The else branch.
-    #[must_use]
+        #[must_use]
     pub fn else_branch(&self) -> Option<Expr<'a>> {
         self.exprs().nth(2)
     }
@@ -414,14 +355,12 @@ impl<'a> IfExpr<'a> {
 }
 
 impl<'a> RecAttrsetExpr<'a> {
-    /// The inner attrset.
-    #[must_use]
+        #[must_use]
     pub fn attrset(&self) -> Option<AttrsetExpr<'a>> {
         self.syntax().child_node(K::AttrsetExpr).map(AttrsetExpr)
     }
 }
 
-/// One formal parameter: a name and an optional default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FormalParam<'a> {
     pub name: &'a SyntaxToken,
@@ -429,8 +368,7 @@ pub struct FormalParam<'a> {
 }
 
 impl<'a> Formals<'a> {
-    /// The parameters in order; b ? 1 yields a default.
-    pub fn params(&self) -> impl Iterator<Item = FormalParam<'a>> + 'a {
+        pub fn params(&self) -> impl Iterator<Item = FormalParam<'a>> + 'a {
         let mut pending: Option<&'a SyntaxToken> = None;
         let mut expect_default = false;
         self.syntax().children().iter().filter_map(move |c| {
@@ -481,8 +419,7 @@ impl<'a> Formals<'a> {
         })
     }
 
-    /// Whether the ellipsis is present.
-    #[must_use]
+        #[must_use]
     pub fn has_ellipsis(&self) -> bool {
         self.syntax()
             .child_tokens()
@@ -491,14 +428,11 @@ impl<'a> Formals<'a> {
 }
 
 impl<'a> ListExpr<'a> {
-    /// The list elements in order.
-    pub fn items(&self) -> impl Iterator<Item = Expr<'a>> + 'a {
+        pub fn items(&self) -> impl Iterator<Item = Expr<'a>> + 'a {
         self.syntax().children().iter().filter_map(expr_of)
     }
 }
 
-/// A lambda parameter: a bare name or a formal set (with an optional
-/// at-name binding).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LambdaParam<'a> {
     Ident(&'a SyntaxToken),
@@ -506,8 +440,7 @@ pub enum LambdaParam<'a> {
 }
 
 impl<'a> LambdaExpr<'a> {
-    /// The parameter.
-    #[must_use]
+        #[must_use]
     pub fn param(&self) -> LambdaParam<'a> {
         let node = self.syntax();
         match node.child_node(K::Formals) {
@@ -540,50 +473,43 @@ impl<'a> LambdaExpr<'a> {
         }
     }
 
-    /// The lambda body.
-    #[must_use]
+        #[must_use]
     pub fn body(&self) -> Option<Expr<'a>> {
         last_expr(self.syntax())
     }
 }
 
 impl<'a> ApplyExpr<'a> {
-    /// The function.
-    #[must_use]
+        #[must_use]
     pub fn func(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }
 
-    /// The argument.
-    #[must_use]
+        #[must_use]
     pub fn arg(&self) -> Option<Expr<'a>> {
         last_expr(self.syntax())
     }
 }
 
 impl<'a> UnaryExpr<'a> {
-    /// The operand after the bang.
-    #[must_use]
+        #[must_use]
     pub fn operand(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }
 }
 
 impl<'a> BinExpr<'a> {
-    /// The left operand.
-    #[must_use]
+        #[must_use]
     pub fn lhs(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }
 
-    /// The right operand.
-    #[must_use]
+        #[must_use]
     pub fn rhs(&self) -> Option<Expr<'a>> {
         last_expr(self.syntax())
     }
 
-    /// The operator token kind (Plus, Arrow, ...).
-    #[must_use]
+        #[must_use]
     pub fn op(&self) -> Option<SyntaxKind> {
         self.syntax()
             .child_tokens()
@@ -593,20 +519,17 @@ impl<'a> BinExpr<'a> {
 }
 
 impl<'a> SelectExpr<'a> {
-    /// The base expression.
-    #[must_use]
+        #[must_use]
     pub fn base(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }
 
-    /// The selected attribute path.
-    #[must_use]
+        #[must_use]
     pub fn attrpath(&self) -> Option<Attrpath<'a>> {
         self.syntax().child_node(K::Attrpath).map(Attrpath)
     }
 
-    /// The or-default expression, if present.
-    #[must_use]
+        #[must_use]
     pub fn default(&self) -> Option<Expr<'a>> {
         if self.syntax().child_tokens().any(|t| t.kind() == K::KwOr) {
             last_expr(self.syntax())
@@ -617,8 +540,7 @@ impl<'a> SelectExpr<'a> {
 }
 
 impl<'a> HasAttrExpr<'a> {
-    /// The base expression.
-    #[must_use]
+        #[must_use]
     pub fn base(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }
@@ -629,7 +551,6 @@ impl<'a> HasAttrExpr<'a> {
     }
 }
 
-/// One part of a string: literal text or an interpolation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StringPart<'a> {
     Content(&'a SyntaxToken),
@@ -647,30 +568,26 @@ fn string_parts<'a>(node: &'a SyntaxNode) -> impl Iterator<Item = StringPart<'a>
 }
 
 impl<'a> StringExpr<'a> {
-    /// The string parts in order: literal text and interpolations.
-    pub fn parts(&self) -> impl Iterator<Item = StringPart<'a>> + 'a {
+        pub fn parts(&self) -> impl Iterator<Item = StringPart<'a>> + 'a {
         string_parts(self.syntax())
     }
 }
 
 impl<'a> IndStringExpr<'a> {
-    /// The string parts in order: literal text and interpolations.
-    pub fn parts(&self) -> impl Iterator<Item = StringPart<'a>> + 'a {
+        pub fn parts(&self) -> impl Iterator<Item = StringPart<'a>> + 'a {
         string_parts(self.syntax())
     }
 }
 
 impl<'a> InterpExpr<'a> {
-    /// The interpolated expression.
-    #[must_use]
+        #[must_use]
     pub fn expr(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }
 }
 
 impl<'a> ParenExpr<'a> {
-    /// The wrapped expression.
-    #[must_use]
+        #[must_use]
     pub fn expr(&self) -> Option<Expr<'a>> {
         first_expr(self.syntax())
     }

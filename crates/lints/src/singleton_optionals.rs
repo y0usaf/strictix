@@ -1,5 +1,3 @@
-//! Use `optional` when a conditional list has exactly one element.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},

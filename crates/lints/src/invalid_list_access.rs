@@ -1,9 +1,3 @@
-//! Flags provably failing applications of the list access builtins.
-//!
-//! This rule is deliberately syntax directed: only a literal list and a
-//! literal integer index are enough to prove an `elemAt` failure.  Unknown
-//! values, aliases, and arbitrary evaluation are left alone.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -112,8 +106,6 @@ fn literal_integer(expr: Expr<'_>, source: &str) -> Option<i128> {
     }
 }
 
-/// Flatten one complete application chain.  A bare builtin and a partial
-/// application produce fewer arguments and therefore do not match callers.
 fn call_parts<'a>(apply: ApplyExpr<'a>) -> Option<(Expr<'a>, Vec<Expr<'a>>)> {
     let mut args = Vec::new();
     let mut current = Expr::Apply(apply);

@@ -1,17 +1,3 @@
-//! strictix command-line interface.
-//!
-//! The CLI is the imperative shell around the functional core: it owns
-//! argument parsing, file discovery, config loading, worker-thread
-//! orchestration, and rendering. Linting itself happens entirely inside
-//! the core + lints crates, which never touch host state.
-//!
-//! Orchestration: parse args, load config, collect files, then process
-//! every file on its own worker thread (std::thread::scope - one
-//! thread per file is fine at linter scale). The rule registry is built
-//! exactly once and shared across workers; rules are Sync and the
-//! schema rule caches its options.json parse in a process-wide
-//! OnceLock, so sharing is both safe and correct.
-
 #[cfg(target_env = "musl")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -34,13 +20,11 @@ use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::rules::Rule;
 
-/// Print a usage error to stderr and exit 1.
 fn usage_error(message: &str) -> ExitCode {
     eprintln!("error: {message}\n\n{}", args::usage());
     ExitCode::FAILURE
 }
 
-/// The lowercase severity word shared by list/explain rendering.
 fn severity_str(severity: Severity) -> &'static str {
     match severity {
         Severity::Warning => "warning",
@@ -220,7 +204,6 @@ fn run_split(args: &Args) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The list command: one line per rule in the registry.
 fn run_list() -> ExitCode {
     let rules = strictix_lints::all_rules();
     for rule in &rules {
@@ -245,8 +228,6 @@ fn run_list() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The explain command: a rule's name, code, severity, kind, and
-/// description. Unknown code is an error.
 fn run_explain(args: &Args) -> ExitCode {
     let Some(code_arg) = args.paths.first() else {
         return usage_error("explain requires a rule code");
@@ -271,9 +252,6 @@ fn run_explain(args: &Args) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The check and fix commands (one code path; fix_mode toggles writing
-/// files back). Returns the process exit code: 1 when any diagnostic
-/// was found (check only) or any hard error occurred.
 fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
     let config = match resolve_config(args) {
         Ok(config) => config,
@@ -643,8 +621,6 @@ fn run_check(args: &Args, fix_mode: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Resolve the config file: --config if given (must exist), else the
-/// default ./strictix.toml when present, else no config.
 fn resolve_config(args: &Args) -> Result<LintConfig, String> {
     let config_path = match &args.config {
         Some(path) => Some(path.as_path()),
@@ -662,8 +638,6 @@ fn resolve_config(args: &Args) -> Result<LintConfig, String> {
     Ok(config)
 }
 
-/// Resolve the ignore file: --ignore-file if given, else the default
-/// ./.strictixignore when present, else none.
 fn resolve_ignore_file(args: &Args) -> Option<PathBuf> {
     match &args.ignore_file {
         Some(path) => Some(path.clone()),
@@ -712,14 +686,6 @@ struct Input {
     virtuals: Option<Vec<merged::Virtual>>,
 }
 
-/// Lint one file: parse, build the (lazy) semantic model, run every
-/// enabled rule, sort findings by range start, and, in fix mode,
-/// splice the fixes, write the file back when it changed, and count
-/// what was applied. A merged file is linted binding by binding as the
-/// files its manifest names, with positions and fixes mapped back into
-/// it. A read failure is reported and the file is skipped; a
-/// fix-application failure leaves the file untouched and is reported
-/// as a warning.
 fn process_file(
     input: &Input,
     rules: &[Box<dyn Rule>],

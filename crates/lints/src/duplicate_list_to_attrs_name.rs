@@ -1,9 +1,3 @@
-//! Finds repeated literal `name` fields in `listToAttrs` input lists.
-//!
-//! `listToAttrs` keeps the first entry for a name when its input contains
-//! duplicates. This rule is deliberately syntax directed: it only inspects
-//! a literal list, literal attrset entries, and plain literal strings.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},
@@ -16,7 +10,6 @@ use strictix_syntax::{
 
 use crate::static_binding;
 
-/// Flags duplicate literal names in a `listToAttrs` list.
 pub struct DuplicateListToAttrsName;
 
 impl Rule for DuplicateListToAttrsName {

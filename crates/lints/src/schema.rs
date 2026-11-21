@@ -1,38 +1,3 @@
-//! Options-schema rules: unknown option paths and option/type
-//! mismatches, backed by options.json (M8).
-//!
-//! NixOS modules interact with options in two directions. They READ
-//! them through the `config` module argument
-//! (`config.services.example.enable`), and they WRITE them by binding
-//! paths in the module body (`services.example.enable = true;`).
-//! AI-generated modules frequently hallucinate option names in both
-//! positions, and set real options to values of the wrong type
-//! (`enable = "true"`). These rules load the options schema (shape
-//! `{"options": {"a.b.c": {"type": "boolean", ...}}}`) once per
-//! process and check both directions against it.
-//!
-//! Schema paths may contain placeholder segments such as
-//! `users.users.<name>.home`; a placeholder matches any single written
-//! segment. A written path counts as DECLARED when it aligns with some
-//! schema path over their common prefix: an exact match, a write below
-//! a declared option (freeform/submodule interiors), or a write of an
-//! intermediate attrset (`services.nginx = { ... }` is structural, not
-//! a leaf option) are all legitimate.
-//!
-//! The parsed schema lives in a process-wide [OnceLock] rather than a
-//! field: rules are constructed by the registry macro as unit structs
-//! (`Type {}`), so the struct itself carries no state. [OnceLock] is
-//! Send + Sync, keeping the rule shareable across worker threads. Both
-//! schema rules share the one loaded schema.
-//!
-//! Across runs, the parsed path→type map is cached on disk next to a
-//! content fingerprint of options.json (format v2: `{hash:x}:v2`
-//! header, then one `path\ttype` line per option), so a second
-//! invocation re-reads a few KB instead of re-parsing a multi-MB
-//! schema. The cache lives in the OS temp dir and never touches the
-//! schema file's directory, so linting a config repo leaves no stray
-//! files in it.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -47,22 +12,13 @@ use strictix_syntax::{
     SelectExpr, StringPart, SyntaxKind, TextRange,
 };
 
-/// The parsed options schema: every declared option path mapped to its
-/// declared type string (empty when options.json carries no `type`
-/// field), plus a pre-split view of each path so wildcard matching
-/// never re-splits the multi-thousand-entry schema per checked path.
 pub(crate) struct OptionsSchema {
-    /// path → declared type; the canonical store, used for exact
-    /// lookups and for serializing the disk cache.
-    types: HashMap<String, String>,
-    /// Every path split on `.`, for placeholder-aware matching.
-    segmented: Vec<Vec<String>>,
+        types: HashMap<String, String>,
+        segmented: Vec<Vec<String>>,
 }
 
 impl OptionsSchema {
-    /// Build the matching view once, at load time, so per-path checks
-    /// touch pre-split segments only.
-    fn new(raw: HashMap<String, String>) -> Self {
+        fn new(raw: HashMap<String, String>) -> Self {
         let mut types = HashMap::with_capacity(raw.len());
         let mut segmented = Vec::with_capacity(raw.len());
         for (key, ty) in raw {
@@ -74,10 +30,6 @@ impl OptionsSchema {
     }
 }
 
-/// Split an options.json key into segments. Nix's `showOption` quotes
-/// segments that are not plain identifiers (`user.tools."7z".enable`),
-/// so dots inside quotes do not split and the quotes are dropped to
-/// match the literal content of a written segment.
 fn split_option_path(key: &str) -> Vec<String> {
     let mut segments = Vec::new();
     let mut current = String::new();
@@ -93,16 +45,10 @@ fn split_option_path(key: &str) -> Vec<String> {
     segments
 }
 
-/// The loaded schema, or the reason loading/parsing failed. Loaded once
-/// per process and shared by [UnknownOption] and [OptionTypeMismatch].
 type Schema = Result<OptionsSchema, String>;
 
-/// Every schema loaded this process, by path; each is parsed once and
-/// lives for the rest of the run.
 static SCHEMAS: OnceLock<Mutex<HashMap<PathBuf, &'static Schema>>> = OnceLock::new();
 
-/// The schema that applies to `file`: `None` when no schema path is
-/// configured for it (both rules off), otherwise the shared load result.
 fn schema_for(config: &LintConfig, file: Option<&Path>) -> Option<&'static Schema> {
     let path = config.schema_for(file)?;
     let mut schemas = SCHEMAS
@@ -116,8 +62,6 @@ fn schema_for(config: &LintConfig, file: Option<&Path>) -> Option<&'static Schem
     )
 }
 
-/// FNV-1a 64-bit hash of `bytes` — a dependency-free content fingerprint
-/// so the disk cache can detect that options.json changed.
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for &b in bytes {
@@ -127,9 +71,6 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// Cache file name for a schema: `{content-hash:x}.paths`. Two schema
-/// files are distinguished by their content, not their path, so moving
-/// a config repo never invalidates the cache.
 fn cache_file_for(schema: &Path) -> PathBuf {
     let hash = std::fs::read(schema)
         .map(|bytes| fnv1a(&bytes))
@@ -139,16 +80,6 @@ fn cache_file_for(schema: &Path) -> PathBuf {
         .join(format!("{hash:016x}.paths"))
 }
 
-/// Serialize the path→type map: the fingerprint plus a `v2` marker on
-/// line 1, then one `path\ttype` line per option. The marker makes
-/// every pre-v2 cache (which stored bare paths under a `{hash}` header)
-/// miss and reparse, instead of being misread as typeless entries.
-///
-/// Types are single-line human strings; any embedded newline, carriage
-/// return, or tab would corrupt the line-per-entry format, so those are
-/// replaced with spaces at write time. The coarse type matching below
-/// only inspects word prefixes, so the substitution never changes a
-/// verdict.
 fn write_cache(cache: &Path, hash: u64, options: &HashMap<String, String>) {
     let Some(parent) = cache.parent() else {
         return;
@@ -173,11 +104,6 @@ fn write_cache(cache: &Path, hash: u64, options: &HashMap<String, String>) {
     let _ = std::fs::write(cache, out);
 }
 
-/// Read the on-disk cache, returning the path→type map if it is present,
-/// v2-formatted, and its stored fingerprint matches `expected` (i.e.
-/// options.json is unchanged since the cache was written). Any line
-/// without a tab separator marks the cache corrupt: report a miss and
-/// reparse rather than guess.
 fn read_cache(cache: &Path, expected: u64) -> Option<HashMap<String, String>> {
     let text = std::fs::read_to_string(cache).ok()?;
     let mut lines = text.lines();
@@ -193,10 +119,6 @@ fn read_cache(cache: &Path, expected: u64) -> Option<HashMap<String, String>> {
         .collect()
 }
 
-/// Read and parse options.json, extracting each option's path and its
-/// declared type string (empty when the entry has no `type` field).
-///
-/// This is the authoritative path; callers use it only on a cache miss.
 fn parse_schema(path: &Path) -> Result<HashMap<String, String>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let parsed = JsonValue::parse(&text).map_err(|e| e.message)?;
@@ -217,11 +139,6 @@ fn parse_schema(path: &Path) -> Result<HashMap<String, String>, String> {
         .collect())
 }
 
-/// Load (and cache) options.json, consulting the disk cache first.
-///
-/// Best-effort: a cache that cannot be read or written falls back to
-/// parsing the schema directly, so a lock-free unwritable temp dir never
-/// degrades correctness — only speed.
 fn load_schema(path: &Path) -> Schema {
     let cache = cache_file_for(path);
     let hash = std::fs::read(path).map(|b| fnv1a(&b)).unwrap_or(0);
@@ -233,19 +150,10 @@ fn load_schema(path: &Path) -> Schema {
     Ok(OptionsSchema::new(options))
 }
 
-/// Whether one schema path segment accepts one written segment: a
-/// placeholder like `<name>` matches any single segment, anything else
-/// matches only itself.
 fn seg_match(schema_seg: &str, written_seg: &str) -> bool {
     (schema_seg.starts_with('<') && schema_seg.ends_with('>')) || schema_seg == written_seg
 }
 
-/// Whether two paths agree pairwise over their common prefix. Because
-/// `zip` stops at the shorter path, this one predicate covers all three
-/// DECLARED shapes: exact match (equal length), a write below a
-/// declared option (schema shorter: freeform/submodule interior), and a
-/// structural intermediate write (written shorter: proper prefix of a
-/// schema path).
 fn prefix_match(schema_path: &[String], written: &[String]) -> bool {
     schema_path
         .iter()
@@ -253,10 +161,6 @@ fn prefix_match(schema_path: &[String], written: &[String]) -> bool {
         .all(|(s, w)| seg_match(s, w))
 }
 
-/// Whether a written dotted path is declared: by the schema (exact key
-/// fast path, then placeholder-aware alignment) or by a local
-/// `options.<path>` declaration in the same file. `joined` must be
-/// `written` joined with dots — callers already have it for messages.
 fn path_declared(
     schema: &OptionsSchema,
     locals: &[Vec<String>],
@@ -268,10 +172,6 @@ fn path_declared(
         || locals.iter().any(|l| prefix_match(l, written))
 }
 
-/// The declared type of the schema option that `written` matches at
-/// FULL length (placeholders allowed), or `None`. Only exact-length
-/// matches carry a judgeable type: a write below or above an option is
-/// structural and never type-checked.
 fn declared_type<'s>(
     schema: &'s OptionsSchema,
     written: &[String],
@@ -287,8 +187,6 @@ fn declared_type<'s>(
     schema.types.get(&hit.join(".")).map(String::as_str)
 }
 
-/// Whether a reference is a use of the `config` module argument: a
-/// LambdaParam binding named `config`.
 fn is_config_reference(model: &SemanticModel, reference: &Reference) -> bool {
     reference.name.text(model.source()) == "config"
         && model
@@ -296,11 +194,6 @@ fn is_config_reference(model: &SemanticModel, reference: &Reference) -> bool {
             .is_some_and(|b| b.kind == BindingKind::LambdaParam)
 }
 
-/// The select chain rooted at `ref_range`: the innermost SelectExpr
-/// whose base is the referenced ident, then every SelectExpr whose base
-/// is the previous one (nested chains such as `Select(Select(config,a),b)`).
-/// The parser usually flattens a path into one SelectExpr with a
-/// multi-element attrpath, so the chain is typically a single node.
 fn select_chain<'a>(
     model: &SemanticModel<'a>,
     ref_range: strictix_syntax::TextRange,
@@ -334,18 +227,10 @@ fn select_chain<'a>(
     chain
 }
 
-/// Formal names whose presence marks a NixOS module: these are the
-/// arguments the module system passes to every module.
 const MODULE_FORMALS: [&str; 4] = ["config", "lib", "pkgs", "options"];
 
-/// Top-level module keys that are not option definitions: `imports` and
-/// `options` have their own meaning, `_module`/`disabledModules`/`key`
-/// are module-system plumbing. `config` is NOT here — a `config`
-/// wrapper is descended into as the definition root instead. `meta` IS
-/// a declared option subtree in the real schema, so it stays checkable.
 const RESERVED_HEADS: [&str; 5] = ["imports", "options", "_module", "disabledModules", "key"];
 
-/// Peel parentheses off an expression.
 pub(crate) fn unwrap_parens(expr: Expr<'_>) -> Expr<'_> {
     let mut current = expr;
     while let Expr::Paren(paren) = current {
@@ -357,10 +242,6 @@ pub(crate) fn unwrap_parens(expr: Expr<'_>) -> Expr<'_> {
     current
 }
 
-/// The static dotted segments of an attrpath: idents verbatim, quoted
-/// strings by their literal content. `None` when any segment is dynamic
-/// (`${...}`) or carries escapes — the written path cannot be proven
-/// then, so callers skip that subtree silently.
 pub(crate) fn static_segments(path: Attrpath<'_>, source: &str) -> Option<Vec<String>> {
     let mut segments = Vec::new();
     for element in path.elements() {
@@ -385,10 +266,6 @@ pub(crate) fn static_segments(path: Attrpath<'_>, source: &str) -> Option<Vec<St
     Some(segments)
 }
 
-/// The bare name a call goes through: `mkIf` for both `mkIf` and
-/// `lib.mkIf`. The base of a select is deliberately ignored — the
-/// `mk*` names are unambiguous in module context regardless of how
-/// `lib` is reached.
 pub(crate) fn callee_name<'s>(expr: Expr<'_>, source: &'s str) -> Option<&'s str> {
     match expr {
         Expr::Ident(token) => Some(token.text(source)),
@@ -406,13 +283,6 @@ pub(crate) fn callee_name<'s>(expr: Expr<'_>, source: &'s str) -> Option<&'s str
     }
 }
 
-/// The module body attrset of this file, when the file provably has
-/// module shape: the top-level expression (lambdas, parens, `let` and `with` unwrapped)
-/// is an attrset that either carries a module key (`imports`, `options`,
-/// `config`) or sits under a lambda whose formals name a module argument
-/// (`config`, `lib`, `pkgs`, `options`) or use `...`. Anything else —
-/// packages, overlays, plain data — returns `None` and the write side
-/// never runs.
 pub(crate) fn module_attrset<'a>(model: &SemanticModel<'a>) -> Option<AttrsetExpr<'a>> {
     let source = model.source();
     let mut expr = Root::cast(model.root())?.expr()?;
@@ -457,9 +327,6 @@ pub(crate) fn module_attrset<'a>(model: &SemanticModel<'a>) -> Option<AttrsetExp
     is_module.then_some(set)
 }
 
-/// One leaf option write found in a module body: the full dotted path
-/// (any `config` wrapper stripped), the attrpath range to report on,
-/// and the value with parens and `mk*` modifiers unwrapped.
 struct OptionWrite<'a> {
     segments: Vec<String>,
     path: String,
@@ -467,9 +334,6 @@ struct OptionWrite<'a> {
     value: Expr<'a>,
 }
 
-/// Collect every leaf option write in this file's module body; empty
-/// for non-module files. Shared by [UnknownOption] (unknown paths) and
-/// [OptionTypeMismatch] (literal/type contradictions).
 fn collect_writes<'a>(model: &SemanticModel<'a>) -> Vec<OptionWrite<'a>> {
     let Some(set) = module_attrset(model) else {
         return Vec::new();
@@ -479,10 +343,6 @@ fn collect_writes<'a>(model: &SemanticModel<'a>) -> Vec<OptionWrite<'a>> {
     out
 }
 
-/// Walk one binding block. At the module root (`at_root`), reserved
-/// heads are skipped and a `config` head is stripped (a `config`
-/// wrapper is the definition root, not an option). Below the root,
-/// binding paths concatenate onto `prefix`.
 fn collect_attrset<'a>(
     source: &str,
     set: AttrsetExpr<'a>,
@@ -534,11 +394,6 @@ fn collect_attrset<'a>(
     }
 }
 
-/// Classify one bound value: descend into plain attrset literals
-/// (accumulating the path), unwrap the module-system value modifiers
-/// (`mkIf c X` → X, `mkMerge [ ... ]` → each element,
-/// `mkForce`/`mkDefault`/`mkOverride n` → their payload), and record
-/// everything else as a leaf write at `path`.
 fn process_value<'a>(
     source: &str,
     value: Expr<'a>,
@@ -601,11 +456,6 @@ fn process_value<'a>(
     }
 }
 
-/// Option paths declared locally in this file: every `options.<path>`
-/// binding (head stripped) plus the leaves of any plain attrset literal
-/// nested below it (`options.foo = { bar = mkOption ...; }` declares
-/// `foo.bar`). Locally declared options are legitimate to write even
-/// though nixpkgs' options.json has never heard of them.
 fn local_declarations(model: &SemanticModel<'_>) -> Vec<Vec<String>> {
     let source = model.source();
     let mut out = Vec::new();
@@ -633,8 +483,6 @@ fn local_declarations(model: &SemanticModel<'_>) -> Vec<Vec<String>> {
     out
 }
 
-/// Accumulate the leaf paths of nested plain attrset literals under a
-/// local `options` declaration.
 fn declared_leaves(source: &str, value: Expr<'_>, prefix: &[String], out: &mut Vec<Vec<String>>) {
     let Expr::Attrset(set) = unwrap_parens(value) else {
         return;
@@ -660,7 +508,6 @@ fn declared_leaves(source: &str, value: Expr<'_>, prefix: &[String], out: &mut V
     }
 }
 
-/// The literal kinds the type rule can prove from syntax alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LitKind {
     Bool,
@@ -674,8 +521,7 @@ enum LitKind {
 }
 
 impl LitKind {
-    /// The human name used in the diagnostic message.
-    fn name(self) -> &'static str {
+        fn name(self) -> &'static str {
         match self {
             Self::Bool => "boolean",
             Self::Int => "integer",
@@ -689,10 +535,6 @@ impl LitKind {
     }
 }
 
-/// The trivia-trimmed range of an expression, for diagnostics: node
-/// ranges flush leading trivia into the node, so pointing at a node's
-/// raw range would include the whitespace before it. Token atoms carry
-/// no trivia and are exact already.
 fn trimmed_range(expr: Expr<'_>) -> TextRange {
     match expr {
         Expr::Ident(t)
@@ -720,10 +562,6 @@ fn trimmed_range(expr: Expr<'_>) -> TextRange {
     }
 }
 
-/// Classify a (already unwrapped) value as a provable literal, or
-/// `None` for anything a static linter cannot judge — variables, calls,
-/// selects, arithmetic. `true`/`false`/`null` only count when nothing
-/// in scope could shadow them.
 fn literal_kind(model: &SemanticModel<'_>, value: Expr<'_>) -> Option<LitKind> {
     match value {
         Expr::Int(_) => Some(LitKind::Int),
@@ -759,12 +597,6 @@ fn literal_kind(model: &SemanticModel<'_>, value: Expr<'_>) -> Option<LitKind> {
     }
 }
 
-/// Coarse compatibility between a declared type string and a literal
-/// kind: `Some(true)` = fits, `Some(false)` = provable mismatch,
-/// `None` = this type is never judged. The type strings are nixpkgs'
-/// human descriptions, so matching is by leading words, most specific
-/// first; anything unrecognized (packages, functions, submodules,
-/// enums, floats, ...) stays silent.
 fn literal_matches_type(ty: &str, kind: LitKind) -> Option<bool> {
     let ty = ty.trim();
     if let Some(rest) = ty.strip_prefix("null or ") {
@@ -799,9 +631,6 @@ fn literal_matches_type(ty: &str, kind: LitKind) -> Option<bool> {
     Some(expected.contains(&kind))
 }
 
-/// Parse the exact inclusive range suffix used by integer option types.
-/// Returning `None` keeps unfamiliar schema prose and overflowing bounds
-/// out of range checking.
 fn integer_range(ty: &str) -> Option<(i128, i128)> {
     let phrase = ty.split_once("; ")?.1;
     let rest = phrase.strip_prefix("between ")?;
@@ -817,8 +646,6 @@ fn integer_range(ty: &str) -> Option<(i128, i128)> {
     Some((min.parse().ok()?, max.parse().ok()?))
 }
 
-/// Parse an integer literal, allowing only unary minus and parentheses.
-/// This deliberately does not evaluate arithmetic or identifiers.
 fn integer_literal(model: &SemanticModel<'_>, value: Expr<'_>) -> Option<i128> {
     match value {
         Expr::Int(token) => token.text(model.source()).parse().ok(),
@@ -834,14 +661,6 @@ fn integer_literal(model: &SemanticModel<'_>, value: Expr<'_>) -> Option<i128> {
     }
 }
 
-/// Flags option paths that options.json does not declare, on both
-/// sides: reads off the `config` module argument and writes in a
-/// module body.
-///
-/// Only fires when [LintConfig::schema] is set; the schema is loaded
-/// lazily once. A load/parse failure is reported as a single diagnostic
-/// on the first `config` reference, so a broken schema cannot crash
-/// the run.
 pub struct UnknownOption;
 
 impl Rule for UnknownOption {
@@ -941,13 +760,6 @@ impl Rule for UnknownOption {
     }
 }
 
-/// Flags option definitions whose literal value contradicts the
-/// declared option type: `enable = "true"` for a boolean,
-/// `port = "8080"` for an integer.
-///
-/// Deliberately fixless: rewriting `"true"` to `true` is tempting but
-/// changing quoted strings blindly is not provably intended — the
-/// string may be exactly what the author meant to fix the other way.
 pub struct OptionTypeMismatch;
 
 impl Rule for OptionTypeMismatch {

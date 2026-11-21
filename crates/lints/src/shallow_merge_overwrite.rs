@@ -1,11 +1,3 @@
-//! Finds literal attrset merges that replace an entire nested attrset.
-//!
-//! Nix's `//` is shallow: when both operands define `a`, the right hand
-//! `a` replaces the left hand value.  This rule only reports cases where
-//! both sides are literal attrsets and the key sets prove that a nested
-//! left-hand key disappears.  Expressions and dynamic attribute names are
-//! deliberately treated as unknown.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use strictix_core::{
@@ -16,7 +8,6 @@ use strictix_syntax::{
     AstNode, AttrItem, AttrName, AttrsetExpr, BinExpr, Expr, StringPart, SyntaxKind, SyntaxNode,
 };
 
-/// Flags shallow merges that discard known nested attributes.
 pub struct ShallowMergeOverwrite;
 
 impl Rule for ShallowMergeOverwrite {
@@ -80,7 +71,6 @@ impl Rule for ShallowMergeOverwrite {
 
 type Shape = BTreeMap<String, Option<BTreeSet<String>>>;
 
-/// Known immediate children of top-level attributes; None means unknown.
 fn literal_shape(expr: Expr<'_>, source: &str) -> Option<Shape> {
     let Expr::Attrset(set) = unwrap_parens(expr) else {
         return None;

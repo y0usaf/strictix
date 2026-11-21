@@ -1,19 +1,3 @@
-//! `unused-option`: options the project declares that nothing in it reads.
-//!
-//! A project-wide rule. The first file to run builds one index of every
-//! option path read anywhere in the project ([ProjectContext::memo]);
-//! each file then reports its own `options.*` leaves that no read covers.
-//! Reads are collected conservatively — anything that might read a
-//! subtree counts as reading all of it — so a finding means no syntax
-//! in the project can reach the option:
-//!
-//! - `config.a.b` / `options.a.b` off a module formal;
-//! - aliases `cfg = config.a;` followed through `let`/`rec` bindings,
-//!   so `cfg.b` reads `a.b` and a bare `cfg` reads all of `a`;
-//! - `inherit (config.a) b;` and `inherit (cfg) b;`;
-//! - `lib.attrByPath [ "a" "b" ] d config` and its siblings;
-//! - `system.config.a.b` on an evaluated system from anywhere.
-
 use std::collections::HashMap;
 
 use strictix_core::config::LintConfig;
@@ -28,11 +12,8 @@ use strictix_syntax::{
 
 use crate::schema::{callee_name, module_attrset, static_segments, unwrap_parens};
 
-/// How many `cfg = config.a; sub = cfg.b;` hops an alias is followed.
 const ALIAS_DEPTH: usize = 4;
 
-/// Every option path each project file reads, one sorted list per file.
-/// A read covers the subtree below it and every declaration above it.
 pub(crate) struct OptionReads(Vec<Vec<Vec<String>>>);
 
 impl OptionReads {
@@ -44,8 +25,6 @@ impl OptionReads {
     }
 }
 
-/// Whether read `read` can reach declaration `declared`: one is a
-/// prefix of the other.
 fn covers(read: &[String], declared: &[String]) -> bool {
     read.iter().zip(declared).all(|(r, d)| r == d)
 }
@@ -54,8 +33,6 @@ fn key(range: TextRange) -> (u32, u32) {
     (range.start(), range.end())
 }
 
-/// Leading static segments of an attrpath, stopping at the first
-/// dynamic one: `a.${x}.b` reads all of `a`.
 fn leading_segments(path: Attrpath<'_>, source: &str) -> Vec<String> {
     let mut out = Vec::new();
     for element in path.elements() {
@@ -77,18 +54,12 @@ fn leading_segments(path: Attrpath<'_>, source: &str) -> Vec<String> {
     out
 }
 
-/// One file's syntax, indexed by the range of the expression that sits
-/// in each slot a read can flow through.
 struct FileReads<'m, 'a> {
     model: &'m SemanticModel<'a>,
-    /// select base range → the select
-    selects: HashMap<(u32, u32), SelectExpr<'a>>,
-    /// bound value range → the binding
-    bindings: HashMap<(u32, u32), Binding<'a>>,
-    /// inherit source range → the inherit
-    inherits: HashMap<(u32, u32), InheritStmt<'a>>,
-    /// argument range → the application
-    applies: HashMap<(u32, u32), ApplyExpr<'a>>,
+        selects: HashMap<(u32, u32), SelectExpr<'a>>,
+        bindings: HashMap<(u32, u32), Binding<'a>>,
+        inherits: HashMap<(u32, u32), InheritStmt<'a>>,
+        applies: HashMap<(u32, u32), ApplyExpr<'a>>,
 }
 
 impl<'m, 'a> FileReads<'m, 'a> {
@@ -148,9 +119,7 @@ impl<'m, 'a> FileReads<'m, 'a> {
         }
     }
 
-    /// Record what the expression at `range`, known to denote the
-    /// option subtree `prefix`, reads.
-    fn read_from(
+        fn read_from(
         &self,
         range: TextRange,
         prefix: &[String],
@@ -179,11 +148,7 @@ impl<'m, 'a> FileReads<'m, 'a> {
         self.flow(whole, full, depth, out);
     }
 
-    /// Record what the expression at `whole`, denoting the option
-    /// subtree `full`, reads through the slot it sits in: the names an
-    /// `inherit (...)` takes from it, the uses of a `let`/`rec` alias
-    /// bound to it, or else the whole subtree.
-    fn flow(&self, whole: TextRange, full: Vec<String>, depth: usize, out: &mut Vec<Vec<String>>) {
+        fn flow(&self, whole: TextRange, full: Vec<String>, depth: usize, out: &mut Vec<Vec<String>>) {
         let source = self.model.source();
         if let Some(inherit) = self.inherits.get(&key(whole)) {
             for name in inherit.names() {
@@ -213,9 +178,7 @@ impl<'m, 'a> FileReads<'m, 'a> {
         }
     }
 
-    /// The uses of the `let`/`rec` name bound to exactly the expression
-    /// at `range` (`cfg = config.a;`), or `None` when it is not an alias.
-    fn alias(&self, range: TextRange) -> Option<Vec<TextRange>> {
+        fn alias(&self, range: TextRange) -> Option<Vec<TextRange>> {
         let binding = self.bindings.get(&key(range))?;
         let mut path = binding.attrpath()?.elements();
         let (Some(AttrName::Ident(name)), None) = (path.next(), path.next()) else {
@@ -224,9 +187,7 @@ impl<'m, 'a> FileReads<'m, 'a> {
         self.uses_of(name.range())
     }
 
-    /// The uses of the `let`/`rec` name defined by the token at `name`.
-    /// Other bindings (plain attrset keys) are not scopes: `None`.
-    fn uses_of(&self, name: TextRange) -> Option<Vec<TextRange>> {
+        fn uses_of(&self, name: TextRange) -> Option<Vec<TextRange>> {
         let bound = self
             .model
             .bindings()
@@ -236,9 +197,7 @@ impl<'m, 'a> FileReads<'m, 'a> {
             .then(|| bound.references.clone())
     }
 
-    /// `lib.attrByPath [ "a" "b" ] d config` (and `getAttrFromPath`,
-    /// `hasAttrByPath`): the literal path read off the value at `range`.
-    fn attr_path_call(&self, range: TextRange) -> Option<Vec<String>> {
+        fn attr_path_call(&self, range: TextRange) -> Option<Vec<String>> {
         let source = self.model.source();
         let apply = self.applies.get(&key(range))?;
         let mut func = unwrap_parens(apply.func()?);
@@ -291,9 +250,6 @@ pub(crate) fn project_reads(project: &ProjectContext) -> OptionReads {
     OptionReads(files)
 }
 
-/// Every option leaf this module declares: `options.<path>` bindings at
-/// the module root, descending through plain attrset literals. Returns
-/// each leaf's path and the attrpath range to report on.
 fn declarations(model: &SemanticModel<'_>) -> Vec<(Vec<String>, TextRange)> {
     let source = model.source();
     let mut out = Vec::new();
@@ -353,9 +309,6 @@ fn leaves(
     }
 }
 
-/// Flags options declared in the project that nothing in the project
-/// reads. Opt-in: a library meant for outside consumers declares options
-/// it never reads, and linting a subset of a project hides its readers.
 pub struct UnusedOption;
 
 impl Rule for UnusedOption {

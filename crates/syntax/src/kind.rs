@@ -1,7 +1,3 @@
-//! Token and (later) node kinds. One enum covers the whole syntax
-//! vocabulary: tokens now, tree nodes in M2.
-
-/// Every kind of token (and later, node) in the Nix syntax vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SyntaxKind {
     Whitespace,
@@ -24,19 +20,13 @@ pub enum SyntaxKind {
     SearchPath,
     Uri,
 
-    /// `"`
-    StringStart,
-    /// `''`
-    IndStringStart,
+        StringStart,
+        IndStringStart,
     StringContent,
-    /// `${`
-    InterpStart,
-    /// `}` closing an interpolation
-    InterpEnd,
-    /// closing `"`
-    StringEnd,
-    /// closing `''`
-    IndStringEnd,
+        InterpStart,
+        InterpEnd,
+        StringEnd,
+        IndStringEnd,
 
     LBrace,
     RBrace,
@@ -46,112 +36,70 @@ pub enum SyntaxKind {
     RParen,
     Semicolon,
     Comma,
-    /// `=`
-    Assign,
-    /// `==`
-    EqEq,
-    /// `!=`
-    Neq,
+        Assign,
+        EqEq,
+        Neq,
     Lt,
     LtEq,
     Gt,
     GtEq,
-    /// `&&`
-    AndAnd,
-    /// `||`
-    OrOr,
-    /// `!`
-    Bang,
-    /// `++`
-    PlusPlus,
+        AndAnd,
+        OrOr,
+        Bang,
+        PlusPlus,
     Plus,
     Minus,
     Star,
-    /// `/` (division)
-    Slash,
-    /// `//` (attrset merge)
-    SlashSlash,
-    /// `->`
-    Arrow,
+        Slash,
+        SlashSlash,
+        Arrow,
     Dot,
-    /// `...`
-    Ellipsis,
-    /// `?`
-    Question,
-    /// `@`
-    At,
+        Ellipsis,
+        Question,
+        At,
     Colon,
 
-    /// Top-level node wrapping one whole file.
-    Root,
-    /// A malformed region produced by error recovery.
-    ErrorNode,
+        Root,
+        ErrorNode,
 
-    /// `let bindings in body`
-    LetExpr,
-    /// The binding section of a `let`.
-    LetBindings,
-    /// One `attrpath = expr;` binding (also used in attrsets).
-    Binding,
-    /// A dotted path of attribute names, e.g. `a.b."c".d`.
-    Attrpath,
-    /// An `inherit (from) a b;` statement.
-    InheritStmt,
+        LetExpr,
+        LetBindings,
+        Binding,
+        Attrpath,
+        InheritStmt,
 
-    /// `with expr; body`
-    WithExpr,
-    /// `assert cond; body`
-    AssertExpr,
-    /// `if cond then then-e else else-e`
-    IfExpr,
+        WithExpr,
+        AssertExpr,
+        IfExpr,
 
-    /// `{ ... }`
-    AttrsetExpr,
-    /// `rec { ... }`
-    RecAttrsetExpr,
-    /// Lambda formal parameters `{ a, b ? 1, ... }`.
-    Formals,
-    /// `[ ... ]`
-    ListExpr,
-    /// `params: body`
-    LambdaExpr,
+        AttrsetExpr,
+        RecAttrsetExpr,
+        Formals,
+        ListExpr,
+        LambdaExpr,
 
-    /// Function application `f x`.
-    ApplyExpr,
-    /// Prefix `! e`.
-    UnaryExpr,
-    /// Infix `a op b` (arithmetic, comparison, logic).
-    BinExpr,
-    /// `e.attrpath` (`or default` included).
-    SelectExpr,
-    /// `e ? attrpath`.
-    HasAttrExpr,
+        ApplyExpr,
+        UnaryExpr,
+        BinExpr,
+        SelectExpr,
+        HasAttrExpr,
 
-    /// `"..."`
-    StringExpr,
-    /// `''...''`
-    IndStringExpr,
-    /// `\${expr}` inside a string.
-    InterpExpr,
-    /// `( expr )`
-    ParenExpr,
+        StringExpr,
+        IndStringExpr,
+        InterpExpr,
+        ParenExpr,
 
     Error,
     Eof,
 }
 
 impl SyntaxKind {
-    /// Trivia tokens carry no meaning but must be preserved for
-    /// lossless round-trips and faithful fixes.
-    #[must_use]
+        #[must_use]
     pub fn is_trivia(self) -> bool {
         matches!(self, Self::Whitespace | Self::Comment)
     }
 
-    /// Whether this token kind can serve as an attribute-name element:
-    /// a name in a dotted path, a numeric key like 1 in { 1 = "x"; },
-    /// or keyword names like if in { if = 1; }.
-    #[must_use]
+        #[must_use]
     pub fn is_attr_name(self) -> bool {
         matches!(
             self,
@@ -170,8 +118,7 @@ impl SyntaxKind {
         )
     }
 
-    /// Whether this token kind is an infix operator.
-    #[must_use]
+        #[must_use]
     pub fn is_binop(self) -> bool {
         matches!(
             self,

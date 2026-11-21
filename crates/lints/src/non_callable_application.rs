@@ -1,8 +1,3 @@
-//! Flags applications whose function is a literal that cannot be called.
-//!
-//! Unknown and compound expressions are deliberately skipped. Attrsets are
-//! callable when they define the conventional `__functor` attribute.
-
 use strictix_core::{
     diagnostic::{Diagnostic, Severity},
     rules::Rule,

@@ -1,5 +1,3 @@
-//! Finds statically known attributes passed to a closed pattern function.
-
 use std::collections::HashSet;
 
 use strictix_core::{

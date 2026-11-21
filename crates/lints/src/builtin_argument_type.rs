@@ -1,9 +1,3 @@
-//! Checks literal arguments passed to builtins with simple, fixed contracts.
-//!
-//! This is deliberately syntax directed: names and compound expressions are
-//! unknown and are left alone.  In particular, this rule does not evaluate
-//! Nix expressions.
-
 use strictix_core::{
     config::LintConfig,
     diagnostic::{Diagnostic, Severity},

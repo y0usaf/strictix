@@ -1,5 +1,3 @@
-//! Flags unary operators applied to literals of incompatible types.
-
 use strictix_core::{
     diagnostic::{Diagnostic, Severity},
     rules::Rule,

@@ -1,6 +1,3 @@
-//! per-system-input-lookup: `inputs.NAME.packages.${pkgs.stdenv.hostPlatform.system}`
-//! spelled out where one per-system argument would say `inputPackages.NAME`.
-
 use strictix_core::config::LintConfig;
 use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
@@ -11,9 +8,6 @@ use strictix_syntax::{AstNode, AttrName, Expr, SelectExpr, SyntaxKind, TextRange
 const CODE: &str = "per-system-input-lookup";
 const INPUTS: [&str; 2] = ["inputs", "flakeInputs"];
 
-/// Whether an interpolated segment names the build platform: an attribute
-/// path or name ending in `system` (`system`, `pkgs.system`,
-/// `pkgs.stdenv.hostPlatform.system`).
 fn is_system(name: AttrName<'_>, source: &str) -> bool {
     let AttrName::Interp(interp) = name else {
         return false;

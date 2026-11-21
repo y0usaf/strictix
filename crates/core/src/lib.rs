@@ -1,8 +1,3 @@
-//! Diagnostics, fix machinery, rule traits, and the semantic model.
-//!
-//! Depends only on `strictix-syntax`. Builtin rules live in
-//! `strictix-lints` and consume only this crate's public API.
-
 #![forbid(unsafe_code)]
 
 pub mod config;
