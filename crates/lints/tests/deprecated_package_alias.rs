@@ -70,22 +70,63 @@ fn xorg_members_under_one_with_become_top_level_names() {
 
 #[test]
 fn selections_keep_their_base() {
-    let source = "{pkgs, final, ...}: [
+    let source = "{pkgs, final, inputs, system, ...}: [
   pkgs.xorg.libX11
   final.xorg.xcbutilwm.dev
-  pkgs.pkgsCross.aarch64-multiplatform.xorg.libXext
+  inputs.nixpkgs.legacyPackages.${system}.xorg.libXext
+  inputs.nixpkgs.legacyPackages.x86_64-linux.swww
   (pkgs.xorg.libXi or null)
   pkgs.swww
 ]";
     assert_eq!(
         fixed(source),
-        "{pkgs, final, ...}: [
+        "{pkgs, final, inputs, system, ...}: [
   pkgs.libx11
   final.libxcb-wm.dev
-  pkgs.pkgsCross.aarch64-multiplatform.libxext
+  inputs.nixpkgs.legacyPackages.${system}.libxext
+  inputs.nixpkgs.legacyPackages.x86_64-linux.awww
   (pkgs.libxi or null)
   pkgs.awww
 ]"
+    );
+}
+
+#[test]
+fn a_receiver_not_known_as_nixpkgs_gets_no_fix() {
+    let source = "{pkgs, custom, ...}: [
+  (custom: custom.xorg.libX11)
+  custom.xorg.libX11
+  pkgs.pkgsCross.aarch64-multiplatform.xorg.libXext
+  (import ./x.nix).xorg.libX11
+  (with custom; xorg.libX11)
+  (with custom.xorg; libX11)
+  (with custom; with xorg; libX11)
+  custom.swww
+  (with custom; swww)
+]";
+    for config in [LintConfig::default(), alone()] {
+        let diags = run(source, &config);
+        assert_eq!(diags.len(), 7, "{diags:?}");
+        assert!(diags.iter().all(|d| d.fix.is_none()), "{diags:?}");
+        assert!(diags[0]
+            .help
+            .as_deref()
+            .is_some_and(|help| help.starts_with("`custom` is not known to be nixpkgs")));
+    }
+}
+
+#[test]
+fn naming_a_receiver_in_sets_lets_fix_rewrite_it() {
+    let source = "{custom, ...}: [ custom.xorg.libX11 (custom.swww) (with custom; xorg.libXext) ]";
+    let config = alone().with_setting("deprecated-package-alias", "sets", "custom");
+    let diags = run(source, &config);
+    let edits: Vec<_> = diags
+        .iter()
+        .flat_map(|d| d.fix.as_ref().expect("fix").edits.clone())
+        .collect();
+    assert_eq!(
+        apply_fixes(source, &edits).unwrap(),
+        "{custom, ...}: [ custom.libx11 (custom.awww) (with custom; libxext) ]"
     );
 }
 
@@ -95,6 +136,11 @@ fn with_the_xorg_set_selects_from_its_parent() {
     assert_eq!(
         fixed(source),
         "{pkgs, ...}: with pkgs.xorg; [ pkgs.libx11 pkgs.libxext.dev ]"
+    );
+    let legacy = "{inputs, ...}: with inputs.nixpkgs.legacyPackages.x86_64-linux.xorg; [ libX11 ]";
+    assert_eq!(
+        fixed(legacy),
+        "{inputs, ...}: with inputs.nixpkgs.legacyPackages.x86_64-linux.xorg; [ inputs.nixpkgs.legacyPackages.x86_64-linux.libx11 ]"
     );
 }
 
@@ -181,4 +227,14 @@ fn a_with_that_unsafe_with_shadowing_removes_is_renamed_on_the_next_pass() {
         assert!(run.error.is_none(), "{:?}", run.error);
         assert_eq!(run.fixed.as_deref(), Some(expected));
     }
+}
+
+#[test]
+fn a_parenthesized_receiver_keeps_its_parentheses() {
+    let source = "pkgs: with pkgs; [ (xorg).libX11 (pkgs).xorg.libXext ]";
+    let out = fixed(source);
+    assert_eq!(out, "pkgs: with pkgs; [ (xorg).libX11 (pkgs).libxext ]");
+    assert!(strictix_syntax::parse(&out).error_nodes().next().is_none());
+    let diags = run(source, &alone());
+    assert_eq!(diags.len(), 1, "{diags:?}");
 }

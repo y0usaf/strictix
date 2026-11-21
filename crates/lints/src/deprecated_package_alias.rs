@@ -6,7 +6,9 @@ use strictix_core::diagnostic::{Diagnostic, Severity};
 use strictix_core::fix::Fix;
 use strictix_core::rules::Rule;
 use strictix_core::semantic::SemanticModel;
-use strictix_syntax::{AstNode, AttrName, Expr, SelectExpr, SyntaxKind, TextRange, WithExpr};
+use strictix_syntax::{
+    AstNode, AttrName, Expr, SelectExpr, SyntaxKind, SyntaxToken, TextRange, WithExpr,
+};
 
 use crate::advanced_rules::{with_removal_fix, UnsafeWithShadowing};
 use crate::builtin_value_rules::literal_string;
@@ -93,24 +95,48 @@ fn with_namespace<'a>(model: &SemanticModel<'a>, scope_range: TextRange) -> Opti
     found.and_then(unparen)
 }
 
-fn static_path(expr: Expr<'_>, source: &str) -> Option<(Vec<String>, Vec<TextRange>)> {
+type Receiver<'a> = (&'a SyntaxToken, Vec<(Option<String>, TextRange)>);
+
+fn receiver<'a>(expr: Expr<'a>, source: &str) -> Option<Receiver<'a>> {
     match expr {
-        Expr::Ident(token) => Some((vec![token.text(source).to_owned()], vec![token.range()])),
+        Expr::Ident(token) => Some((token, Vec::new())),
         Expr::Select(select) if select.default().is_none() => {
-            let Some(Expr::Ident(base)) = select.base() else {
+            let Some(Expr::Ident(base)) = select.base().and_then(unparen) else {
                 return None;
             };
-            let mut names = vec![base.text(source).to_owned()];
-            let mut ranges = vec![base.range()];
-            for element in select.attrpath()?.elements() {
-                let (name, range) = segment(element, source);
-                names.push(name?);
-                ranges.push(range);
-            }
-            Some((names, ranges))
+            let names = select
+                .attrpath()?
+                .elements()
+                .map(|element| segment(element, source))
+                .collect();
+            Some((base, names))
         }
         _ => None,
     }
+}
+
+fn legacy_packages(before: &[Option<String>]) -> bool {
+    before.len() >= 2 && before[before.len() - 2].as_deref() == Some("legacyPackages")
+}
+
+fn package_set(source: &str, sets: &[&str], head: &SyntaxToken, before: &[Option<String>]) -> bool {
+    legacy_packages(before) || (before.is_empty() && sets.contains(&head.text(source)))
+}
+
+fn with_is_package_set(model: &SemanticModel<'_>, sets: &[&str], site: usize) -> bool {
+    let source = model.source();
+    with_namespace(model, model.with_sites()[site].scope_range)
+        .and_then(|namespace| receiver(namespace, source))
+        .is_some_and(|(head, names)| {
+            let before: Vec<Option<String>> = names.into_iter().map(|(name, _)| name).collect();
+            package_set(source, sets, head, &before)
+        })
+}
+
+fn reaches_package_set(model: &SemanticModel<'_>, sets: &[&str], offset: u32) -> bool {
+    model.with_sites().iter().enumerate().any(|(site, with)| {
+        with.body_range.contains(offset) && with_is_package_set(model, sets, site)
+    })
 }
 
 fn same_binding(model: &SemanticModel<'_>, name: &str, a: u32, b: u32) -> bool {
@@ -156,6 +182,21 @@ impl DeprecatedPackageAlias {
         )
     }
 
+    fn unknown_receiver(
+        &self,
+        old: &str,
+        new: &str,
+        range: TextRange,
+        receiver: &str,
+    ) -> Diagnostic {
+        self.unfixed(
+            old,
+            new,
+            range,
+            format!("`{receiver}` is not known to be nixpkgs; if it is, write `{new}` from it, or name it in the `sets` setting so fix does"),
+        )
+    }
+
     fn unfixed(&self, old: &str, new: &str, range: TextRange, help: String) -> Diagnostic {
         self.diagnostic(old, new, range).with_help(help)
     }
@@ -178,8 +219,9 @@ impl DeprecatedPackageAlias {
             .collect();
         let names: Vec<Option<String>> = elements.iter().map(|(name, _)| name.clone()).collect();
         let longest = renames().longest;
-        let base = select.base().and_then(unparen);
-        if let Some(Expr::Ident(token)) = base {
+        let written = select.base();
+        let base = written.and_then(unparen);
+        if let Some(Expr::Ident(token)) = written {
             let base_name = token.text(source).to_owned();
             let start = token.range().start();
             for len in (1..longest.min(names.len() + 1)).rev() {
@@ -189,18 +231,18 @@ impl DeprecatedPackageAlias {
                     continue;
                 };
                 let range = TextRange::new(start, elements[len - 1].1.end());
-                diags.push(self.free_head(model, config, &old, new, range, sets));
+                diags.extend(self.free_head(model, config, &old, new, range, sets));
                 return;
             }
         }
         let mut at = 0;
         while at < names.len() {
+            let known = legacy_packages(&names[..at])
+                || (at == 0
+                    && matches!(base, Some(Expr::Ident(token)) if sets.contains(&token.text(source))));
             let mut matched = None;
             for len in (1..=longest.min(names.len() - at)).rev() {
-                if len == 1
-                    && !(at == 0
-                        && matches!(base, Some(Expr::Ident(token)) if sets.contains(&token.text(source))))
-                {
+                if !known && len == 1 {
                     continue;
                 }
                 if let Some((old, new)) = lookup(&names[at..at + len]) {
@@ -213,7 +255,18 @@ impl DeprecatedPackageAlias {
                 continue;
             };
             let range = TextRange::new(elements[at].1.start(), elements[at + len - 1].1.end());
-            diags.push(self.fixed(&old, new, range, attr_segments(new)));
+            if known {
+                diags.push(self.fixed(&old, new, range, attr_segments(new)));
+            } else {
+                let receiver_end = if at == 0 {
+                    written.map_or(range.start(), |base| base.content_range().end())
+                } else {
+                    elements[at - 1].1.end()
+                };
+                let receiver_start = select.syntax().content_range().start();
+                let receiver = &source[receiver_start as usize..receiver_end as usize];
+                diags.push(self.unknown_receiver(&old, new, range, receiver));
+            }
             at += len;
         }
     }
@@ -226,37 +279,35 @@ impl DeprecatedPackageAlias {
         new: &str,
         range: TextRange,
         sets: &[&str],
-    ) -> Diagnostic {
+    ) -> Option<Diagnostic> {
         let offset = range.start();
         let base = head(old);
         if model.resolve_lexical(base, offset).is_some() {
-            return self.unfixed(
+            return Some(self.unfixed(
                 old,
                 new,
                 range,
                 format!("`{base}` is bound here; take `{}` the way `{base}` arrives and use it in place of `{old}`", head(new)),
-            );
+            ));
         }
-        let Some(reference) =
-            model.reference_at(TextRange::new(offset, offset + base.len() as u32))
-        else {
-            return self.unfixed(old, new, range, format!("write `{new}`"));
-        };
-        let Some(innermost) = reference.via_with else {
-            return self.unfixed(old, new, range, format!("write `{new}`"));
-        };
-        let withs = model
-            .with_sites()
-            .iter()
-            .filter(|site| site.body_range.contains(offset))
-            .count();
-        let site = &model.with_sites()[innermost];
-        let named_set = matches!(
-            with_namespace(model, site.scope_range),
-            Some(Expr::Ident(token)) if sets.contains(&token.text(model.source()))
-        );
+        let reference = model.reference_at(TextRange::new(offset, offset + base.len() as u32))?;
+        let innermost = reference.via_with?;
+        if !with_is_package_set(model, sets, innermost) {
+            if reaches_package_set(model, sets, offset) {
+                return Some(self.unfixed(
+                    old,
+                    new,
+                    range,
+                    format!("`{base}` reaches a package set through nested `with` scopes; write `{new}` from that set"),
+                ));
+            }
+            let namespace = with_namespace(model, model.with_sites()[innermost].scope_range)?;
+            let range_of = namespace.content_range();
+            let receiver = &model.source()[range_of.start() as usize..range_of.end() as usize];
+            return Some(self.unknown_receiver(old, new, range, receiver));
+        }
         if !is_ident(head(new)) || model.resolve_lexical(head(new), offset).is_some() {
-            return self.unfixed(
+            return Some(self.unfixed(
                 old,
                 new,
                 range,
@@ -264,27 +315,20 @@ impl DeprecatedPackageAlias {
                     "`{}` would not reach the package set here; write `{new}` from it",
                     head(new)
                 ),
-            );
+            ));
         }
-        if with_removed_first(model, config, innermost) {
+        Some(if with_removed_first(model, config, innermost) {
             self.after_with_removal(old, new, range)
-        } else if withs == 1 || named_set {
-            self.fixed(old, new, range, new.to_owned())
         } else {
-            self.unfixed(
-                old,
-                new,
-                range,
-                format!("`{base}` comes from one of {withs} nested `with` scopes; write `{new}` from the package set it names"),
-            )
-        }
+            self.fixed(old, new, range, new.to_owned())
+        })
     }
 
     fn check_reference(
         &self,
         model: &SemanticModel<'_>,
         config: &LintConfig,
-        token: &strictix_syntax::SyntaxToken,
+        token: &SyntaxToken,
         innermost: usize,
         sets: &[&str],
         diags: &mut Vec<Diagnostic>,
@@ -297,38 +341,38 @@ impl DeprecatedPackageAlias {
             return;
         };
         let deferred = with_removed_first(model, config, innermost);
-        if let Expr::Ident(set) = namespace {
-            if sets.contains(&set.text(source)) {
-                let Some(new) = renames().map.get(name) else {
-                    return;
-                };
-                if deferred {
-                    diags.push(self.after_with_removal(name, new, token.range()));
-                } else if is_ident(head(new)) && model.resolve_lexical(head(new), offset).is_none()
-                {
-                    diags.push(self.fixed(name, new, token.range(), (*new).to_owned()));
-                } else {
-                    diags.push(self.unfixed(
-                        name,
-                        new,
-                        token.range(),
-                        format!(
-                            "`{}` would not reach `{}` here; write `{}.{}`",
-                            head(new),
-                            set.text(source),
-                            set.text(source),
-                            attr_segments(new)
-                        ),
-                    ));
-                }
-                return;
-            }
-        }
-        let Some((path, ranges)) = static_path(namespace, source) else {
+        let Some((namespace_head, names)) = receiver(namespace, source) else {
             return;
         };
+        let namespace_text = &source
+            [namespace.content_range().start() as usize..namespace.content_range().end() as usize];
+        if with_is_package_set(model, sets, innermost) {
+            let Some(new) = renames().map.get(name) else {
+                return;
+            };
+            if deferred {
+                diags.push(self.after_with_removal(name, new, token.range()));
+            } else if is_ident(head(new)) && model.resolve_lexical(head(new), offset).is_none() {
+                diags.push(self.fixed(name, new, token.range(), (*new).to_owned()));
+            } else {
+                diags.push(self.unfixed(
+                    name,
+                    new,
+                    token.range(),
+                    format!(
+                        "`{}` would not reach `{namespace_text}` here; write `{namespace_text}.{}`",
+                        head(new),
+                        attr_segments(new)
+                    ),
+                ));
+            }
+            return;
+        }
+        let head_name = namespace_head.text(source).to_owned();
+        let mut path: Vec<Option<String>> = vec![Some(head_name.clone())];
+        path.extend(names.iter().map(|(segment, _)| segment.clone()));
         for from in 0..path.len() {
-            let mut key: Vec<Option<String>> = path[from..].iter().cloned().map(Some).collect();
+            let mut key = path[from..].to_vec();
             key.push(Some(name.to_owned()));
             if key.len() < 2 {
                 continue;
@@ -336,37 +380,58 @@ impl DeprecatedPackageAlias {
             let Some((old, new)) = lookup(&key) else {
                 continue;
             };
-            let namespace_start = ranges[0].start();
-            let prefix_end = if from == 0 {
-                None
+            let help = format!("`{name}` comes from `with {namespace_text}`; write `{new}` from the package set that holds it");
+            if from == 0 {
+                let head_start = namespace_head.range().start();
+                let known = model.resolve_lexical(&head_name, head_start).is_some()
+                    || model
+                        .reference_at(namespace_head.range())
+                        .is_some_and(|reference| {
+                            reference.resolved.is_none()
+                                && reference
+                                    .via_with
+                                    .is_some_and(|outer| with_is_package_set(model, sets, outer))
+                        });
+                if known {
+                    diags.push(self.unfixed(&old, new, token.range(), help));
+                } else {
+                    diags.push(self.unknown_receiver(&old, new, token.range(), &head_name));
+                }
+                return;
+            }
+            if !package_set(source, sets, namespace_head, &path[1..from]) {
+                let receiver = &source[namespace_head.range().start() as usize..if from == 1 {
+                    namespace_head.range().end()
+                } else {
+                    names[from - 2].1.end()
+                }
+                    as usize];
+                diags.push(self.unknown_receiver(&old, new, token.range(), receiver));
+                return;
+            }
+            let namespace_start = namespace_head.range().start();
+            let prefix_end = if from == 1 {
+                namespace_head.range().end()
             } else {
-                Some(ranges[from - 1].end())
+                names[from - 2].1.end()
             };
-            match prefix_end {
-                Some(_) if deferred => {
-                    diags.push(self.after_with_removal(&old, new, token.range()));
-                }
-                Some(end) if same_binding(model, &path[0], namespace_start, offset) => {
-                    let prefix = &source[namespace_start as usize..end as usize];
-                    diags.push(self.fixed(
-                        &old,
-                        new,
-                        token.range(),
-                        format!("{prefix}.{}", attr_segments(new)),
-                    ));
-                }
-                _ => diags.push(self.unfixed(
+            if deferred {
+                diags.push(self.after_with_removal(&old, new, token.range()));
+            } else if same_binding(model, &head_name, namespace_start, offset) {
+                let prefix = &source[namespace_start as usize..prefix_end as usize];
+                diags.push(self.fixed(
                     &old,
                     new,
                     token.range(),
-                    format!("`{name}` comes from `with {}`; write `{new}` from the package set that holds it", &source[namespace_start as usize..ranges[ranges.len() - 1].end() as usize]),
-                )),
+                    format!("{prefix}.{}", attr_segments(new)),
+                ));
+            } else {
+                diags.push(self.unfixed(&old, new, token.range(), help));
             }
             return;
         }
     }
 }
-
 impl Rule for DeprecatedPackageAlias {
     fn code(&self) -> &'static str {
         CODE
@@ -377,7 +442,7 @@ impl Rule for DeprecatedPackageAlias {
     }
 
     fn description(&self) -> &'static str {
-        "Flags a nixpkgs attribute that nixpkgs keeps only as a warning alias for a renamed package, such as `xorg.libX11` for `libx11`, which makes every evaluation that reaches it print `evaluation warning: The xorg package set has been deprecated`. The renames come from the `warnAlias`/`warnOnInstantiate` definitions in nixpkgs' `pkgs/top-level/aliases.nix`, read by `nix run .#nixpkgs-renames` from the nixpkgs strictix is locked to; an alias whose message is not a plain `'OLD' has been renamed to 'NEW'` is left alone. A path such as `xorg.libX11` is matched inside any selection (`pkgs.xorg.libX11.dev`, `final.xorg.libX11`) and as `with pkgs.xorg; libX11`; a one-segment alias (`swww`) only after a name in the `sets` setting (default `pkgs`, `final`, `prev`) or inside `with` one of them. Fix rewrites the selection, `xorg.libX11` under a single `with` (or under `with` a `sets` name) to `libx11`, and `libX11` under `with pkgs.xorg;` to `pkgs.libx11`; it is withheld when the new name is shadowed by a lexical binding, when nested `with` scopes make the resolution unclear, and when `xorg` is a binding of its own (an argument or `let`). A `with` or argument left unused is for `redundant-with` and `unused-formal`."
+        "Flags a nixpkgs attribute that nixpkgs keeps only as a warning alias for a renamed package, such as `xorg.libX11` for `libx11`, which makes every evaluation that reaches it print `evaluation warning: The xorg package set has been deprecated`. The renames come from the `warnAlias`/`warnOnInstantiate` definitions in nixpkgs' `pkgs/top-level/aliases.nix`, read by `nix run .#nixpkgs-renames` from the nixpkgs strictix is locked to; an alias whose message is not a plain `'OLD' has been renamed to 'NEW'` is left alone. An alias is matched only on a receiver known to be nixpkgs: a name in the `sets` setting (default `pkgs`, `final`, `prev`) or a path ending in `legacyPackages.SYSTEM`, selected from directly (`pkgs.xorg.libX11.dev`, `pkgs.swww`) or opened with `with` (`with pkgs; xorg.libX11`, `with pkgs.xorg; libX11`); on any other receiver (`custom.xorg.libX11`, `pkgs.pkgsCross.X.xorg.libX11`, `with p; xorg.libX11`) a multi-segment alias is reported without a fix, with help to name the receiver in `sets`, and a one-segment alias is left alone. Fix rewrites the selection, `xorg.libX11` under `with pkgs;` to `libx11`, and `libX11` under `with pkgs.xorg;` to `pkgs.libx11`; it is withheld, with help, when the new name is shadowed by a lexical binding, when the innermost `with` is not the package set but an outer one is, and when `xorg` is a binding of its own (an argument or `let`). A `with` or argument left unused is for `redundant-with` and `unused-formal`."
     }
 
     fn severity(&self) -> Severity {
